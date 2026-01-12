@@ -717,11 +717,6 @@ export function showCloseShiftModal(onSuccess) {
                             created_at: new Date()
                         };
                         active.closing_receipts.push(expenseRecord);
-
-                        // New Logic: Only Upsert to global if created in this session (not linked)
-                        if (!exp._isLinked) {
-                            await Repository.upsert('expenses', expenseRecord);
-                        }
                     }
                     await Repository.upsert('shifts', active);
                     currentShift = active;
