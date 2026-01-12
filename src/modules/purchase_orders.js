@@ -898,6 +898,8 @@ async function renderAlerts() {
     const alertsSection = document.getElementById('po-alerts-section');
     const alertCount = document.getElementById('alert-count');
 
+    if (!alertsSection || !alertsBody) return; // View likely unloaded
+
     const alerts = [];
     items.forEach(item => {
         const m = metrics.find(x => x.sku_id === item.id);

@@ -2306,7 +2306,34 @@ async function resumeTransaction(id) {
         }
 
         if (tx) {
-            posCart = Array.isArray(tx.items) ? tx.items : [];
+            let items = tx.items;
+
+            // Robust parsing: Handle stringified JSON or legacy json_body wrapper
+            if (typeof items === 'string') {
+                try { items = JSON.parse(items); } catch (e) { console.warn("Failed to parse items string", e); }
+            }
+            if (!items && tx.json_body) {
+                try {
+                    const body = typeof tx.json_body === 'string' ? JSON.parse(tx.json_body) : tx.json_body;
+                    if (body.items) items = body.items;
+                } catch (e) { }
+            }
+
+            posCart = Array.isArray(items) ? items : [];
+
+            if (posCart.length === 0) {
+                alert("CRITICAL ERROR: Resumed transaction has NO items. \n\nDebug Data:\n" + JSON.stringify(tx, null, 2));
+                return; // Do not delete the record, so we can debug
+            }
+
+            // Fix: Force-hide previous success overlays
+            if (document.getElementById("mobile-change-overlay")) {
+                document.getElementById("mobile-change-overlay").classList.add("hidden");
+            }
+            if (document.getElementById("mobile-payment-overlay")) {
+                document.getElementById("mobile-payment-overlay").classList.add("hidden");
+            }
+
             selectedCustomer = tx.customer || { id: "Guest", name: "Guest" };
             currentSuspendedId = tx.id; // Use the actual ID from the record
 
@@ -2322,7 +2349,7 @@ async function resumeTransaction(id) {
         }
     } catch (error) {
         console.error("Error resuming transaction:", error);
-        showToast("Failed to resume transaction.", true);
+        alert("Error resuming: " + error.message);
     }
 }
 
