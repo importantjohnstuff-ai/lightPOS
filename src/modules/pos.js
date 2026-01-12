@@ -2318,12 +2318,19 @@ async function resumeTransaction(id) {
                     if (body.items) items = body.items;
                 } catch (e) { }
             }
+            // Fix: Handle SQLite serialization where items are stored as items_json string
+            if (!items && tx.items_json) {
+                try {
+                    items = typeof tx.items_json === 'string' ? JSON.parse(tx.items_json) : tx.items_json;
+                } catch (e) { console.warn("Failed to parse items_json", e); }
+            }
 
             posCart = Array.isArray(items) ? items : [];
 
             if (posCart.length === 0) {
-                alert("CRITICAL ERROR: Resumed transaction has NO items. \n\nDebug Data:\n" + JSON.stringify(tx, null, 2));
-                return; // Do not delete the record, so we can debug
+                console.warn("Resumed transaction has NO items even after parsing attempt.", tx);
+                // We allow it to proceed so the user can at least delete the bad record if needed, 
+                // or we could show a toast.
             }
 
             // Fix: Force-hide previous success overlays
