@@ -2333,12 +2333,15 @@ async function resumeTransaction(id) {
                 // or we could show a toast.
             }
 
-            // Fix: Force-hide previous success overlays
+            // Fix: Force-hide previous success overlays and clear values
             if (document.getElementById("mobile-change-overlay")) {
                 document.getElementById("mobile-change-overlay").classList.add("hidden");
+                document.getElementById("mobile-change-amount").textContent = "₱0.00";
             }
             if (document.getElementById("mobile-payment-overlay")) {
                 document.getElementById("mobile-payment-overlay").classList.add("hidden");
+                const tenderedInput = document.getElementById("mobile-input-tendered");
+                if (tenderedInput) tenderedInput.value = "";
             }
 
             selectedCustomer = tx.customer || { id: "Guest", name: "Guest" };
