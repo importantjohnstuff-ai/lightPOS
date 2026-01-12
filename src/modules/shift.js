@@ -575,71 +575,215 @@ function showOpenShiftModal(onSuccess) {
 
 export function showCloseShiftModal(onSuccess) {
     let modal = document.getElementById("modal-close-shift");
+    if (modal) modal.remove();
 
-    if (!modal) {
-        const div = document.createElement("div");
-        div.innerHTML = `
-            <div id="modal-close-shift" class="fixed inset-0 bg-gray-900 bg-opacity-90 flex items-center justify-center z-50">
-                <div class="bg-white rounded-lg shadow-xl p-8 w-96">
-                    <h2 class="text-2xl font-bold text-gray-800 mb-4 text-center">End Shift</h2>
-                    
-                    <div id="shift-summary-view" class="hidden text-center">
-                        <div class="mb-4">
-                            <div class="text-sm text-gray-500">Expected Cash</div>
-                            <div id="summary-expected" class="text-xl font-bold"></div>
+    const div = document.createElement("div");
+    div.id = "modal-close-shift";
+    div.className = "fixed inset-0 bg-gray-900 bg-opacity-90 flex items-center justify-center z-50 overflow-y-auto";
+
+    // We'll track expenses added during this modal session
+    let sessionExpenses = [];
+
+    const renderShiftUI = () => {
+        const cashValue = document.getElementById("shift-closing-cash")?.value || "";
+        const cashInput = parseFloat(cashValue) || 0;
+        const totalExpenses = sessionExpenses.reduce((s, e) => s + e.amount, 0);
+        const GRAND_TOTAL = cashInput + totalExpenses;
+
+        const expenseRows = sessionExpenses.map((exp, idx) => `
+            <div class="flex justify-between items-center bg-gray-50 border rounded p-2 mb-1 group">
+                <div class="flex-1">
+                    <div class="text-xs font-bold text-gray-800">${exp.description}</div>
+                    <div class="text-[10px] text-gray-500 uppercase">${exp.category}</div>
+                </div>
+                <div class="text-sm font-black text-red-600 mr-2">₱${exp.amount.toFixed(2)}</div>
+                <button type="button" class="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition btn-remove-session-exp" data-idx="${idx}">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+        `).join("");
+
+        const body = `
+            <div class="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md my-8">
+                <h2 class="text-2xl font-black text-gray-800 mb-2 text-center">End Shift</h2>
+                <div class="text-center text-gray-500 text-xs mb-6 font-medium uppercase tracking-widest">Verify accountability</div>
+                
+                <div id="shift-summary-view" class="hidden">
+                    <div class="bg-gray-50 rounded-lg p-6 mb-6 border-dashed border-2 border-gray-200">
+                        <div class="flex justify-between mb-2">
+                            <span class="text-sm text-gray-500">Expected (Net Cash):</span>
+                            <span id="summary-expected" class="font-bold text-gray-800"></span>
                         </div>
-                        <div class="mb-4">
-                            <div class="text-sm text-gray-500">Actual Count</div>
-                            <div id="summary-actual" class="text-xl font-bold"></div>
+                        <div class="flex justify-between mb-4">
+                            <span class="text-sm text-gray-500">Actual (Cash + Exp):</span>
+                            <span id="summary-actual" class="font-bold text-blue-600"></span>
                         </div>
-                        <div class="mb-6">
-                            <div class="text-sm text-gray-500">Difference</div>
-                            <div id="summary-diff" class="text-2xl font-bold"></div>
+                        <div class="border-t pt-4">
+                            <div class="text-xs text-center text-gray-400 uppercase font-black mb-1">Total Variance</div>
+                            <div id="summary-diff" class="text-center"></div>
                         </div>
-                        <button id="btn-finish-shift" class="w-full bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-4 rounded">
-                            Finish
-                        </button>
+                    </div>
+                    <button id="btn-finish-shift" class="w-full bg-gray-800 hover:bg-black text-white font-black py-4 rounded-xl shadow-lg transition transform hover:scale-[1.02]">
+                        PRINT & COMPLETE
+                    </button>
+                </div>
+
+                <form id="form-close-shift" class="space-y-6">
+                    <div class="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                        <label class="block text-blue-800 text-[10px] font-black uppercase mb-1">Cash in Drawer (Turn-over)</label>
+                        <input type="number" id="shift-closing-cash" value="${cashValue}" class="w-full bg-white border-2 border-blue-200 rounded-lg py-3 px-4 text-gray-800 focus:border-blue-500 outline-none text-2xl font-black text-center" step="0.01" required min="0" placeholder="0.00">
                     </div>
 
-                    <form id="form-close-shift">
-                        <p class="text-gray-600 text-sm mb-6 text-center">Please count the cash in the drawer.</p>
-                        <div class="mb-6">
-                            <label class="block text-gray-700 text-sm font-bold mb-2">Closing Cash Count (PHP)</label>
-                            <input type="number" id="shift-closing-cash" class="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 text-xl text-center" step="0.01" required min="0">
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                             <label class="text-[10px] font-black text-gray-400 uppercase">Expense Receipts</label>
+                             <button type="button" id="btn-add-modal-exp" class="text-[10px] font-black bg-red-50 text-red-600 px-2 py-1 rounded border border-red-200 hover:bg-red-100">+ Add Expense</button>
                         </div>
-                        <div class="flex gap-2">
-                            <button type="button" id="btn-cancel-close-shift" class="w-1/2 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded">Cancel</button>
-                            <button type="submit" class="w-1/2 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded">Close Shift</button>
+                        <div id="session-expenses-list" class="max-h-40 overflow-y-auto">
+                            ${expenseRows || '<div class="text-center py-4 text-gray-300 text-xs italic border-2 border-dashed rounded-lg">No receipts added</div>'}
                         </div>
-                    </form>
-                </div>
+                    </div>
+
+                    <div class="bg-gray-900 text-white p-4 rounded-xl shadow-inner">
+                        <div class="flex justify-between text-[10px] font-black text-gray-400 uppercase mb-1">
+                            <span>Subtotal (Exp + Cash)</span>
+                            <span class="text-red-400">₱${totalExpenses.toFixed(2)} Receipts</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <div class="text-3xl font-black">₱${GRAND_TOTAL.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+                            <div class="text-[10px] bg-white/10 px-2 py-1 rounded">CASHIER POS</div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2">
+                        <button type="button" id="btn-cancel-close-shift" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-3 px-4 rounded-lg transition">Cancel</button>
+                        <button type="submit" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-4 rounded-lg shadow-md transition">Confirm Closure</button>
+                    </div>
+                </form>
             </div>
         `;
-        document.body.appendChild(div.firstElementChild);
-        modal = document.getElementById("modal-close-shift");
+        div.innerHTML = body;
 
-        document.getElementById("btn-cancel-close-shift").addEventListener("click", () => modal.remove());
+        // Bind inner actions
+        document.getElementById("btn-add-modal-exp").addEventListener("click", () => {
+            showMiniExpenseForm((newExp) => {
+                sessionExpenses.push(newExp);
+                renderShiftUI();
+            });
+        });
+
+        document.querySelectorAll(".btn-remove-session-exp").forEach(btn => {
+            btn.addEventListener("click", (e) => {
+                const idx = e.currentTarget.dataset.idx;
+                sessionExpenses.splice(idx, 1);
+                renderShiftUI();
+            });
+        });
+
+        document.getElementById("shift-closing-cash").addEventListener("input", () => {
+            const val = parseFloat(document.getElementById("shift-closing-cash").value) || 0;
+            const expTotal = sessionExpenses.reduce((s, e) => s + e.amount, 0);
+            const total = val + expTotal;
+            document.querySelector(".text-3xl.font-black").textContent = `₱${total.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+        });
+
+        document.getElementById("btn-cancel-close-shift").addEventListener("click", () => div.remove());
 
         document.getElementById("form-close-shift").addEventListener("submit", async (e) => {
             e.preventDefault();
             const amount = document.getElementById("shift-closing-cash").value;
+
             try {
+                // Record session expenses to the shift and regular expense table
+                const active = await checkActiveShift();
+                if (active) {
+                    if (!active.closing_receipts) active.closing_receipts = [];
+                    for (const exp of sessionExpenses) {
+                        const expenseRecord = {
+                            id: generateUUID(),
+                            ...exp,
+                            date: new Date().toISOString().split('T')[0],
+                            user_id: active.user_id,
+                            created_at: new Date()
+                        };
+                        active.closing_receipts.push(expenseRecord);
+                    }
+                    await Repository.upsert('shifts', active);
+                    currentShift = active;
+                }
+
                 const summary = await closeShift(amount);
+
                 document.getElementById("form-close-shift").classList.add("hidden");
                 document.getElementById("shift-summary-view").classList.remove("hidden");
                 document.getElementById("summary-expected").textContent = `₱${summary.expected.toFixed(2)}`;
-                document.getElementById("summary-actual").textContent = `₱${summary.actual.toFixed(2)}`;
+                document.getElementById("summary-actual").textContent = `₱${(summary.actual + totalExpenses).toFixed(2)}`;
+
                 const diffEl = document.getElementById("summary-diff");
                 diffEl.textContent = `₱${summary.difference.toFixed(2)}`;
-                diffEl.className = `text-3xl font-bold ${summary.difference < 0 ? 'text-red-600' : (summary.difference > 0 ? 'text-green-600' : 'text-gray-800')}`;
+                diffEl.className = `text-4xl font-black ${summary.difference < 0 ? 'text-red-600' : (summary.difference > 0 ? 'text-green-600' : 'text-gray-800')}`;
+
+                document.getElementById("btn-finish-shift").addEventListener("click", () => {
+                    div.remove();
+                    if (onSuccess) onSuccess();
+                });
             } catch (error) {
                 console.error("Error closing shift:", error);
-                alert("Failed to close shift. Please try again.");
+                alert("Failed to close shift: " + error.message);
             }
         });
+    };
 
-        document.getElementById("btn-finish-shift").addEventListener("click", () => { modal.remove(); if (onSuccess) onSuccess(); });
-    } else { modal.classList.remove("hidden"); }
+    document.body.appendChild(div);
+    renderShiftUI();
+}
+
+function showMiniExpenseForm(onSave) {
+    const div = document.createElement("div");
+    div.className = "fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[100]";
+    div.innerHTML = `
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-80 transform scale-in">
+            <h3 class="font-black text-gray-800 mb-4 text-center uppercase tracking-wider">New Receipt</h3>
+            <form id="mini-exp-form" class="space-y-4">
+                <div>
+                    <label class="block text-[10px] font-black text-gray-400 uppercase mb-1">Description</label>
+                    <input type="text" id="mini-desc" class="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="e.g. Drinking Water" required>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black text-gray-400 uppercase mb-1">Amount</label>
+                    <input type="number" id="mini-amount" class="w-full border rounded-lg p-2 font-black text-lg focus:ring-2 focus:ring-red-500 outline-none" placeholder="0.00" step="0.01" required>
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black text-gray-400 uppercase mb-1">Category</label>
+                    <select id="mini-cat" class="w-full border rounded-lg p-2 text-sm">
+                        <option value="Karinderya">Karinderya</option>
+                        <option value="Procurement">Procurement</option>
+                        <option value="Utilities">Utilities</option>
+                        <option value="Salary">Salary</option>
+                        <option value="Maintenance">Maintenance</option>
+                        <option value="Other">Other</option>
+                    </select>
+                </div>
+                <div class="flex gap-2 pt-2">
+                    <button type="button" id="btn-mini-cancel" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-500 font-bold py-2 rounded-lg">Back</button>
+                    <button type="submit" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-lg shadow-md">Add</button>
+                </div>
+            </form>
+        </div>
+    `;
+    document.body.appendChild(div);
+
+    document.getElementById("btn-mini-cancel").addEventListener("click", () => div.remove());
+    document.getElementById("mini-exp-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const data = {
+            description: document.getElementById("mini-desc").value,
+            amount: parseFloat(document.getElementById("mini-amount").value),
+            category: document.getElementById("mini-cat").value
+        };
+        onSave(data);
+        div.remove();
+    });
 }
 
 export function showAdjustCashModal(shiftId, onSuccess) {
