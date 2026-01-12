@@ -90,6 +90,7 @@ export async function loadExpensesView() {
                                 <option value="Rent">Rent</option>
                                 <option value="Salary">Salary</option>
                                 <option value="Maintenance">Maintenance</option>
+                                <option value="Karinderya">Karinderya</option>
                                 <option value="Other">Other</option>
                             </select>
                         </div>
@@ -114,14 +115,13 @@ export async function loadExpensesView() {
         </div>
     `;
 
-    // Set default filter date (Current Month)
+    // Set default filter date (Today)
     const now = new Date();
-    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-    const lastDay = now.toISOString().split('T')[0]; // To Today
+    const today = now.toISOString().split('T')[0];
 
-    document.getElementById("exp-filter-start").value = firstDay;
-    document.getElementById("exp-filter-end").value = lastDay;
-    document.getElementById("exp-date").value = lastDay;
+    document.getElementById("exp-filter-start").value = today;
+    document.getElementById("exp-filter-end").value = today;
+    document.getElementById("exp-date").value = today;
 
     // Event Listeners
     const modal = document.getElementById("modal-add-expense");
@@ -130,7 +130,7 @@ export async function loadExpensesView() {
             document.getElementById("expense-modal-title").textContent = "Record Expense";
             document.getElementById("exp-id").value = "";
             document.getElementById("form-add-expense").reset();
-            document.getElementById("exp-date").value = lastDay;
+            document.getElementById("exp-date").value = today;
             modal.classList.remove("hidden");
         });
     }
@@ -148,8 +148,8 @@ export async function loadExpensesView() {
     document.getElementById("exp-filter-end").addEventListener("change", fetchExpenses);
     document.getElementById("btn-clear-filters").addEventListener("click", () => {
         document.getElementById("exp-search").value = "";
-        document.getElementById("exp-filter-start").value = firstDay;
-        document.getElementById("exp-filter-end").value = lastDay;
+        document.getElementById("exp-filter-start").value = today;
+        document.getElementById("exp-filter-end").value = today;
         fetchExpenses();
     });
 
