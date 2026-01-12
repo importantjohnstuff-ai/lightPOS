@@ -637,7 +637,10 @@ export function showCloseShiftModal(onSuccess) {
                     <div>
                         <div class="flex justify-between items-center mb-2">
                              <label class="text-[10px] font-black text-gray-400 uppercase">Expense Receipts</label>
-                             <button type="button" id="btn-add-modal-exp" class="text-[10px] font-black bg-red-50 text-red-600 px-2 py-1 rounded border border-red-200 hover:bg-red-100">+ Add Expense</button>
+                             <div class="flex gap-2">
+                                <button type="button" id="btn-select-modal-exp" class="text-[10px] font-black bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100">Select from Expenses</button>
+                                <button type="button" id="btn-add-modal-exp" class="text-[10px] font-black bg-red-50 text-red-600 px-2 py-1 rounded border border-red-200 hover:bg-red-100">+ Add New</button>
+                             </div>
                         </div>
                         <div id="session-expenses-list" class="max-h-40 overflow-y-auto">
                             ${expenseRows || '<div class="text-center py-4 text-gray-300 text-xs italic border-2 border-dashed rounded-lg">No receipts added</div>'}
@@ -668,6 +671,13 @@ export function showCloseShiftModal(onSuccess) {
         document.getElementById("btn-add-modal-exp").addEventListener("click", () => {
             showMiniExpenseForm((newExp) => {
                 sessionExpenses.push(newExp);
+                renderShiftUI();
+            });
+        });
+
+        document.getElementById("btn-select-modal-exp").addEventListener("click", () => {
+            showExpenseSelector((selectedExp) => {
+                sessionExpenses.push(selectedExp);
                 renderShiftUI();
             });
         });
@@ -707,6 +717,11 @@ export function showCloseShiftModal(onSuccess) {
                             created_at: new Date()
                         };
                         active.closing_receipts.push(expenseRecord);
+
+                        // New Logic: Only Upsert to global if created in this session (not linked)
+                        if (!exp._isLinked) {
+                            await Repository.upsert('expenses', expenseRecord);
+                        }
                     }
                     await Repository.upsert('shifts', active);
                     currentShift = active;
@@ -736,6 +751,57 @@ export function showCloseShiftModal(onSuccess) {
 
     document.body.appendChild(div);
     renderShiftUI();
+}
+
+async function showExpenseSelector(onSelect) {
+    const div = document.createElement("div");
+    div.className = "fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[110]"; // Higher z-index
+
+    const today = new Date().toISOString().split('T')[0];
+    let expenses = [];
+    try {
+        const all = await Repository.getAll('expenses');
+        // Filter for specific date (today) or expand logic as needed
+        expenses = all.filter(e => e.date === today);
+    } catch (e) {
+        console.error("Error fetching expenses", e);
+    }
+
+    const listHtml = expenses.length > 0 ? expenses.map(e => `
+        <div class="flex justify-between items-center p-3 border-b hover:bg-gray-50 cursor-pointer expense-item transform transition hover:scale-[1.01]" data-json='${JSON.stringify(e).replace(/'/g, "&#39;")}'>
+            <div>
+                <div class="font-bold text-gray-800 text-sm">${e.description}</div>
+                <div class="text-[10px] text-gray-500 uppercase">${e.category} • ${e.supplier_name || 'No Supplier'}</div>
+            </div>
+            <div class="font-black text-red-600">₱${e.amount.toFixed(2)}</div>
+        </div>
+    `).join("") : `<div class="text-center py-8 text-gray-400 italic">No global expenses recorded for today (${today}).</div>`;
+
+    div.innerHTML = `
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-96 max-h-[80vh] flex flex-col scale-in">
+            <h3 class="font-black text-gray-800 mb-2 uppercase tracking-wider text-center">Select Expense</h3>
+            <p class="text-center text-xs text-gray-400 mb-4">Click to add to shift report</p>
+            
+            <div class="flex-1 overflow-y-auto border rounded-lg mb-4 custom-scrollbar">
+                ${listHtml}
+            </div>
+
+            <button id="btn-cancel-exp-select" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-3 rounded-lg transition">Cancel</button>
+        </div>
+    `;
+
+    document.body.appendChild(div);
+
+    document.getElementById("btn-cancel-exp-select").addEventListener("click", () => div.remove());
+
+    div.querySelectorAll(".expense-item").forEach(item => {
+        item.addEventListener("click", () => {
+            const data = JSON.parse(item.dataset.json);
+            // Mark as 'Linked' to prevent saving it AGAIN to global table
+            onSelect({ ...data, _isLinked: true });
+            div.remove();
+        });
+    });
 }
 
 function showMiniExpenseForm(onSave) {
@@ -779,7 +845,8 @@ function showMiniExpenseForm(onSave) {
         const data = {
             description: document.getElementById("mini-desc").value,
             amount: parseFloat(document.getElementById("mini-amount").value),
-            category: document.getElementById("mini-cat").value
+            category: document.getElementById("mini-cat").value,
+            _isLinked: false // New items created here SHOULD be saved globally
         };
         onSave(data);
         div.remove();
