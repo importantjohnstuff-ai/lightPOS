@@ -13,8 +13,9 @@ class SQLiteStore {
         $this->pdo->exec("PRAGMA journal_mode=WAL;");
         $this->pdo->exec("PRAGMA busy_timeout = 5000;");
         // Enable emulated prepares to handle parameter reuse and older drivers better
-        $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, true);
-        error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=true");
+        // Disable emulated prepares to use native SQLite binding (prevents Error 21 in some envs)
+        $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
+        error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=false");
         $this->collections = [
             'items', 'transactions', 'users', 'customers', 'suppliers',
             'shifts', 'expenses', 'returns', 'stock_movements',
