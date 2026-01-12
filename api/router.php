@@ -223,63 +223,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         echo json_encode(["success" => true]);
     } elseif ($action === 'login') {
-        // Ensure we wait for locks on login too
-        $store->pdo->exec("PRAGMA busy_timeout = 5000;");
-        
-        $email = $input['email'] ?? '';
-        $password = $input['password'] ?? ''; 
+        try {
+            // Ensure we wait for locks on login too
+            $store->pdo->exec("PRAGMA busy_timeout = 5000;");
+            
+            $email = $input['email'] ?? '';
+            $password = $input['password'] ?? ''; 
 
-        $users = $store->getAll('users');
-        if (empty($users)) {
-            $defaultAdmin = [
-                "email" => "admin@lightpos.com",
-                "name" => "Super Admin",
-                "password_hash" => md5("admin123"),
-                "is_active" => true,
-                "_version" => 1,
-                "_updatedAt" => round(microtime(true) * 1000),
-                "_deleted" => false,
-                "permissions_json" => json_encode([
-                    "pos" => ["read" => true, "write" => true], "customers" => ["read" => true, "write" => true],
-                    "items" => ["read" => true, "write" => true], "suppliers" => ["read" => true, "write" => true],
-                    "stockin" => ["read" => true, "write" => true], "stock-count" => ["read" => true, "write" => true],
-                    "reports" => ["read" => true, "write" => true], "expenses" => ["read" => true, "write" => true],
-                    "users" => ["read" => true, "write" => true], "shifts" => ["read" => true, "write" => true],
-                    "migrate" => ["read" => true, "write" => true], "returns" => ["read" => true, "write" => true],
-                    "settings" => ["read" => true, "write" => true]
-                ])
-            ];
-            $store->upsert('users', $defaultAdmin);
-            $users = [$defaultAdmin];
-        }
-
-        error_log("LOGIN attempt for $email. Users in DB: " . count($users));
-
-        $foundUser = null;
-        foreach ($users as $u) {
-            if ($u['email'] === $email && $u['password_hash'] === md5($password)) {
-                $foundUser = $u;
-                break;
+            $users = $store->getAll('users');
+            if (empty($users)) {
+                $defaultAdmin = [
+                    "email" => "admin@lightpos.com",
+                    "name" => "Super Admin",
+                    "password_hash" => md5("admin123"),
+                    "is_active" => true,
+                    "_version" => 1,
+                    "_updatedAt" => round(microtime(true) * 1000),
+                    "_deleted" => false,
+                    "permissions_json" => json_encode([
+                        "pos" => ["read" => true, "write" => true], "customers" => ["read" => true, "write" => true],
+                        "items" => ["read" => true, "write" => true], "suppliers" => ["read" => true, "write" => true],
+                        "stockin" => ["read" => true, "write" => true], "stock-count" => ["read" => true, "write" => true],
+                        "reports" => ["read" => true, "write" => true], "expenses" => ["read" => true, "write" => true],
+                        "users" => ["read" => true, "write" => true], "shifts" => ["read" => true, "write" => true],
+                        "migrate" => ["read" => true, "write" => true], "returns" => ["read" => true, "write" => true],
+                        "settings" => ["read" => true, "write" => true]
+                    ])
+                ];
+                $store->upsert('users', $defaultAdmin);
+                $users = [$defaultAdmin];
             }
-        }
 
-        if ($foundUser) {
-            if (isset($foundUser['is_active']) && !$foundUser['is_active']) {
-                error_log("LOGIN failed for $email: account inactive");
-                http_response_code(403);
-                echo json_encode(["error" => "Account inactive"]);
-            } else {
-                error_log("LOGIN success for $email");
-                unset($foundUser['password_hash']); // Don't send hash back
-                if (isset($foundUser['permissions_json']) && is_string($foundUser['permissions_json'])) {
-                    $foundUser['permissions'] = json_decode($foundUser['permissions_json'], true);
+            error_log("LOGIN attempt for $email. Users in DB: " . count($users));
+
+            $foundUser = null;
+            foreach ($users as $u) {
+                if ($u['email'] === $email && $u['password_hash'] === md5($password)) {
+                    $foundUser = $u;
+                    break;
                 }
-                echo json_encode(["success" => true, "user" => $foundUser]);
             }
-        } else {
-            error_log("LOGIN failed for $email: invalid credentials");
-            http_response_code(401);
-            echo json_encode(["error" => "Invalid credentials"]);
+
+            if ($foundUser) {
+                if (isset($foundUser['is_active']) && !$foundUser['is_active']) {
+                    error_log("LOGIN failed for $email: account inactive");
+                    http_response_code(403);
+                    echo json_encode(["error" => "Account inactive"]);
+                } else {
+                    error_log("LOGIN success for $email");
+                    unset($foundUser['password_hash']); // Don't send hash back
+                    if (isset($foundUser['permissions_json']) && is_string($foundUser['permissions_json'])) {
+                        $foundUser['permissions'] = json_decode($foundUser['permissions_json'], true);
+                    }
+                    echo json_encode(["success" => true, "user" => $foundUser]);
+                }
+            } else {
+                error_log("LOGIN failed for $email: invalid credentials");
+                http_response_code(401);
+                echo json_encode(["error" => "Invalid credentials"]);
+            }
+        } catch (Exception $e) {
+            error_log("LOGIN CRASH: " . $e->getMessage());
+            http_response_code(500);
+            echo json_encode(["error" => "Server Error: " . $e->getMessage()]);
         }
     } elseif ($action === 'repair_users') {
         // Utility to fix existing users with plain text passwords
