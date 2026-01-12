@@ -2333,7 +2333,7 @@ async function resumeTransaction(id) {
                 // or we could show a toast.
             }
 
-            // Fix: Force-hide previous success overlays and clear values
+            // Fix: Force-hide previous success overlays and clear values (Mobile & Desktop)
             if (document.getElementById("mobile-change-overlay")) {
                 document.getElementById("mobile-change-overlay").classList.add("hidden");
                 document.getElementById("mobile-change-amount").textContent = "₱0.00";
@@ -2342,6 +2342,10 @@ async function resumeTransaction(id) {
                 document.getElementById("mobile-payment-overlay").classList.add("hidden");
                 const tenderedInput = document.getElementById("mobile-input-tendered");
                 if (tenderedInput) tenderedInput.value = "";
+            }
+            // Fix: Hide Desktop "Last Transaction" Panel
+            if (document.getElementById("last-transaction")) {
+                document.getElementById("last-transaction").classList.add("hidden");
             }
 
             selectedCustomer = tx.customer || { id: "Guest", name: "Guest" };
