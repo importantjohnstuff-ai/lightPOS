@@ -1,18 +1,18 @@
 import { dbPromise } from "../db.js";
 import { getUserProfile } from "../auth.js";
-import { checkActiveShift, calculateExpectedCash } from "./shift.js";
+import { checkActiveShift, calculateExpectedCash } from "./shift.js?v=2";
 
 export async function loadDashboardView() {
     const user = getUserProfile();
     const content = document.getElementById("main-content");
-    
+
     if (user.role === 'cashier') {
         await renderCashierDashboard(content, user);
         return;
     }
 
     renderManagerDashboard(content);
-    
+
     const refreshBtn = document.getElementById("btn-refresh-dash");
     if (refreshBtn) {
         refreshBtn.addEventListener("click", refreshDashboard);
@@ -27,7 +27,7 @@ let tenderChartInstance = null;
 async function renderCashierDashboard(content, user) {
     const db = await dbPromise;
     const todayStr = new Date().toLocaleDateString('en-CA');
-    
+
     // Sync shifts first for accurate count
     await checkActiveShift();
 
@@ -37,9 +37,9 @@ async function renderCashierDashboard(content, user) {
             .toArray(),
         db.shifts.toArray()
     ]);
-    
+
     const openShiftsCount = allShifts.filter(s => s.status === 'open').length;
-    
+
     content.innerHTML = `
         <div class="flex flex-col items-center justify-center h-[calc(100vh-200px)] p-6">
             <div class="bg-white p-10 rounded-3xl shadow-xl text-center max-w-md border border-blue-50 w-full">
@@ -293,7 +293,7 @@ async function refreshDashboard() {
     try {
         const now = new Date();
         const todayStr = now.toLocaleDateString('en-CA');
-        
+
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = yesterday.toLocaleDateString('en-CA');
@@ -334,7 +334,7 @@ async function refreshDashboard() {
         todayTxs.forEach(tx => {
             netSalesToday += tx.total_amount;
             tenderSplit[tx.payment_method] = (tenderSplit[tx.payment_method] || 0) + tx.total_amount;
-            
+
             const hour = new Date(tx.timestamp).getHours();
             hourlySalesToday[hour] += tx.total_amount;
 
@@ -351,7 +351,7 @@ async function refreshDashboard() {
 
         const netSalesLastWeek = lastWeekTxs.reduce((sum, tx) => sum + tx.total_amount, 0);
         const salesDiff = netSalesLastWeek > 0 ? ((netSalesToday - netSalesLastWeek) / netSalesLastWeek * 100).toFixed(1) : 0;
-        
+
         const margin = netSalesToday > 0 ? ((netSalesToday - totalCogsToday) / netSalesToday * 100).toFixed(2) : 0;
         const atv = todayTxs.length > 0 ? (netSalesToday / todayTxs.length).toFixed(2) : 0;
         const openShiftsCount = allShifts.filter(s => s.status === 'open').length;
@@ -360,16 +360,16 @@ async function refreshDashboard() {
         const netSalesEl = document.getElementById("dash-net-sales");
         if (!netSalesEl) return;
 
-        netSalesEl.textContent = `₱${netSalesToday.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+        netSalesEl.textContent = `₱${netSalesToday.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
         const compareEl = document.getElementById("dash-sales-compare");
         const compareIcon = document.getElementById("dash-sales-compare-icon");
-        
+
         compareEl.textContent = `${salesDiff >= 0 ? '+' : ''}${salesDiff}% vs last week`;
         compareEl.className = `text-[10px] font-bold ${salesDiff >= 0 ? 'text-green-600' : 'text-red-600'}`;
-        compareIcon.innerHTML = salesDiff >= 0 
+        compareIcon.innerHTML = salesDiff >= 0
             ? `<svg class="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z" clip-rule="evenodd"></path></svg>`
             : `<svg class="w-3 h-3 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 112 0v7.586l2.293-2.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>`;
-        
+
         document.getElementById("dash-margin").textContent = `${margin}%`;
         document.getElementById("dash-tx-count").textContent = todayTxs.length;
         document.getElementById("dash-atv").textContent = `ATV: ₱${atv}`;
@@ -388,22 +388,22 @@ async function refreshDashboard() {
         // Pending POs
         const pendingPOs = allPOs.filter(po => po.status === 'draft' || po.status === 'approved');
         document.getElementById("alert-po-count").textContent = `${pendingPOs.length} POs Pending`;
-        
+
         // Security Alerts
         const securityCount = todayVoids.length + todayReturns.length;
         document.getElementById("alert-security-count").textContent = `${securityCount} Security Alerts`;
         document.getElementById("alert-security-detail").textContent = `${todayVoids.length} Voids, ${todayReturns.length} Returns today`;
-        
+
         document.getElementById("total-alerts-badge").textContent = lowStockItems.length + securityCount;
 
         // 6. Relationships
         const newCustToday = allCustomers.filter(c => c.id !== 'Guest' && c.timestamp && new Date(c.timestamp).toLocaleDateString('en-CA') === todayStr).length;
         document.getElementById("dash-new-customers").textContent = newCustToday;
-        
+
         // Calculate Expected Cash for Today (Per Open Shift)
         const openShifts = allShifts.filter(s => s.status === 'open');
         const expectedCashContainer = document.getElementById("dash-expected-cash");
-        
+
         if (openShifts.length === 0) {
             expectedCashContainer.innerHTML = `₱0.00`;
         } else {
@@ -415,7 +415,7 @@ async function refreshDashboard() {
                 html += `
                     <div class="flex justify-between items-center mb-1">
                         <span class="text-[10px] text-gray-400 font-bold truncate mr-2">${displayName}</span>
-                        <span class="text-sm font-black text-gray-800">₱${expected.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                        <span class="text-sm font-black text-gray-800">₱${expected.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                     </div>
                 `;
             }
@@ -452,7 +452,7 @@ function renderVelocityChart(today, yesterday) {
     velocityChartInstance = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: Array.from({length: 24}, (_, i) => `${i}:00`),
+            labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
             datasets: [
                 {
                     label: 'Today',
@@ -484,13 +484,13 @@ function renderVelocityChart(today, yesterday) {
             maintainAspectRatio: false,
             interaction: { intersect: false, mode: 'index' },
             scales: {
-                y: { 
-                    beginAtZero: true, 
+                y: {
+                    beginAtZero: true,
                     grid: { color: '#f9fafb' },
-                    ticks: { 
+                    ticks: {
                         callback: value => '₱' + value,
                         font: { size: 10 }
-                    } 
+                    }
                 },
                 x: {
                     grid: { display: false },
@@ -498,10 +498,10 @@ function renderVelocityChart(today, yesterday) {
                 }
             },
             plugins: {
-                legend: { 
-                    position: 'top', 
+                legend: {
+                    position: 'top',
                     align: 'end',
-                    labels: { boxWidth: 10, font: { size: 11, weight: 'bold' } } 
+                    labels: { boxWidth: 10, font: { size: 11, weight: 'bold' } }
                 },
                 tooltip: {
                     backgroundColor: '#1f2937',
@@ -534,7 +534,7 @@ function renderRecentTransactions(allTxs) {
     list.innerHTML = recent.map(tx => `
         <div class="flex justify-between items-center text-xs">
             <div class="flex flex-col">
-                <span class="font-bold text-gray-700">₱${tx.total_amount.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                <span class="font-bold text-gray-700">₱${tx.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 <span class="text-[9px] text-gray-400">${new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • ${tx.customer_name}</span>
             </div>
             <span class="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold">${tx.payment_method}</span>
@@ -567,14 +567,14 @@ function renderTenderChart(data) {
             maintainAspectRatio: false,
             cutout: '70%',
             plugins: {
-                legend: { 
-                    position: 'bottom', 
-                    labels: { 
-                        boxWidth: 8, 
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        boxWidth: 8,
                         usePointStyle: true,
                         font: { size: 10, weight: 'bold' },
                         padding: 15
-                    } 
+                    }
                 },
                 tooltip: {
                     enabled: hasData,

@@ -1,7 +1,7 @@
 import { checkPermission } from "../auth.js";
 import { addNotification } from "../services/notification-service.js";
 import { generateUUID } from "../utils.js";
-import { checkActiveShift, requireShift } from "./shift.js";
+import { checkActiveShift, requireShift } from "./shift.js?v=2";
 import { dbRepository as Repository } from "../db.js";
 import { SyncEngine } from "../services/SyncEngine.js";
 
@@ -128,7 +128,7 @@ function renderReturnsInterface(content) {
     `;
 
     document.getElementById("btn-find-tx").addEventListener("click", findTransaction);
-    
+
     const searchInput = document.getElementById("exchange-search-input");
     if (searchInput) {
         searchInput.addEventListener("input", handleExchangeSearch);
@@ -202,7 +202,7 @@ async function displayTransaction(id) {
 
     document.getElementById("search-results").classList.add("hidden");
     document.getElementById("return-details-container").classList.remove("hidden");
-    
+
     document.getElementById("display-tx-id").textContent = `Transaction #${selectedTransaction.id}`;
     document.getElementById("display-tx-date").textContent = new Date(selectedTransaction.timestamp).toLocaleString();
 
@@ -223,10 +223,10 @@ function renderOriginalItems() {
                 <td class="p-2 text-center">${available}</td>
                 <td class="p-2 text-right">₱${item.selling_price.toFixed(2)}</td>
                 <td class="p-2 text-center">
-                    ${available > 0 ? 
-                        `<button class="text-blue-600 font-bold hover:underline btn-add-to-return" data-index="${idx}">Return</button>` : 
-                        `<span class="text-gray-400 italic text-[10px]">N/A</span>`
-                    }
+                    ${available > 0 ?
+                `<button class="text-blue-600 font-bold hover:underline btn-add-to-return" data-index="${idx}">Return</button>` :
+                `<span class="text-gray-400 italic text-[10px]">N/A</span>`
+            }
                 </td>
             </tr>
         `;
@@ -247,15 +247,15 @@ function renderOriginalItems() {
 async function handleExchangeSearch(e) {
     const term = e.target.value.trim().toLowerCase();
     const resultsDiv = document.getElementById("exchange-search-results");
-    
+
     if (!term) {
         resultsDiv.classList.add("hidden");
         return;
     }
 
     const items = await Repository.getAll('items');
-    const filtered = items.filter(i => 
-        (i.name || "").toLowerCase().includes(term) || 
+    const filtered = items.filter(i =>
+        (i.name || "").toLowerCase().includes(term) ||
         (i.barcode || "").toLowerCase().includes(term)
     ).slice(0, 5);
 
@@ -381,7 +381,7 @@ async function processExchange() {
 
     const user = JSON.parse(localStorage.getItem('pos_user'))?.email || 'unknown';
     const timestamp = new Date().toISOString();
-    
+
     const returnTotal = returnedItems.reduce((sum, i) => sum + (i.selling_price * i.qty), 0);
     const exchangeTotal = exchangeItems.reduce((sum, i) => sum + (i.selling_price * i.qty), 0);
     const netDue = exchangeTotal - returnTotal;
@@ -391,7 +391,7 @@ async function processExchange() {
         returnedItems.forEach(ri => {
             selectedTransaction.items[ri.originalIndex].returned_qty = (selectedTransaction.items[ri.originalIndex].returned_qty || 0) + ri.qty;
         });
-        
+
         if (!selectedTransaction.exchanges) selectedTransaction.exchanges = [];
         selectedTransaction.exchanges.push({
             timestamp,
@@ -458,7 +458,7 @@ async function processExchange() {
 
         SyncEngine.sync();
         await addNotification('Exchange', `Exchange processed for Tx #${selectedTransaction.id}. ${returnedItems.length} returned, ${exchangeItems.length} taken.`);
-        
+
         alert("Exchange completed successfully.");
         loadReturnsView();
     } catch (e) {

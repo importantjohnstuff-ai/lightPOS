@@ -9,7 +9,7 @@ import { loadReportsView } from "./modules/Reportsv2.js";
 import { loadExpensesView } from "./modules/expenses.js";
 import { loadUsersView } from "./modules/users.js";
 import { loadProfileView } from "./modules/profile.js";
-import { loadShiftsView } from "./modules/shift.js";
+import { loadShiftsView } from "./modules/shift.js?v=2";
 import { loadSettingsView } from "./modules/settings.js";
 import { loadReturnsView } from "./modules/returns.js";
 import { loadPurchaseOrdersView } from "./modules/purchase_orders.js";

@@ -1,6 +1,6 @@
 import { dbPromise } from "./db.js";
 import { checkPermission, logout, getUserProfile } from "./auth.js";
-import { checkActiveShift } from "./modules/shift.js";
+import { checkActiveShift } from "./modules/shift.js?v=2";
 import { getRecentNotifications, markAllAsRead, toggleNotificationRead, getUnreadCount } from "./services/notification-service.js";
 import { SyncEngine } from "./services/SyncEngine.js";
 
