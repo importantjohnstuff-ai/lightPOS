@@ -1,6 +1,6 @@
 import { dbPromise } from "../db.js";
 import { getUserProfile } from "../auth.js";
-import { checkActiveShift, calculateExpectedCash } from "./shift.js?v=2";
+import { checkActiveShift, calculateExpectedCash } from "./shift.js?v=3";
 
 export async function loadDashboardView() {
     const user = getUserProfile();

@@ -1,7 +1,8 @@
+
 import { checkPermission } from "../auth.js";
 import { addNotification } from "../services/notification-service.js";
 import { generateUUID } from "../utils.js";
-import { checkActiveShift, requireShift } from "./shift.js?v=2";
+import { checkActiveShift, requireShift } from "./shift.js?v=3";
 import { dbRepository as Repository } from "../db.js";
 import { SyncEngine } from "../services/SyncEngine.js";
 

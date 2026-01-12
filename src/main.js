@@ -1,6 +1,6 @@
-import { login, logout, monitorAuthState } from "./auth.js";
-import { renderSidebar, renderLoginBranding } from "./layout.js";
-import { initRouter } from "./router.js";
+import { login, logout, monitorAuthState } from "./auth.js?v=3";
+import { renderSidebar, renderLoginBranding } from "./layout.js?v=3";
+import { initRouter } from "./router.js?v=3";
 import { SyncEngine } from "./services/SyncEngine.js";
 import { dbPromise } from "./db.js";
 import { dbRepository as Repository } from "./db.js";

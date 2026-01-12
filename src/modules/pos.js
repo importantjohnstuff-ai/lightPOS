@@ -1,5 +1,5 @@
 import { checkPermission, requestManagerApproval } from "../auth.js";
-import { checkActiveShift, requireShift, showCloseShiftModal, recordRemittance } from "./shift.js?v=2";
+import { checkActiveShift, requireShift, showCloseShiftModal, recordRemittance } from "./shift.js?v=3";
 import { addNotification } from "../services/notification-service.js";
 import { getSystemSettings } from "./settings.js";
 import { generateUUID, showToast as showGlobalToast } from "../utils.js";

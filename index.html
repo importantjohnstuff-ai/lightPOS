@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -14,10 +15,11 @@
     <link rel="stylesheet" href="style.css">
     <script type="text/javascript" src="./src/libs/sql.js"></script>
     <script type="text/javascript">
-      // Explicitly expose initSqlJs to the global window object
-      window.initSqlJs = initSqlJs;
+        // Explicitly expose initSqlJs to the global window object
+        window.initSqlJs = initSqlJs;
     </script>
 </head>
+
 <body class="bg-gray-100 h-screen w-screen overflow-hidden text-gray-800">
 
     <!-- Login View -->
@@ -28,14 +30,20 @@
             <form id="form-login">
                 <div class="mb-4">
                     <label class="block text-gray-700 text-sm font-bold mb-2" for="email">Email</label>
-                    <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" id="email" type="email" placeholder="admin@lightpos.com" required>
+                    <input
+                        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        id="email" type="email" placeholder="admin@lightpos.com" required>
                 </div>
                 <div class="mb-6">
                     <label class="block text-gray-700 text-sm font-bold mb-2" for="password">Password</label>
-                    <input class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" id="password" type="password" placeholder="******************" required>
+                    <input
+                        class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        id="password" type="password" placeholder="******************" required>
                 </div>
                 <div class="flex items-center justify-between">
-                    <button class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full transition duration-150" type="submit">
+                    <button
+                        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full transition duration-150"
+                        type="submit">
                         Sign In
                     </button>
                 </div>
@@ -45,10 +53,12 @@
                     <span class="border-b w-1/5 lg:w-1/4"></span>
                 </div>
                 <div class="mt-4">
-                    <button type="button" id="btn-google-login" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full transition duration-150">
+                    <button type="button" id="btn-google-login"
+                        class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full transition duration-150">
                         Sign in with Google
                     </button>
-                    <button type="button" id="btn-dev-reset" class="mt-2 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full transition duration-150 text-xs">
+                    <button type="button" id="btn-dev-reset"
+                        class="mt-2 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full transition duration-150 text-xs">
                         ⚠️ Reset System (Dev)
                     </button>
                 </div>
@@ -62,8 +72,10 @@
         <div class="bg-white p-8 rounded-2xl shadow-xl w-96 text-center">
             <div class="text-6xl mb-6">🚀</div>
             <h2 class="text-xl font-bold mb-4 text-gray-800">Welcome to LightPOS</h2>
-            <p class="text-gray-600 mb-8 text-sm">No existing data found. The application is ready to be initialized.</p>
-            <button id="btn-initialize" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg w-full shadow transition duration-150 transform hover:scale-105">
+            <p class="text-gray-600 mb-8 text-sm">No existing data found. The application is ready to be initialized.
+            </p>
+            <button id="btn-initialize"
+                class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg w-full shadow transition duration-150 transform hover:scale-105">
                 Initialize Application
             </button>
         </div>
@@ -75,16 +87,17 @@
             <div id="header-store-branding" class="flex items-center gap-3"></div>
             <div id="header-actions" class="flex items-center gap-4"></div>
         </header>
-        
+
         <div class="flex flex-1 overflow-hidden">
             <!-- Sidebar Placeholder -->
             <nav id="sidebar-container" class="w-64 bg-white border-r hidden md:block relative shadow-sm"></nav>
-            
+
             <!-- Main Content Area -->
             <main id="main-content" class="flex-1 p-6 overflow-auto bg-gray-50"></main>
         </div>
     </div>
 
-    <script type="module" src="src/main.js?v=1.3"></script>
+    <script type="module" src="src/main.js?v=3"></script>
 </body>
+
 </html>
