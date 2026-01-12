@@ -1,7 +1,7 @@
 #!/bin/bash
 # remote_finish.sh - Runs on the remote server to finalize setup
 
-TARGET_DIR="/opt/lampp/htdocs/devPOS"
+TARGET_DIR="${1:-/opt/lampp/htdocs/lightPOS}"
 XAMPP_USER="daemon"
 XAMPP_GROUP="daemon"
 

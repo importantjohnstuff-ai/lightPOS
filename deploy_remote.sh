@@ -3,7 +3,7 @@
 # Configuration
 REMOTE_USER="john"
 REMOTE_HOST="192.168.0.177"
-TARGET_DIR="/opt/lampp/htdocs/devPOS"
+TARGET_DIR="/opt/lampp/htdocs/lightPOS"
 
 echo "Deploying to ${REMOTE_USER}@${REMOTE_HOST}:${TARGET_DIR}"
 
@@ -44,6 +44,6 @@ rsync -avz --delete \
 
 # 5. Finalize on Remote (piping sudo password)
 echo "Running final setup on remote..."
-ssh -S $SSH_SOCKET -t ${REMOTE_USER}@${REMOTE_HOST} "echo '$REMOTE_SUDO_PASS' | sudo -S -k bash ${TARGET_DIR}/remote_finish.sh"
+ssh -S $SSH_SOCKET -t ${REMOTE_USER}@${REMOTE_HOST} "echo '$REMOTE_SUDO_PASS' | sudo -S -k bash ${TARGET_DIR}/remote_finish.sh '${TARGET_DIR}'"
 
 echo "Deployment Done."
