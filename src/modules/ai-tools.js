@@ -5,6 +5,15 @@ import { renderHeader } from "../layout.js";
 // --- State Management ---
 let currentAnalysisResult = null;
 let currentItems = [];
+let aiWorker = null;
+
+// Initialize Worker
+if (window.Worker) {
+    aiWorker = new Worker(new URL('../workers/ai-worker.js', import.meta.url), { type: "module" });
+    aiWorker.onmessage = handleWorkerMessage;
+}
+
+import { addNotification } from "../services/notification-service.js"; // Import notification service
 
 export async function loadAIToolsView() {
     const content = document.getElementById("main-content");
@@ -16,7 +25,7 @@ export async function loadAIToolsView() {
             <div class="border-b border-gray-200 mb-6">
                 <nav class="flex -mb-px space-x-8">
                     <button data-tab="categories" class="ai-tab-btn border-blue-500 text-blue-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">Category Analyzer</button>
-                    <!-- Future tabs can go here -->
+                    <button data-tab="parents" class="ai-tab-btn border-transparent text-gray-500 hover:text-gray-700 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">Item Parent Linker</button>
                 </nav>
             </div>
 
@@ -106,6 +115,79 @@ export async function loadAIToolsView() {
                     </div>
                 </div>
             </div>
+
+            <!-- Parent Linker Tab -->
+            <div id="ai-tab-parents" class="ai-panel flex-1 flex flex-col min-h-0 hidden">
+                 <div class="flex-1 flex gap-6 min-h-0">
+                    <!-- Left: Supplier List -->
+                    <div class="w-1/3 flex flex-col bg-white rounded-lg shadow-sm border overflow-hidden">
+                        <div class="p-4 border-b bg-gray-50">
+                            <h3 class="font-bold text-gray-700 mb-2">Select Supplier</h3>
+                            <input type="text" id="ai-supplier-search" placeholder="Search suppliers..." class="w-full border rounded p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                        </div>
+                        <div class="flex-1 overflow-y-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50 sticky top-0">
+                                    <tr>
+                                        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
+                                        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Items</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="ai-supplier-list" class="bg-white divide-y divide-gray-200 cursor-pointer"></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Right: Workspace -->
+                    <div class="flex-1 flex flex-col bg-white rounded-lg shadow-sm border overflow-hidden">
+                        <div id="ai-parent-workspace-empty" class="flex-1 flex flex-col items-center justify-center text-gray-400">
+                            <svg class="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                            <p>Select a supplier to analyze</p>
+                        </div>
+                        
+                        <div id="ai-parent-workspace-content" class="hidden flex-1 flex flex-col min-h-0">
+                            <!-- Header -->
+                            <div class="p-4 border-b bg-gray-50 flex justify-between items-center">
+                                <div>
+                                    <h3 id="ai-selected-supplier-name" class="text-xl font-bold text-gray-800">Supplier Name</h3>
+                                    <div class="text-sm text-gray-500"><span id="ai-selected-item-count">0</span> items available</div>
+                                </div>
+                                <button id="btn-analyze-parents" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg shadow transition flex items-center gap-2">
+                                    <span>🔗</span> Analyze Links
+                                </button>
+                            </div>
+
+                            <!-- Item Preview (Collapsible) -->
+                            <div class="border-b bg-gray-50">
+                                <button id="btn-toggle-items" class="w-full text-left px-4 py-2 text-xs font-bold text-gray-500 hover:bg-gray-100 flex justify-between items-center">
+                                    <span>Current Items Preview</span>
+                                    <span id="ai-arrow-items">▼</span>
+                                </button>
+                                <div id="ai-supplier-items-preview" class="hidden max-h-40 overflow-y-auto p-2 bg-gray-50 border-t text-xs text-gray-600 grid grid-cols-2 gap-2"></div>
+                            </div>
+
+                            <!-- Results Area -->
+                            <div class="flex-1 p-4 overflow-y-auto bg-gray-50">
+                                <div id="ai-parent-results-container" class="space-y-4">
+                                    <!-- Results go here -->
+                                    <div class="text-center text-gray-400 mt-10 italic">Click analyze to find relationships...</div>
+                                </div>
+                            </div>
+                             
+                            <!-- Footer Actions -->
+                             <div id="ai-parent-actions" class="p-4 border-t bg-white hidden flex justify-between items-center">
+                                <div class="text-sm text-gray-600">
+                                    <span id="ai-link-count">0</span> links proposed
+                                </div>
+                                <div class="flex gap-2">
+                                    <button onclick="document.getElementById('ai-parent-results-container').innerHTML=''" class="text-gray-500 hover:text-gray-700 px-3 py-1">Clear</button>
+                                    <button id="btn-apply-links" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded shadow">Apply Selected Links</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     `;
 
@@ -128,10 +210,47 @@ export async function loadAIToolsView() {
             else alert("Select a category first!");
         });
     }
+
+    // Parent Linker Setup
+    document.getElementById("ai-supplier-search").addEventListener("input", filterSupplierList);
+    document.getElementById("btn-toggle-items").addEventListener("click", () => {
+        const el = document.getElementById("ai-supplier-items-preview");
+        const arrow = document.getElementById("ai-arrow-items");
+        if (el.classList.contains("hidden")) {
+            el.classList.remove("hidden");
+            arrow.textContent = "▲";
+        } else {
+            el.classList.add("hidden");
+            arrow.textContent = "▼";
+        }
+    });
+    document.getElementById("btn-analyze-parents").addEventListener("click", analyzeParents);
+    document.getElementById("btn-apply-links").addEventListener("click", applyParentLinks);
+
+    // Initial Load
+    loadSuppliersWithCounts();
 }
 
 function setupTabListeners() {
-    // ... (Same as before)
+    const tabs = document.querySelectorAll('.ai-tab-btn');
+    const panels = document.querySelectorAll('.ai-panel');
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            // Deactivate all
+            tabs.forEach(t => {
+                t.classList.remove('border-blue-500', 'text-blue-600');
+                t.classList.add('border-transparent', 'text-gray-500');
+            });
+            panels.forEach(p => p.classList.add('hidden'));
+
+            // Activate clicked
+            tab.classList.remove('border-transparent', 'text-gray-500');
+            tab.classList.add('border-blue-500', 'text-blue-600');
+            const target = tab.dataset.tab;
+            document.getElementById(`ai-tab-${target}`).classList.remove('hidden');
+        });
+    });
 }
 
 async function loadCategories() {
@@ -185,46 +304,12 @@ async function analyzeCategories(allItems) {
 
     setLoading(true, "Analyzing Categories...");
 
-    try {
-        const categoryMap = {};
-        allItems.forEach(item => {
-            const cat = item.category || "Uncategorized";
-            if (!categoryMap[cat]) categoryMap[cat] = [];
-            if (categoryMap[cat].length < 5) categoryMap[cat].push(item.name);
-        });
-
-        const promptData = Object.entries(categoryMap).map(([cat, samples]) => ({
-            category: cat,
-            samples: samples
-        }));
-
-        const prompt = `
-        You are an expert inventory manager. Analyze these categories.
-        Task:
-        1. Identify categories to REMOVE (redundant, vague, spelling errors).
-        2. Identify categories to MERGE (e.g. "Bev" -> "Beverages").
-        3. Identify PROPOSED NEW categories if beneficial.
-
-        Data: ${JSON.stringify(promptData)}
-
-        Return JSON only:
-        {
-            "removed": ["cat1", "cat2"],
-            "merged": [{"old": "oldName", "new": "newName"}],
-            "users_proposed_new": ["High Margin", "Seasonal"]
-        }
-        `;
-
-        const result = await callLLM(aiSettings, prompt);
-        currentAnalysisResult = result;
-        renderAnalysisResults(result);
-
-    } catch (error) {
-        console.error("Analysis Failed", error);
-        alert("Analysis failed: " + error.message);
-    } finally {
-        setLoading(false);
-    }
+    // Send to worker
+    aiWorker.postMessage({
+        type: 'analyze-categories',
+        data: { items: allItems },
+        aiSettings
+    });
 }
 
 function renderAnalysisResults(result) {
@@ -279,22 +364,12 @@ async function applyMerges() {
     if (!confirm(`Apply ${currentAnalysisResult.merged.length} merges? This is irreversible.`)) return;
 
     setLoading(true, "Merging Categories...");
-    const db = await dbPromise;
 
-    try {
-        for (const merge of currentAnalysisResult.merged) {
-            await db.items.where('category').equals(merge.old).modify({ category: merge.new });
-        }
-        alert("Merges applied successfully!");
-        currentItems = await loadCategories(); // Refresh
-        document.getElementById("btn-apply-merges").disabled = true;
-        document.getElementById("container-merged").innerHTML = '<div class="text-green-600 custom-center p-2">Merges applied!</div>';
-    } catch (e) {
-        console.error(e);
-        alert("Error applying merges.");
-    } finally {
-        setLoading(false);
-    }
+    aiWorker.postMessage({
+        type: 'apply-merges',
+        data: { merges: currentAnalysisResult.merged },
+        aiSettings: JSON.parse(localStorage.getItem('ai_settings') || '{}')
+    });
 }
 
 // --- Action: Categorize Removed Items (Batch 100) ---
@@ -302,22 +377,6 @@ async function applyMerges() {
 async function categorizeRemoved() {
     if (!currentAnalysisResult || !currentAnalysisResult.removed) return;
 
-    // 1. Get all valid target categories (Existing + Proposed New + Merged targets)
-    // Actually, asking LLM to pick from *existing* non-removed categories + proposed new is best.
-    const validCategories = [...new Set(currentItems.map(i => i.category))]
-        .filter(c => !currentAnalysisResult.removed.includes(c)); // Exclude removed ones
-
-    if (currentAnalysisResult.users_proposed_new) {
-        validCategories.push(...currentAnalysisResult.users_proposed_new);
-    }
-    // Also include merge targets just in case
-    if (currentAnalysisResult.merged) {
-        currentAnalysisResult.merged.forEach(m => {
-            if (!validCategories.includes(m.new)) validCategories.push(m.new);
-        });
-    }
-
-    // 2. Find items in removed categories
     const itemsToProcess = currentItems.filter(i => currentAnalysisResult.removed.includes(i.category));
 
     if (itemsToProcess.length === 0) {
@@ -325,55 +384,21 @@ async function categorizeRemoved() {
         return;
     }
 
-    // 3. Batch Process
-    const BATCH_SIZE = 100;
-    const aiSettings = JSON.parse(localStorage.getItem('ai_settings') || '{}');
-    const updateProgress = (curr, total) => {
-        const p = document.getElementById("ai-progress-bar");
-        const pc = document.getElementById("ai-progress-bar-container");
-        if (p && pc) {
-            pc.classList.remove("hidden");
-            const pect = Math.round((curr / total) * 100);
-            p.style.width = `${pect}%`;
-        }
-        document.getElementById("ai-loading-subtext").textContent = `Processing items ${curr}/${total}`;
-    };
+    const validCategories = [...new Set(currentItems.map(i => i.category))];
 
     setLoading(true, "Re-categorizing Items...");
-    const db = await dbPromise;
-    let processedCount = 0;
 
-    try {
-        for (let i = 0; i < itemsToProcess.length; i += BATCH_SIZE) {
-            const batch = itemsToProcess.slice(i, i + BATCH_SIZE);
-            updateProgress(i, itemsToProcess.length);
-
-            const prompt = `
-            Assign a new category to these items.
-            Valid Categories: ${JSON.stringify(validCategories)}
-            Items: ${JSON.stringify(batch.map(b => ({ id: b.id, name: b.name, old_cat: b.category })))}
-            
-            Return JSON: { "items": [{ "id": "itemId", "category": "Valid Category Name" }] }
-            `;
-
-            const batchResult = await callLLM(aiSettings, prompt);
-
-            if (batchResult && batchResult.items) {
-                for (const change of batchResult.items) {
-                    await db.items.update(change.id, { category: change.category });
-                }
-            }
-            processedCount += batch.length;
-        }
-
-        alert(`Successfully re-categorized ${processedCount} items!`);
-        currentItems = await loadCategories();
-    } catch (e) {
-        console.error(e);
-        alert("Error during batch processing: " + e.message);
-    } finally {
-        setLoading(false);
-    }
+    aiWorker.postMessage({
+        type: 'categorize-removed',
+        data: {
+            items: itemsToProcess,
+            removedCats: currentAnalysisResult.removed,
+            validCats: validCategories,
+            usersProposedNew: currentAnalysisResult.users_proposed_new,
+            merged: currentAnalysisResult.merged
+        },
+        aiSettings: JSON.parse(localStorage.getItem('ai_settings') || '{}')
+    });
 }
 
 // --- Action: Audit Category (Batch 50) ---
@@ -382,90 +407,253 @@ async function auditCategory(categoryName) {
     const itemsInCat = currentItems.filter(i => i.category === categoryName);
     if (itemsInCat.length === 0) return alert("Category is empty.");
 
-    const BATCH_SIZE = 50;
-    const aiSettings = JSON.parse(localStorage.getItem('ai_settings') || '{}');
-    const db = await dbPromise;
-
-    // Valid potential categories (all existing)
-    const validCategories = [...new Set(currentItems.map(i => i.category))];
-
-    const updateProgress = (curr, total) => {
-        // Re-use progress bar logic
-        const p = document.getElementById("ai-progress-bar");
-        const pc = document.getElementById("ai-progress-bar-container");
-        if (p && pc) {
-            pc.classList.remove("hidden");
-            const pect = Math.round((curr / total) * 100);
-            p.style.width = `${pect}%`;
-        }
-        document.getElementById("ai-loading-subtext").textContent = `Auditing items ${curr}/${total}`;
-    };
-
     setLoading(true, `Auditing '${categoryName}'...`);
-    let changesCount = 0;
 
+    aiWorker.postMessage({
+        type: 'audit-category',
+        data: {
+            categoryName,
+            items: itemsInCat,
+            validCats: [...new Set(currentItems.map(i => i.category))]
+        },
+        aiSettings: JSON.parse(localStorage.getItem('ai_settings') || '{}')
+    });
+}
+
+// --- Parent Linker Logic ---
+
+let currentSupplierId = null;
+let currentSupplierItems = [];
+let currentParentLinks = [];
+
+async function loadSuppliersWithCounts() {
     try {
-        for (let i = 0; i < itemsInCat.length; i += BATCH_SIZE) {
-            const batch = itemsInCat.slice(i, i + BATCH_SIZE);
-            updateProgress(i, itemsInCat.length);
+        const db = await dbPromise;
+        const suppliers = await db.suppliers.toArray();
+        const items = await db.items.toArray();
 
-            const prompt = `
-            Audit these items currently in category '${categoryName}'.
-            Identify items that DO NOT belong here and suggest a better category from: ${JSON.stringify(validCategories.slice(0, 50))}... (others available).
-            If no existing category fits well, suggest a generic standard one.
-            
-            Items: ${JSON.stringify(batch.map(b => ({ id: b.id, name: b.name })))}
-            
-            Return JSON: { "changes": [{ "id": "itemId", "new_category": "Better Name" }] }
-            Only include items that NEED changing.
-            `;
-
-            const batchResult = await callLLM(aiSettings, prompt);
-            if (batchResult && batchResult.changes) {
-                for (const change of batchResult.changes) {
-                    await db.items.update(change.id, { category: change.new_category });
-                    changesCount++;
-                }
+        // Count items per supplier
+        const counts = {}; // { supplierId: count }
+        items.forEach(i => {
+            if (i.supplier_id) {
+                counts[i.supplier_id] = (counts[i.supplier_id] || 0) + 1;
             }
-        }
-        alert(`Audit complete. Moved ${changesCount} items out of '${categoryName}'.`);
-        currentItems = await loadCategories();
+        });
+
+        // Enrich suppliers with count
+        const enriched = suppliers.map(s => ({
+            ...s,
+            itemCount: counts[s.id] || 0
+        })).sort((a, b) => b.itemCount - a.itemCount); // Sort by most items
+
+        const tbody = document.getElementById("ai-supplier-list");
+        tbody.innerHTML = enriched.map(s => `
+            <tr class="hover:bg-blue-50 transition border-b border-gray-100" onclick="window.selectAiSupplier('${s.id}', '${s.name.replace(/'/g, "\\'")}', ${s.itemCount})">
+                <td class="px-4 py-3 text-sm font-medium text-gray-700 filter-name">${s.name}</td>
+                <td class="px-4 py-3 text-right text-sm text-gray-500">${s.itemCount}</td>
+            </tr>
+        `).join('');
+
+        // Expose to window for onclick
+        window.selectAiSupplier = selectAiSupplier;
 
     } catch (e) {
-        console.error(e);
-        alert("Audit Error: " + e.message);
-    } finally {
-        setLoading(false);
+        console.error("Error loading suppliers:", e);
+    }
+}
+
+function filterSupplierList(e) {
+    const term = e.target.value.toLowerCase();
+    const rows = document.querySelectorAll("#ai-supplier-list tr");
+    rows.forEach(row => {
+        const name = row.querySelector(".filter-name").textContent.toLowerCase();
+        row.style.display = name.includes(term) ? "" : "none";
+    });
+}
+
+async function selectAiSupplier(id, name, count) {
+    currentSupplierId = id;
+    document.getElementById("ai-parent-workspace-empty").classList.add("hidden");
+    document.getElementById("ai-parent-workspace-content").classList.remove("hidden");
+
+    document.getElementById("ai-selected-supplier-name").textContent = name;
+    document.getElementById("ai-selected-item-count").textContent = count;
+
+    // Load items for display
+    const db = await dbPromise;
+    currentSupplierItems = await db.items.where('supplier_id').equals(id).toArray();
+
+    const preview = document.getElementById("ai-supplier-items-preview");
+    preview.innerHTML = currentSupplierItems.map(i => `
+        <div class="truncate" title="${i.name}">${i.name}</div>
+    `).join('');
+
+    // Reset Results
+    document.getElementById("ai-parent-results-container").innerHTML = '<div class="text-center text-gray-400 mt-10 italic">Click analyze to find relationships...</div>';
+    document.getElementById("ai-parent-actions").classList.add("hidden");
+}
+
+async function analyzeParents() {
+    if (!currentSupplierId || currentSupplierItems.length === 0) return alert("Select a supplier with items.");
+
+    setLoading(true, "Analyzing Parent-Child Relationships...");
+
+    // Send to worker
+    aiWorker.postMessage({
+        type: 'analyze-parents',
+        data: {
+            items: currentSupplierItems.map(i => ({ id: i.id, name: i.name, parent_id: i.parent_id }))
+        },
+        aiSettings: JSON.parse(localStorage.getItem('ai_settings') || '{}')
+    });
+}
+
+function renderParentAnalysisResults(links) {
+    currentParentLinks = links; // Store for application
+    const container = document.getElementById("ai-parent-results-container");
+    const actions = document.getElementById("ai-parent-actions");
+    const countSpan = document.getElementById("ai-link-count");
+
+    if (!links || links.length === 0) {
+        container.innerHTML = '<div class="text-center text-gray-500 py-8">No parent-child relationships found.</div>';
+        actions.classList.add("hidden");
+        return;
+    }
+
+    actions.classList.remove("hidden");
+    countSpan.textContent = links.length;
+
+    container.innerHTML = links.map((link, index) => {
+        const parent = currentSupplierItems.find(i => i.id === link.parent_id);
+        const child = currentSupplierItems.find(i => i.id === link.child_id);
+        if (!parent || !child) return ''; // Should not happen
+
+        return `
+            <div class="bg-white p-3 rounded border border-gray-200 shadow-sm flex items-center gap-4">
+                <input type="checkbox" class="link-checkbox w-4 h-4 text-indigo-600 rounded" data-index="${index}" checked>
+                
+                <div class="flex-1 flex items-center justify-center gap-2">
+                    <div class="flex-1 text-right">
+                        <div class="font-bold text-gray-800 text-sm">${parent.name}</div>
+                        <div class="text-xs text-indigo-600 font-bold">PARENT</div>
+                    </div>
+                    
+                    <div class="flex flex-col items-center px-4">
+                        <div class="text-xs text-gray-400 font-mono">contains</div>
+                        <div class="bg-indigo-100 text-indigo-800 px-2 py-1 rounded font-bold text-sm border border-indigo-200">
+                            ${link.conversion_factor}
+                        </div>
+                        <div class="text-2xl text-gray-300">↓</div>
+                    </div>
+
+                    <div class="flex-1 text-left">
+                        <div class="font-bold text-gray-800 text-sm">${child.name}</div>
+                        <div class="text-xs text-green-600 font-bold">CHILD</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function applyParentLinks() {
+    const checkboxes = document.querySelectorAll(".link-checkbox:checked");
+    if (checkboxes.length === 0) return alert("Select at least one link to apply.");
+
+    const selectedIndices = Array.from(checkboxes).map(cb => parseInt(cb.dataset.index));
+    const linksToApply = selectedIndices.map(i => currentParentLinks[i]);
+
+    if (!confirm(`Apply ${linksToApply.length} parent-child links?`)) return;
+
+    const db = await dbPromise;
+    let appliedCount = 0;
+
+    for (const link of linksToApply) {
+        // We update the CHILD item to set its parent_id and conv_factor
+        await db.items.update(link.child_id, {
+            parent_id: link.parent_id,
+            conv_factor: link.conversion_factor
+        });
+        appliedCount++;
+    }
+
+    alert(`Successfully linked ${appliedCount} items!`);
+
+    // Refresh
+    selectAiSupplier(currentSupplierId, document.getElementById("ai-selected-supplier-name").textContent, document.getElementById("ai-selected-item-count").textContent);
+}
+
+function handleWorkerMessage(e) {
+    const { type, result, error, message, current, total, count } = e.data;
+
+    // Stop loading if error or final success (except progress)
+    if (type !== 'progress') {
+        const loadingEl = document.getElementById("ai-loading");
+        if (loadingEl && !loadingEl.classList.contains("hidden")) {
+            setLoading(false);
+        }
+    }
+
+    if (type === 'error') {
+        alert("AI Error: " + error);
+        console.error("AI Worker Error:", error);
+    } else if (type === 'progress') {
+        // Only update UI if we are on the page
+        if (document.getElementById("ai-loading")) {
+            // Make sure loading is shown if it was hidden (e.g. user navigated back)
+            // Actually, setLoading(true) might reset text, so we handle UI manually here
+            const p = document.getElementById("ai-progress-bar");
+            const pc = document.getElementById("ai-progress-bar-container");
+            const st = document.getElementById("ai-loading-subtext");
+
+            if (p && pc && total > 0) {
+                pc.classList.remove("hidden");
+                const pect = Math.round((current / total) * 100);
+                p.style.width = `${pect}%`;
+            }
+            if (st) st.textContent = message;
+        }
+    } else if (type === 'success') {
+        // Determine context based on result structure or state
+        if (result && result.merged) {
+            // Analyze Categories Result
+            currentAnalysisResult = result;
+            // If UI is active, render.
+            if (document.getElementById("container-merged")) {
+                renderAnalysisResults(result);
+            }
+            addNotification("AI", "Category analysis complete.");
+        } else if (count !== undefined) {
+            // Categorize Removed or Audit
+            addNotification("AI", `Operation complete. processed ${count} items.`);
+            // Refresh
+            loadCategories().then(items => {
+                currentItems = items;
+                if (document.getElementById("category-count")) {
+                    alert("Operation Complete!");
+                }
+            });
+        } else if (result && result.links) {
+            // Parent Linker Result
+            renderParentAnalysisResults(result.links);
+            addNotification("AI", `Analysis complete. Found ${result.links.length} potential links.`);
+        } else {
+            // Apply Merges
+            addNotification("AI", "Category merges applied.");
+            loadCategories().then(items => {
+                currentItems = items;
+                if (document.getElementById("container-merged")) {
+                    document.getElementById("btn-apply-merges").disabled = true;
+                    document.getElementById("container-merged").innerHTML = '<div class="text-green-600 custom-center p-2">Merges applied!</div>';
+                    alert("Merges applied successfully!");
+                }
+            });
+        }
     }
 }
 
 // --- Helper: Call LLM ---
-async function callLLM(settings, prompt) {
-    const response = await fetch(`${settings.url}/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            model: settings.model || "local-model",
-            messages: [
-                { role: "system", content: "You are a helpful JSON data assistant. Always return valid JSON." },
-                { role: "user", content: prompt }
-            ],
-            temperature: 0.1
-        })
-    });
-
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const json = await response.json();
-    let content = json.choices[0].message.content;
-
-    // Basic cleanup
-    if (content.includes("```json")) {
-        content = content.split("```json")[1].split("```")[0];
-    } else if (content.includes("```")) {
-        content = content.split("```")[1].split("```")[0];
-    }
-    return JSON.parse(content);
-}
+// function callLLM removed (moved to worker)
 
 function setLoading(isLoading, text = "") {
     const el = document.getElementById("ai-loading");

@@ -373,7 +373,7 @@ export async function loadPurchaseOrdersView() {
         }
         const items = await Repository.getAll('items');
         const filtered = items.filter(i => i.name.toLowerCase().includes(term) && !i._deleted).slice(0, 10);
-        
+
         resultsDiv.innerHTML = filtered.map(i => `
             <div class="p-2 hover:bg-gray-100 cursor-pointer border-b" onclick="window.selectItemForPo('${i.id}', '${i.name.replace(/'/g, "\\'")}', ${i.cost_price})">
                 <div class="font-bold text-sm">${i.name}</div>
@@ -425,10 +425,10 @@ export async function loadPurchaseOrdersView() {
     await renderPOList();
     // Reset selection
     selectedPoId = null;
-    
+
     // Calculate metrics immediately on load
     await refreshProcurementData();
-    
+
     await renderAlerts();
 }
 
@@ -451,7 +451,7 @@ async function refreshProcurementData() {
         const supplierConfigs = await Repository.getAll('supplier_config');
         const suppliers = await Repository.getAll('suppliers');
         const globalSettings = await Repository.get('settings', 'global');
-        
+
         let kFactorSetting = (globalSettings && globalSettings.procurement && globalSettings.procurement.k_factor) ? parseFloat(globalSettings.procurement.k_factor) : 110;
         if (kFactorSetting < 100) kFactorSetting = 100;
         const multiplier = kFactorSetting / 100;
@@ -463,26 +463,33 @@ async function refreshProcurementData() {
         const assumedStockEnabled = (globalSettings && globalSettings.procurement && globalSettings.procurement.assumed_stock_new_store) || false;
 
         // 1. Compute Live Velocity
+        // 1. Compute Live Velocity
         const itemStats = {}; // { itemId: { firstSale: Date, totalQty: 0, dailySales: { date: qty } } }
         const now = new Date();
         const lookbackWindow = new Date(now);
         lookbackWindow.setDate(lookbackWindow.getDate() - 180);
         let globalFirstSale = new Date(); // Track oldest transaction for store age
-        
+
+        // Initialize for ALL items to ensure parents are included
+        items.forEach(item => {
+            itemStats[item.id] = { firstSale: new Date(), totalQty: 0, dailySales: {} };
+        });
+
         transactions.forEach(t => {
             if (t.is_voided || t._deleted) return;
             const txDate = new Date(t.timestamp);
             const dateStr = txDate.toISOString().split('T')[0];
             const txItems = Array.isArray(t.items) ? t.items : [];
-            
+
             // Check for global store age
             if (txDate < globalFirstSale) globalFirstSale = txDate;
 
             txItems.forEach(i => {
                 if (!itemStats[i.id]) {
+                    // Should be init by above loop, but safety check for items deleted/missing from 'items' array but present in history
                     itemStats[i.id] = { firstSale: txDate, totalQty: 0, dailySales: {} };
                 }
-                
+
                 // Track lifetime first sale for accurate age
                 if (txDate < itemStats[i.id].firstSale) {
                     itemStats[i.id].firstSale = txDate;
@@ -505,15 +512,15 @@ async function refreshProcurementData() {
             const cost = item ? (parseFloat(item.cost_price) || 0) : 0;
             const minStock = item ? (parseFloat(item.min_stock) || 0) : 0;
             const maxStock = item ? (parseFloat(item.max_stock) || 0) : 0;
-            
+
             const daysSince = Math.max(1, Math.ceil((now - stats.firstSale) / (1000 * 60 * 60 * 24)));
             const effectiveDays = Math.min(180, daysSince);
             const velocity = stats.totalQty / effectiveDays;
-            
+
             let cadenceDays = 7;
             let leadTime = defaultLeadTime;
             let reviewPeriod = 7;
-            
+
             if (item && item.supplier_id) {
                 const config = supplierConfigs.find(c => c.supplier_id === item.supplier_id);
                 if (config) {
@@ -543,7 +550,7 @@ async function refreshProcurementData() {
             const plannedSalesCost = plannedSalesUnits * cost;
             const targetEndStockCost = minStock * cost;
             const currentStockCost = currentStock * cost;
-            
+
             // Item-level OTB (cannot be negative for budget purposes)
             let itemOtb = 0;
             if (otbMode === 'replenishment') {
@@ -560,7 +567,7 @@ async function refreshProcurementData() {
             const variance = (sumX2 / effectiveDays) - (velocity * velocity);
             const stdDev = Math.sqrt(Math.max(0, variance));
             const cv = velocity > 0 ? stdDev / velocity : 0;
-            
+
             let xyz = 'Z';
             if (cv < 0.2) xyz = 'X';
             else if (cv <= 0.5) xyz = 'Y';
@@ -591,7 +598,7 @@ async function refreshProcurementData() {
             } else {
                 targetLevel = Math.ceil(velocity * cadenceDays);
             }
-            
+
             const netRequirement = targetLevel - currentStock;
             let suggestedQty = 0;
             if (netRequirement > 0) {
@@ -609,7 +616,7 @@ async function refreshProcurementData() {
                 projNext: velocity * cadenceDays,
                 projMonthlyCost: velocity * 30 * cost,
                 projNextCost: velocity * cadenceDays * cost,
-                
+
                 plannedSalesCost,
                 targetEndStockCost,
                 currentStockCost,
@@ -619,7 +626,7 @@ async function refreshProcurementData() {
                 cost,
                 dailySales: stats.dailySales,
                 supplier_id: item ? item.supplier_id : null,
-                
+
                 annualUsage,
                 cv,
                 xyz,
@@ -630,26 +637,45 @@ async function refreshProcurementData() {
             };
         });
 
-        // --- Demand Roll-up Logic ---
-        // If a Child item needs stock, convert that need to the Parent item (if exists)
-        // This ensures we order Cases (Parent) instead of Units (Child)
+        // --- Demand Roll-up Logic (Recursive via Sort) ---
+        // 1. Calculate Hierarchy Depth for keys
+        const depthMap = new Map();
+        const getDepth = (itemId) => {
+            if (depthMap.has(itemId)) return depthMap.get(itemId);
+            const item = items.find(i => i.id === itemId);
+            if (!item || !item.parent_id) {
+                depthMap.set(itemId, 0);
+                return 0;
+            }
+            const d = 1 + getDepth(item.parent_id);
+            depthMap.set(itemId, d);
+            return d;
+        };
+
+        // 2. Sort velocityRows by Depth Descending (Deepest Child First)
+        // This ensures Child demand is calculated before Parent, bubbling up correctly
+        velocityRows.sort((a, b) => getDepth(b.id) - getDepth(a.id));
+
         const rowMap = new Map(velocityRows.map(r => [r.id, r]));
-        
+
         velocityRows.forEach(child => {
             const childItem = items.find(i => i.id === child.id);
             if (childItem && childItem.parent_id) {
                 const parentRow = rowMap.get(childItem.parent_id);
                 if (parentRow) {
                     const factor = parseFloat(childItem.conv_factor) || 1;
-                    
+
                     // If Child has a net requirement (deficit), transfer it to Parent
                     if (child.netRequirement > 0) {
                         const neededParentUnits = child.netRequirement / factor;
                         parentRow.netRequirement += neededParentUnits;
-                        
+
                         // Re-calculate Parent's suggested quantity based on new requirement
+                        // Ensure we respect the parent's EOQ and Min Stock policies logic again if needed, 
+                        // but simple Max(EOQ, Net) is a good safe baseline for the roll-up.
+                        // We accumulate netRequirement first so if multiple children add up, we take the total.
                         parentRow.suggestedQty = Math.ceil(Math.max(parentRow.eoq, parentRow.netRequirement));
-                        
+
                         // Zero out Child suggestion so we don't double order
                         child.suggestedQty = 0;
                         child.itemOtb = 0; // Remove from budget calculation
@@ -663,7 +689,7 @@ async function refreshProcurementData() {
         let totalAnnualUsage = 0;
         velocityRows.forEach(r => totalAnnualUsage += r.annualUsage);
         velocityRows.sort((a, b) => b.annualUsage - a.annualUsage);
-        
+
         let runningUsage = 0;
         velocityRows.forEach(row => {
             runningUsage += row.annualUsage;
@@ -702,7 +728,7 @@ async function refreshProcurementData() {
             supplierStats[row.supplier_id].currentStock += row.currentStockCost;
             supplierStats[row.supplier_id].otb += row.itemOtb;
             supplierStats[row.supplier_id].itemCount++;
-            
+
             if (row.suggestedQty > 0) {
                 // supplierStats[row.supplier_id].suggestedValue += (row.suggestedQty * row.cost); // Calculated after filtering
                 supplierStats[row.supplier_id].suggestedItems.push({
@@ -729,9 +755,9 @@ async function refreshProcurementData() {
                 // Items C are dropped immediately if over budget per PRD Priority 3
 
                 const costA = itemsA.reduce((sum, i) => sum + (i.orderQty * i.cost_price), 0);
-                
+
                 let finalItems = [];
-                
+
                 // Priority 1: Keep Class A items at 100% (unless they exceed budget themselves)
                 if (costA > sup.otb) {
                     // Strict Budget Mode: Scale down Class A items to fit budget
@@ -743,12 +769,12 @@ async function refreshProcurementData() {
                     // No budget left for B or C
                 } else {
                     finalItems = [...itemsA];
-                    
+
                     let remainingOtb = sup.otb - costA;
 
                     if (remainingOtb > 0) {
                         const costB = itemsB.reduce((sum, i) => sum + (i.orderQty * i.cost_price), 0);
-                        
+
                         if (costB <= remainingOtb) {
                             // Priority 2: Fit all B if possible
                             finalItems = [...finalItems, ...itemsB];
@@ -764,7 +790,7 @@ async function refreshProcurementData() {
                     }
                 }
                 // Priority 3: Remove Class C items entirely (implicit by not adding them)
-                
+
                 sup.suggestedItems = finalItems;
             }
 
@@ -804,9 +830,9 @@ async function renderPOList() {
         if (po._deleted) return false;
         const supplierName = supplierMap.get(po.supplier_id) || po.supplier_id || '';
         const term = poSearchTerm;
-        return po.id.toLowerCase().includes(term) || 
-               supplierName.toLowerCase().includes(term) || 
-               po.status.toLowerCase().includes(term);
+        return po.id.toLowerCase().includes(term) ||
+            supplierName.toLowerCase().includes(term) ||
+            po.status.toLowerCase().includes(term);
     });
 
     // Sort
@@ -835,7 +861,7 @@ async function renderPOList() {
         if (valA > valB) return poSortState.dir === 'asc' ? 1 : -1;
         return 0;
     });
-    
+
     if (filtered.length === 0) {
         tbody.innerHTML = '<tr><td colspan="4" class="px-6 py-4 text-center text-gray-500">No purchase orders found.</td></tr>';
         return;
@@ -901,7 +927,7 @@ async function renderAlerts() {
 
 async function showSalesData() {
     if (!procurementData) await refreshProcurementData();
-    
+
     const { items: velocityRows, suppliers: supplierStats, raw } = procurementData;
     const { transactions } = raw;
 
@@ -916,7 +942,7 @@ async function showSalesData() {
         return `<tr>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${new Date(t.timestamp).toLocaleString()}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${t.id}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">₱${(t.total_amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">₱${(t.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
             <td class="px-6 py-4 text-sm text-gray-500 truncate max-w-xs" title="${itemSummary}">${itemSummary}</td>
         </tr>`;
     }).join('');
@@ -932,33 +958,33 @@ async function showSalesData() {
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${row.firstSale}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">${row.effectiveDays}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">${row.totalQty.toLocaleString()}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 font-bold">${row.velocity.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">${row.projMonthly.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">${row.projNext.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900 font-bold">${row.velocity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">${row.projMonthly.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">${row.projNext.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
     `).join('');
 
     // 3. Render Supplier Analysis
     const supplierBody = document.getElementById('sales-supplier-body');
-    supplierBody.innerHTML = Object.values(supplierStats).sort((a,b) => b.projMonthly - a.projMonthly).map(s => `
+    supplierBody.innerHTML = Object.values(supplierStats).sort((a, b) => b.projMonthly - a.projMonthly).map(s => `
         <tr>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${s.name}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">${s.itemCount}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${s.projMonthly.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${s.projNext.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${s.projMonthly.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${s.projNext.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
     `).join('');
 
     // 4. Render OTB Planner
     const otbBody = document.getElementById('sales-otb-body');
-    otbBody.innerHTML = Object.values(supplierStats).sort((a,b) => b.otb - a.otb).map(s => `
+    otbBody.innerHTML = Object.values(supplierStats).sort((a, b) => b.otb - a.otb).map(s => `
         <tr>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${s.name}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-center text-gray-500 capitalize">${s.cadence}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${s.plannedSales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${s.targetEndStock.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${s.currentStock.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-blue-600">₱${s.otb.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${s.plannedSales.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${s.targetEndStock.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${s.currentStock.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-blue-600">₱${s.otb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
     `).join('');
 
@@ -970,14 +996,14 @@ async function showSalesData() {
     abcBody.innerHTML = sortedAbc.map(row => {
         const abcColor = row.abc === 'A' ? 'text-green-600 font-bold' : (row.abc === 'B' ? 'text-blue-600' : 'text-gray-500');
         const xyzColor = row.xyz === 'X' ? 'text-green-600 font-bold' : (row.xyz === 'Y' ? 'text-yellow-600' : 'text-red-600');
-        
+
         const frequency = (row.velocity > 0 && row.eoq > 0) ? Math.round(row.eoq / row.velocity) + ' days' : '-';
 
         return `<tr>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">${row.name}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${row.annualUsage.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${row.annualUsage.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-center ${abcColor}">${row.abc}</td>
-            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">${row.cv.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+            <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">${row.cv.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-center ${xyzColor}">${row.xyz}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-center font-bold border-l">${row.abc}${row.xyz}</td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500 text-xs">EOQ: ${row.eoq} / ROP: ${row.rop}</td>
@@ -995,20 +1021,20 @@ async function showCreatePOModal() {
     const modal = document.getElementById('po-modal');
     const tbody = document.getElementById('po-supplier-list-body');
     const searchInput = document.getElementById('po-supplier-search');
-    
+
     modal.classList.remove('hidden');
-    
+
     const supplierData = Object.values(procurementData.suppliers);
 
     const renderTable = () => {
         const term = searchInput.value.toLowerCase();
         const filtered = supplierData.filter(s => s.name.toLowerCase().includes(term));
-        
+
         tbody.innerHTML = filtered.map(s => {
             const isOverBudget = s.suggestedValue > s.otb;
             const statusColor = isOverBudget ? 'text-red-600' : 'text-green-600';
             const statusText = isOverBudget ? 'Over Budget' : 'Within Budget';
-            
+
             const detailsHtml = s.suggestedItems.map(i => `
                 <tr class="border-b border-gray-200 last:border-0 text-xs">
                     <td class="py-1 pl-4 text-gray-600">${i.name}</td>
@@ -1016,8 +1042,8 @@ async function showCreatePOModal() {
                     <td class="py-1 text-right text-gray-500">${Math.ceil(i.netRequirement)}</td>
                     <td class="py-1 text-right text-gray-500">${i.eoq}</td>
                     <td class="py-1 text-right font-bold text-blue-600">${i.orderQty}</td>
-                    <td class="py-1 text-right text-gray-500">₱${i.cost_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                    <td class="py-1 text-right pr-4 font-medium">₱${(i.orderQty * i.cost_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                    <td class="py-1 text-right text-gray-500">₱${i.cost_price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td class="py-1 text-right pr-4 font-medium">₱${(i.orderQty * i.cost_price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                 </tr>
             `).join('');
 
@@ -1034,8 +1060,8 @@ async function showCreatePOModal() {
                             <option value="twice_a_week" ${s.cadence === 'twice_a_week' ? 'selected' : ''}>Twice a Week</option>
                         </select>
                     </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${s.otb.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-blue-600">₱${s.suggestedValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">₱${s.otb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-bold text-blue-600">₱${s.suggestedValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-center font-bold ${statusColor}">${statusText}</td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-right">
                         <button onclick="window.togglePoDetails('${s.id}')" class="text-xs text-gray-500 hover:text-blue-600 underline mr-3">Details</button>
@@ -1070,7 +1096,7 @@ async function showCreatePOModal() {
 
     searchInput.oninput = renderTable;
     renderTable();
-    
+
     // Store calculated items for creation
     window._poSuggestions = supplierData;
 }
@@ -1082,13 +1108,13 @@ window.quickEditCadence = async (supplierId, newCadence) => {
             alert("Invalid cadence.");
             return;
         }
-        
+
         const config = await Repository.get('supplier_config', supplierId) || { supplier_id: supplierId };
         if (config.delivery_cadence !== newCadence) {
             config.delivery_cadence = newCadence;
             config._updatedAt = Date.now();
             config._version = (config._version || 0) + 1;
-            
+
             await Repository.upsert('supplier_config', config);
             SyncEngine.sync();
             await refreshProcurementData();
@@ -1106,7 +1132,7 @@ window.calculateOtb = async (supplierId) => {
     const res = await fetch(`api/procurement.php?action=calculate-otb&supplier_id=${supplierId}`);
     const data = await res.json();
     if (data.new_otb !== undefined) {
-        alert(`OTB Recalculated: ${data.new_otb.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`);
+        alert(`OTB Recalculated: ${data.new_otb.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
         SyncEngine.sync(); // Pull new config
         // Invalidate cache to force refresh next time
         procurementData = null;
@@ -1181,7 +1207,7 @@ window.selectPO = async (poId) => {
 
     const po = await Repository.get('purchase_orders', poId);
     if (!po) return;
-    
+
     window._currentPoId = poId;
     const suppliers = await Repository.getAll('suppliers');
     const stockIns = await Repository.getAll('stockins');
@@ -1206,7 +1232,7 @@ window.selectPO = async (poId) => {
 
     const tbody = document.getElementById('po-view-items');
     const items = po.items || [];
-    
+
     // Reset search
     document.getElementById('po-view-search').value = '';
 
@@ -1222,7 +1248,7 @@ window.selectPO = async (poId) => {
 
     const btnAdd = document.getElementById('btn-add-po-item');
     btnAdd.dataset.id = poId;
-    
+
     if (po.status === 'draft') {
         const btnApprove = document.createElement('button');
         btnApprove.className = "bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-xs font-bold shadow";
@@ -1258,21 +1284,21 @@ window.selectPO = async (poId) => {
 
     const orderedAmount = parseFloat(po.total_amount) || 0;
     const variance = actualAmount - orderedAmount;
-    
-    document.getElementById('po-detail-actual').textContent = (po.status === 'received' || po.status === 'partially_received') ? `₱${actualAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '-';
+
+    document.getElementById('po-detail-actual').textContent = (po.status === 'received' || po.status === 'partially_received') ? `₱${actualAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-';
     const varEl = document.getElementById('po-detail-variance');
-    varEl.textContent = (po.status === 'received' || po.status === 'partially_received') ? `₱${variance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}` : '-';
+    varEl.textContent = (po.status === 'received' || po.status === 'partially_received') ? `₱${variance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '-';
     varEl.className = `font-bold text-lg ${variance < -0.01 ? 'text-green-600' : (variance > 0.01 ? 'text-red-600' : 'text-gray-800')}`;
 
     tbody.innerHTML = items.map(item => {
         const manualBadge = item.is_manual ? '<span class="ml-2 text-[10px] bg-yellow-100 text-yellow-800 px-1 rounded border border-yellow-200">Manual</span>' : '';
-        const qtyDisplay = isDraft 
-            ? `<input type="number" class="w-20 border rounded p-1 text-right text-sm" value="${item.qty}" min="1" onchange="window.updatePoItemQty('${po.id}', '${item.item_id || item.id}', this.value)">` 
+        const qtyDisplay = isDraft
+            ? `<input type="number" class="w-20 border rounded p-1 text-right text-sm" value="${item.qty}" min="1" onchange="window.updatePoItemQty('${po.id}', '${item.item_id || item.id}', this.value)">`
             : item.qty;
         const deleteBtn = isDraft
             ? `<button onclick="window.removePoItem('${po.id}', '${item.item_id || item.id}')" class="text-red-600 hover:text-red-800 p-1"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg></button>`
             : '';
-        
+
         let discrepancyHtml = '';
         let rowBg = '';
         if (po.status === 'received' || po.status === 'partially_received') {
@@ -1292,13 +1318,13 @@ window.selectPO = async (poId) => {
                 </div>
             </td>
             <td class="px-4 py-2 whitespace-nowrap text-sm text-right text-gray-500">${qtyDisplay}</td>
-            <td class="px-4 py-2 whitespace-nowrap text-sm text-right text-gray-500">${(item.cost || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-            <td class="px-4 py-2 whitespace-nowrap text-sm text-right text-gray-500">${(item.total || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+            <td class="px-4 py-2 whitespace-nowrap text-sm text-right text-gray-500">${(item.cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td class="px-4 py-2 whitespace-nowrap text-sm text-right text-gray-500">${(item.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
             <td class="px-4 py-2 whitespace-nowrap text-sm text-right">${deleteBtn}</td>
         </tr>
     `}).join('');
 
-    document.getElementById('po-view-total').textContent = `₱${(po.total_amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+    document.getElementById('po-view-total').textContent = `₱${(po.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
 window.deletePO = async (poId) => {
@@ -1387,7 +1413,7 @@ window.confirmReceivePO = async () => {
         const receivedQty = parseInt(row.querySelector('.received-qty').value) || 0;
         const orderedQty = parseInt(row.querySelector('td:nth-child(2)').textContent);
         const reasonInput = row.querySelector('.discrepancy-reason');
-        
+
         // Reset error style
         reasonInput.classList.remove('border-red-500', 'ring-1', 'ring-red-500');
 
@@ -1397,7 +1423,7 @@ window.confirmReceivePO = async () => {
                 hasError = true;
             }
         }
-        
+
         if (receivedQty > 0 || receivedQty < orderedQty) {
             receivedItemsData.push({
                 item_id: row.dataset.itemId,
@@ -1440,7 +1466,7 @@ window.confirmReceivePO = async () => {
             const product = await Repository.get('items', item.item_id || item.id);
             if (product) {
                 product.stock_level = (product.stock_level || 0) + item.qty;
-                if (item.cost > 0) product.cost_price = item.cost; 
+                if (item.cost > 0) product.cost_price = item.cost;
                 await Repository.upsert('items', product);
 
                 await Repository.upsert('stock_movements', {
@@ -1479,7 +1505,7 @@ window.confirmReceivePO = async () => {
 window.printPO = async (poId) => {
     const po = await Repository.get('purchase_orders', poId);
     if (!po) return;
-    
+
     const suppliers = await Repository.getAll('suppliers');
     const supplier = suppliers.find(s => s.id === po.supplier_id);
     const supplierName = supplier ? supplier.name : po.supplier_id;
@@ -1489,8 +1515,8 @@ window.printPO = async (poId) => {
         <tr>
             <td style="padding:5px; border-bottom:1px solid #ddd;">${i.name}</td>
             <td style="padding:5px; border-bottom:1px solid #ddd; text-align:right;">${i.qty}</td>
-            <td style="padding:5px; border-bottom:1px solid #ddd; text-align:right;">${(i.cost || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-            <td style="padding:5px; border-bottom:1px solid #ddd; text-align:right;">${(i.total || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+            <td style="padding:5px; border-bottom:1px solid #ddd; text-align:right;">${(i.cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            <td style="padding:5px; border-bottom:1px solid #ddd; text-align:right;">${(i.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
         </tr>
     `).join('');
 
@@ -1504,7 +1530,7 @@ window.printPO = async (poId) => {
             <table style="width:100%; border-collapse: collapse; margin-top: 20px;">
                 <thead><tr style="background:#eee; text-align:left;"><th>Item</th><th style="text-align:right">Qty</th><th style="text-align:right">Cost</th><th style="text-align:right">Total</th></tr></thead>
                 <tbody>${itemsHtml}</tbody>
-                <tfoot><tr><td colspan="3" style="text-align:right; font-weight:bold; padding-top:10px;">Total:</td><td style="text-align:right; font-weight:bold; padding-top:10px;">${(po.total_amount || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td></tr></tfoot>
+                <tfoot><tr><td colspan="3" style="text-align:right; font-weight:bold; padding-top:10px;">Total:</td><td style="text-align:right; font-weight:bold; padding-top:10px;">${(po.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr></tfoot>
             </table>
         </body></html>
     `);
@@ -1563,7 +1589,7 @@ window.addItemToPo = async () => {
     po.total_amount = po.items.reduce((sum, i) => sum + i.total, 0);
     po._updatedAt = Date.now();
     await Repository.upsert('purchase_orders', po);
-    
+
     document.getElementById('po-add-item-modal').classList.add('hidden');
     await window.viewPO(_currentPoIdForAdd);
     await renderPOList();
@@ -1587,7 +1613,7 @@ window.removePoItem = async (poId, itemId) => {
     if (!confirm("Remove this item from the PO?")) return;
     const po = await Repository.get('purchase_orders', poId);
     if (!po) return;
-    
+
     po.items = po.items.filter(i => (i.item_id || i.id) !== itemId);
     po.total_amount = po.items.reduce((sum, i) => sum + i.total, 0);
     await Repository.upsert('purchase_orders', po);

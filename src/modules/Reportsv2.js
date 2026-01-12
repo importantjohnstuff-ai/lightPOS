@@ -567,8 +567,11 @@ async function renderShiftDetail(shiftId) {
 
     txs.forEach(tx => {
         // Sales: Cash payments by this user
-        if (tx.user_email === userEmail && !tx.is_voided && tx.payment_method === 'Cash') {
-            calcSales += (tx.total_amount || 0);
+        if (tx.user_email === userEmail && !tx.is_voided) {
+            const pm = (tx.payment_method || 'Cash').toLowerCase();
+            if (pm === 'cash') {
+                calcSales += (tx.total_amount || 0);
+            }
         }
 
         // Exchanges: Processed by this user (check array)
@@ -590,10 +593,16 @@ async function renderShiftDetail(shiftId) {
     // Detail Header (in Metrics Area)
     metricsContainer.innerHTML = `
         <div class="p-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
-            <button id="btn-back-shifts" class="flex items-center text-gray-600 hover:text-blue-600 transition font-medium">
-                <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-                Back to List
-            </button>
+            <div class="flex gap-2">
+                <button id="btn-back-shifts" class="flex items-center text-gray-600 hover:text-blue-600 transition font-medium px-3 py-1 rounded hover:bg-white border border-transparent hover:border-gray-200">
+                    <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                    Back to List
+                </button>
+                <button id="btn-view-shift-txs" class="flex items-center text-blue-600 hover:text-blue-800 transition font-medium px-3 py-1 rounded bg-blue-50 hover:bg-blue-100 border border-blue-200">
+                    <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg>
+                    View Transactions
+                </button>
+            </div>
             <div class="text-right">
                 <div class="text-sm text-gray-500">Shift ID: <span class="font-mono text-xs">${fullShift.id.slice(0, 8)}...</span></div>
                 <div class="font-bold text-gray-800">${new Date(fullShift.start_time).toLocaleString()}</div>
@@ -629,7 +638,7 @@ async function renderShiftDetail(shiftId) {
 
         <!-- Detailed Reconciliation Bar -->
         <div class="grid grid-cols-3 gap-2 px-4 pb-4 text-center text-xs text-gray-600">
-             <div class="flex items-center justify-center gap-2 bg-gray-50 rounded py-1 px-2 border border-gray-100">
+             <div class="flex items-center justify-center gap-2 bg-gray-50 rounded py-1 px-2 border border-gray-100 cursor-help" title="Based on ${txs.filter(t => t.payment_method === 'Cash').length} Cash Transactions">
                 <span>Total Cash Sales:</span>
                 <span class="font-bold text-gray-800">₱${calcSales.toFixed(2)}</span>
              </div>
@@ -727,6 +736,164 @@ async function renderShiftDetail(shiftId) {
     document.getElementById("btn-back-shifts").addEventListener("click", () => {
         renderShiftReports(lastShiftData);
     });
+    document.getElementById("btn-view-shift-txs").addEventListener("click", () => {
+        showShiftTransactions(fullShift);
+    });
+}
+
+// --- Drill Down Views ---
+
+async function showShiftTransactions(shift) {
+    const db = await dbPromise;
+    const startTime = new Date(shift.start_time);
+    const endTime = shift.end_time ? new Date(shift.end_time) : new Date();
+
+    // Fetch transactions for this shift
+    const txs = await db.transactions
+        .where('timestamp').between(startTime.toISOString(), endTime.toISOString(), true, true)
+        .reverse()
+        .toArray();
+
+    // Filter to user (optional, but good for accuracy)
+    const userTxs = txs.filter(t => t.user_email === shift.user_id && !t.is_voided);
+
+    const contentContainer = document.getElementById("report-modal-content");
+    const metricsContainer = document.getElementById("report-metrics-container");
+
+    // Update Header for context
+    metricsContainer.innerHTML = `
+        <div class="p-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+             <button id="btn-back-shift-detail" class="flex items-center text-gray-600 hover:text-blue-600 transition font-medium">
+                <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                Back to Shift
+            </button>
+            <div class="text-right">
+                <div class="text-xs text-gray-500">Shift Transactions</div>
+                <div class="font-bold text-gray-800">${userTxs.length} Transactions</div>
+            </div>
+        </div>
+    `;
+
+    document.getElementById("btn-back-shift-detail").addEventListener("click", () => renderShiftDetail(shift.id));
+
+    if (userTxs.length === 0) {
+        contentContainer.innerHTML = `<div class="p-10 text-center text-gray-500">No transactions found for this shift.</div>`;
+        return;
+    }
+
+    contentContainer.innerHTML = `
+        <div class="overflow-hidden border border-gray-200 rounded-lg">
+            <table class="min-w-full bg-white">
+                <thead class="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                        <th class="py-2 px-4 text-left text-xs font-semibold text-gray-600 uppercase">Time</th>
+                        <th class="py-2 px-4 text-left text-xs font-semibold text-gray-600 uppercase">Type</th>
+                        <th class="py-2 px-4 text-center text-xs font-semibold text-gray-600 uppercase">Method</th>
+                        <th class="py-2 px-4 text-right text-xs font-semibold text-gray-600 uppercase">Total</th>
+                         <th class="py-2 px-4 text-right text-xs font-semibold text-gray-600 uppercase"></th>
+                    </tr>
+                </thead>
+                <tbody class="text-sm divide-y divide-gray-100">
+                    ${userTxs.map(tx => `
+                        <tr class="hover:bg-blue-50 cursor-pointer transition-colors tx-row" data-id="${tx.id}">
+                            <td class="py-3 px-4 text-gray-700 whitespace-nowrap">${new Date(tx.timestamp).toLocaleTimeString()}</td>
+                            <td class="py-3 px-4">
+                                <span class="bg-blue-100 text-blue-800 text-[10px] px-2 py-1 rounded-full font-bold">SALE</span>
+                            </td>
+                            <td class="py-3 px-4 text-center text-gray-600 text-xs">${tx.payment_method || 'Cash'}</td>
+                            <td class="py-3 px-4 text-right font-bold text-gray-800">₱${(tx.total_amount || 0).toFixed(2)}</td>
+                             <td class="py-3 px-4 text-right text-gray-400">→</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    contentContainer.querySelectorAll('.tx-row').forEach(row => {
+        row.addEventListener('click', () => {
+            const tx = userTxs.find(t => t.id == row.dataset.id); // Loose select for ID
+            if (tx) showTransactionDetails(tx, shift);
+        });
+    });
+}
+
+function showTransactionDetails(tx, shift) {
+    const contentContainer = document.getElementById("report-modal-content");
+    const metricsContainer = document.getElementById("report-metrics-container");
+
+    // Update Header
+    metricsContainer.innerHTML = `
+        <div class="p-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
+             <button id="btn-back-tx-list" class="flex items-center text-gray-600 hover:text-blue-600 transition font-medium">
+                <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                Back to Transactions
+            </button>
+            <div class="text-right">
+                <div class="text-xs text-gray-500">Transaction ID</div>
+                <div class="font-mono text-sm font-bold text-gray-800">#${tx.id}</div>
+            </div>
+        </div>
+    `;
+
+    document.getElementById("btn-back-tx-list").addEventListener("click", () => showShiftTransactions(shift));
+
+    const items = tx.items || [];
+
+    contentContainer.innerHTML = `
+        <div class="p-4 bg-white rounded-lg border shadow-sm max-w-2xl mx-auto mt-4">
+            <div class="flex justify-between items-center mb-4 border-b pb-4">
+                <div>
+                    <div class="text-sm text-gray-500">Date</div>
+                    <div class="font-bold">${new Date(tx.timestamp).toLocaleString()}</div>
+                </div>
+                 <div class="text-right">
+                    <div class="text-sm text-gray-500">Payment</div>
+                    <div class="font-bold text-blue-600 uppercase">${tx.payment_method || 'Cash'}</div>
+                </div>
+            </div>
+
+            <table class="min-w-full text-sm mb-6">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="py-2 px-3 text-left font-medium text-gray-600">Item</th>
+                        <th class="py-2 px-3 text-center font-medium text-gray-600">Qty</th>
+                        <th class="py-2 px-3 text-right font-medium text-gray-600">Price</th>
+                        <th class="py-2 px-3 text-right font-medium text-gray-600">Total</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    ${items.map(item => `
+                        <tr>
+                            <td class="py-2 px-3 text-gray-800">
+                                <div class="font-medium">${item.name}</div>
+                                <div class="text-[10px] text-gray-500">${item.barcode || ''}</div>
+                            </td>
+                            <td class="py-2 px-3 text-center text-gray-600">x${item.qty}</td>
+                            <td class="py-2 px-3 text-right text-gray-600">₱${item.price.toFixed(2)}</td>
+                            <td class="py-2 px-3 text-right font-bold text-gray-800">₱${(item.price * item.qty).toFixed(2)}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+                <tfoot class="border-t border-gray-200">
+                    <tr>
+                        <td colspan="3" class="py-3 px-3 text-right font-bold text-gray-600">Total</td>
+                        <td class="py-3 px-3 text-right font-bold text-xl text-blue-700">₱${(tx.total_amount || 0).toFixed(2)}</td>
+                    </tr>
+                     ${tx.cash_received ? `
+                    <tr>
+                        <td colspan="3" class="py-1 px-3 text-right text-gray-500 text-xs">Cash Tendered</td>
+                        <td class="py-1 px-3 text-right text-gray-600 text-xs">₱${tx.cash_received.toFixed(2)}</td>
+                    </tr>
+                    <tr>
+                        <td colspan="3" class="py-1 px-3 text-right text-gray-500 text-xs">Change</td>
+                        <td class="py-1 px-3 text-right text-gray-600 text-xs">₱${(tx.change || 0).toFixed(2)}</td>
+                    </tr>
+                    ` : ''}
+                </tfoot>
+            </table>
+        </div>
+    `;
 }
 
 function renderStockMovement(movements) {

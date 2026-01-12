@@ -10,7 +10,7 @@ const use_sqlite = false;
 
 // Dynamically set database name based on the URL directory (e.g., /lightPOS/ -> lightPOS_DB)
 // This ensures that copies of the app in different folders use separate local databases.
-const pathSegments = window.location.pathname.split('/').filter(Boolean);
+const pathSegments = globalThis.location.pathname.split('/').filter(Boolean);
 const dbName = (pathSegments[0] || 'lightPOS') + '_DB';
 
 let repository;
@@ -62,11 +62,13 @@ if (use_sqlite) {
 }
 
 // Global error handler for unhandled database exceptions
-window.addEventListener('unhandledrejection', (event) => {
-    if (event.reason && event.reason.name && event.reason.name.includes('Error')) {
-        handleError(event.reason, 'Database Global');
-    }
-});
+if (typeof window !== 'undefined') {
+    window.addEventListener('unhandledrejection', (event) => {
+        if (event.reason && event.reason.name && event.reason.name.includes('Error')) {
+            handleError(event.reason, 'Database Global');
+        }
+    });
+}
 
 if (!use_sqlite) {
     dbPromise.then(db => { // Access the Dexie instance from the promise
@@ -74,7 +76,7 @@ if (!use_sqlite) {
             console.warn("Database version change detected in another tab. Closing connection...");
             db.close();
             alert("The system has been updated. This tab will now reload.");
-            window.location.reload();
+            if (typeof window !== 'undefined') window.location.reload();
         });
 
         db.on('blocked', function (event) {
@@ -89,7 +91,7 @@ if (!use_sqlite) {
             console.error("Database upgrade failed due to schema change. Wiping local data for a fresh start...");
             db.delete().then(() => {
                 console.log("Database deleted. Reloading...");
-                window.location.reload();
+                if (typeof window !== 'undefined') window.location.reload();
             });
         }).catch(err => {
             console.error("Failed to open db:", err);

@@ -2,7 +2,7 @@ import { checkPermission, requestManagerApproval } from "../auth.js";
 import { checkActiveShift, requireShift, showCloseShiftModal, recordRemittance } from "./shift.js";
 import { addNotification } from "../services/notification-service.js";
 import { getSystemSettings } from "./settings.js";
-import { generateUUID } from "../utils.js";
+import { generateUUID, showToast as showGlobalToast } from "../utils.js";
 import { dbRepository as Repository } from "../db.js";
 import { SyncEngine } from "../services/SyncEngine.js";
 
@@ -429,8 +429,7 @@ async function renderPosInterface(content) {
             </div>
         </div>
 
-        <!-- Toast Container -->
-        <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
 
         <!-- Checkout Modal -->
         <div id="modal-checkout" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50">
@@ -711,7 +710,7 @@ async function renderPosInterface(content) {
                 e.target.focus();
             } else {
                 playBeep(220, 0.3, 'sawtooth'); // Bad beep
-                showToast("Item not found", true);
+                showToast("Item not found", 'error');
             }
         }
     });
@@ -1731,6 +1730,56 @@ function handleGridNavigation(e, index, totalItems) {
     }
 }
 
+
+async function ensureStockViaBreakdown(item, requiredQty) {
+    if (item.stock_level >= requiredQty) return false;
+    if (!item.parent_id) return false;
+
+    const parent = allItems.find(p => p.id === item.parent_id);
+    if (!parent) return false;
+
+    const deficit = requiredQty - item.stock_level;
+    const factor = parseFloat(item.conv_factor) || 1;
+    const parentsNeeded = Math.ceil(deficit / factor);
+
+    // Recursively ensure parent has enough stock
+    // We try to fulfill 'parentsNeeded', but if we can't get all, we take what we can.
+    await ensureStockViaBreakdown(parent, parentsNeeded);
+
+    // After attempting recursion, check what we actually have available to break
+    const parentsToBreak = Math.min(parent.stock_level, parentsNeeded);
+
+    if (parentsToBreak > 0) {
+        const qtyCreated = parentsToBreak * factor;
+
+        // Update Memory State
+        parent.stock_level -= parentsToBreak;
+        item.stock_level += qtyCreated;
+
+        // Persist DB
+        await Promise.all([Repository.upsert('items', parent), Repository.upsert('items', item)]);
+
+        // Log Movements
+        const user = JSON.parse(localStorage.getItem('pos_user'))?.email || 'system';
+        const timestamp = new Date().toISOString();
+
+        await Repository.upsert('stock_movements', {
+            id: generateUUID(), item_id: parent.id, item_name: parent.name, timestamp,
+            type: 'Conversion', qty: -parentsToBreak, user, reason: `Recursive Breakdown > ${item.name}`
+        });
+
+        await Repository.upsert('stock_movements', {
+            id: generateUUID(), item_id: item.id, item_name: item.name, timestamp,
+            type: 'Conversion', qty: qtyCreated, user, reason: `Recursive Breakdown < ${parent.name}`
+        });
+
+        showGlobalToast(`Auto-breakdown: ${parentsToBreak} ${parent.name} -> ${item.name}`);
+        return true;
+    }
+
+    return false;
+}
+
 function parseSearchTerm(val) {
     const regex = /^(\d+)\*(.*)$/;
     const match = val.match(regex);
@@ -1746,41 +1795,12 @@ async function addToCart(item, qty = 1) {
     // Hide last transaction summary when starting a new sale
     document.getElementById("last-transaction").classList.add("hidden");
 
-    // Auto-Breakdown Logic: Still useful to keep inventory accurate where possible
-    if ((item.stock_level < qty) && item.parent_id) {
-        const parent = allItems.find(p => p.id === item.parent_id);
-        if (parent && parent.stock_level > 0) {
-            const factor = parseFloat(item.conv_factor) || 1;
-            const neededQty = qty - item.stock_level;
-            // Calculate how many parents we need to break to cover the deficit
-            const parentsToBreak = Math.min(parent.stock_level, Math.ceil(neededQty / factor));
-
-            if (parentsToBreak > 0) {
-                const qtyCreated = parentsToBreak * factor;
-                parent.stock_level -= parentsToBreak;
-                item.stock_level += qtyCreated;
-
-                // Persist to Dexie immediately so state is saved
-                await Promise.all([Repository.upsert('items', parent), Repository.upsert('items', item)]);
-
-                // Log Movements for Audit
-                const user = JSON.parse(localStorage.getItem('pos_user'))?.email || 'system';
-                const timestamp = new Date().toISOString();
-
-                await Repository.upsert('stock_movements', {
-                    id: generateUUID(), item_id: parent.id, item_name: parent.name, timestamp,
-                    type: 'Conversion', qty: -parentsToBreak, user, reason: `Auto-breakdown for ${item.name}`
-                });
-                await Repository.upsert('stock_movements', {
-                    id: generateUUID(), item_id: item.id, item_name: item.name, timestamp,
-                    type: 'Conversion', qty: qtyCreated, user, reason: `Auto-breakdown from ${parent.name}`
-                });
-
-                showToast(`Auto-converted ${parentsToBreak} ${parent.name} to ${qtyCreated} ${item.name}`);
-
-                // Refresh Grid to show new stock levels
-                filterItems(document.getElementById("pos-search").value);
-            }
+    // Auto-Breakdown Logic (Recursive)
+    if (item.stock_level < qty) {
+        const breakdownOccurred = await ensureStockViaBreakdown(item, qty);
+        if (breakdownOccurred) {
+            // Refresh Grid to show new stock levels if breakdown happened
+            filterItems(document.getElementById("pos-search").value);
         }
     }
 
@@ -1925,25 +1945,7 @@ function renderCart() {
 }
 
 function showToast(message, isError = false) {
-    const container = document.getElementById("toast-container");
-    if (!container) return;
-
-    const toast = document.createElement("div");
-    toast.className = `${isError ? 'bg-red-600' : 'bg-green-600'} text-white px-4 py-2 rounded shadow-lg text-sm transition-all duration-300 opacity-0 transform translate-y-2`;
-    toast.textContent = message;
-
-    container.appendChild(toast);
-
-    // Animate in
-    requestAnimationFrame(() => {
-        toast.classList.remove("opacity-0", "translate-y-2");
-    });
-
-    // Remove after 3s
-    setTimeout(() => {
-        toast.classList.add("opacity-0", "translate-y-2");
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
+    showGlobalToast(message, isError ? 'error' : 'success');
 }
 
 function openCheckout() {
