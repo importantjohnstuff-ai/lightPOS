@@ -103,7 +103,7 @@ function generateShiftReports(payload) {
     filteredShifts.forEach(s => {
         const sStart = new Date(s.start_time);
         const sEnd = s.end_time ? new Date(s.end_time) : new Date();
-        const userEmail = s.user_id;
+        const userEmailNormalized = (s.user_id || "").trim().toLowerCase();
 
         // 1. Calculate Sales (Cash only) for this shift
         let shiftSales = 0;
@@ -112,9 +112,10 @@ function generateShiftReports(payload) {
         if (transactions && transactions.length) {
             transactions.forEach(tx => {
                 const txTime = new Date(tx.timestamp);
+                const txUserNormalized = (tx.user_email || "").trim().toLowerCase();
 
-                // Regular Sales
-                if (tx.user_email === userEmail && txTime >= sStart && txTime <= sEnd && !tx.is_voided) {
+                // Regular Sales matching normalized user and time
+                if (txUserNormalized === userEmailNormalized && txTime >= sStart && txTime <= sEnd && !tx.is_voided) {
                     const pm = (tx.payment_method || 'Cash').toLowerCase();
                     if (pm === 'cash') {
                         shiftSales += parseFloat(tx.total_amount || 0);
@@ -125,7 +126,8 @@ function generateShiftReports(payload) {
                 if (tx.exchanges && Array.isArray(tx.exchanges)) {
                     tx.exchanges.forEach(exch => {
                         const exchTime = new Date(exch.timestamp);
-                        if (exchTime >= sStart && exchTime <= sEnd && exch.processed_by === userEmail) {
+                        const exchUserNormalized = (exch.processed_by || "").trim().toLowerCase();
+                        if (exchUserNormalized === userEmailNormalized && exchTime >= sStart && exchTime <= sEnd) {
                             const returnedTotal = (exch.returned || []).reduce((sum, item) => sum + (parseFloat(item.selling_price || 0) * (parseFloat(item.qty) || 1)), 0);
                             const takenTotal = (exch.taken || []).reduce((sum, item) => sum + (parseFloat(item.selling_price || 0) * (parseFloat(item.qty) || 1)), 0);
                             shiftExchangeCash += (takenTotal - returnedTotal);
@@ -140,27 +142,32 @@ function generateShiftReports(payload) {
 
         // 3. Dynamic Expected Cash (Gross Accountability)
         // Formula: Opening + Sales + Exchanges + Adjustments
-        const dynamicExpected = (parseFloat(s.opening_cash) || 0) + shiftSales + shiftExchangeCash + shiftAdjustments;
+        const opening = parseFloat(s.opening_cash || 0);
+        const dynamicExpectedAccountability = opening + shiftSales + shiftExchangeCash + shiftAdjustments;
 
         // 4. Turnover & Variance
         const closing = parseFloat(s.closing_cash || 0);
-        const cashout = (s.remittances || []).reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
-        const expenses = (s.closing_receipts || []).reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+        const cashoutTotalInShiftObj = (s.remittances || []).reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+        const expensesTotalInShiftObj = (s.closing_receipts || []).reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
 
-        const turnover = closing + cashout + expenses;
-        const variance = (s.status === 'closed') ? (turnover - dynamicExpected) : 0;
+        // Expected in Drawer = Accountability - Cashout - Expenses
+        const expectedInDrawer = dynamicExpectedAccountability - cashoutTotalInShiftObj - expensesTotalInShiftObj;
+
+        const turnover = closing + cashoutTotalInShiftObj + expensesTotalInShiftObj;
+        const variance = (s.status === 'closed') ? (turnover - dynamicExpectedAccountability) : 0;
 
         // Cache results back to shift object for the mapper
-        s._dynamicExpected = dynamicExpected;
+        s._dynamicExpected = expectedInDrawer; // We show "Expected in Drawer" in the table
         s._calculatedSales = shiftSales;
         s._calculatedVariance = variance;
         s._calculatedTurnover = turnover;
-        s._calculatedCashout = cashout;
+        s._calculatedCashout = cashoutTotalInShiftObj;
+        s._grossAccountability = dynamicExpectedAccountability;
 
         totalSalesGlobal += shiftSales;
         if (s.status === 'closed') {
             totalVariance += variance;
-            totalCashout += cashout;
+            totalCashout += cashoutTotalInShiftObj;
         }
     });
 
@@ -173,14 +180,15 @@ function generateShiftReports(payload) {
             user_id: s.user_id,
             opening_cash: parseFloat(s.opening_cash || 0),
             closing_cash: parseFloat(s.closing_cash || 0),
-            expected_cash: s._dynamicExpected, // Now dynamic!
+            expected_cash: s._dynamicExpected,
             cashout: s._calculatedCashout,
             total_sales: s._calculatedSales,
             adjustment_count: (s.adjustments || []).length,
             variance: s._calculatedVariance,
             turnover: s._calculatedTurnover,
             forced_closed: s.forced_closed,
-            remittance_total: s._calculatedCashout
+            remittance_total: s._calculatedCashout,
+            gross_accountability: s._grossAccountability
         })),
         summary: {
             totalShifts,

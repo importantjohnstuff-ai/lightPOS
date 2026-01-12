@@ -478,9 +478,6 @@ function renderShiftReports(data) {
                         <th class="py-2 px-4 border-b text-left text-xs font-semibold text-gray-600 uppercase">Started</th>
                         <th class="py-2 px-4 border-b text-left text-xs font-semibold text-gray-600 uppercase">User</th>
                          <th class="py-2 px-4 border-b text-center text-xs font-semibold text-gray-600 uppercase">Status</th>
-                        <th class="py-2 px-4 border-b text-right text-xs font-semibold text-gray-600 uppercase">Sales</th>
-                        <th class="py-2 px-4 border-b text-right text-xs font-semibold text-gray-600 uppercase">Expected</th>
-                        <th class="py-2 px-4 border-b text-right text-xs font-semibold text-gray-600 uppercase">Actual</th>
                         <th class="py-2 px-4 border-b text-right text-xs font-semibold text-gray-600 uppercase">Variance</th>
                     </tr>
                 </thead>
@@ -495,12 +492,7 @@ function renderShiftReports(data) {
                              <td class="py-3 px-4 text-center">
                                 <span class="px-2 py-1 rounded-full text-xs font-bold ${s.status === 'closed' ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-600'}">${s.status}</span>
                             </td>
-                            <td class="py-3 px-4 text-right font-mono font-bold text-blue-600">₱${(s.total_sales || 0).toFixed(2)}</td>
-                            <td class="py-3 px-4 text-right font-mono text-gray-500">₱${(s.expected_cash || 0).toFixed(2)}</td>
-                            <td class="py-3 px-4 text-right font-mono font-bold">₱${(s.closing_cash || 0).toFixed(2)}</td>
-                            <td class="py-3 px-4 text-right font-bold ${s.variance < 0 ? 'text-red-600' : (s.variance > 0 ? 'text-green-600' : 'text-gray-400')}">
-                                ${s.variance > 0 ? '+' : ''}${s.variance.toFixed(2)}
-                            </td>
+                            <td class="py-3 px-4 text-right font-mono font-bold ${s.variance < 0 ? 'text-red-500' : (s.variance > 0 ? 'text-green-600' : 'text-gray-400')}">${s.variance > 0 ? '+' : ''}${s.variance.toFixed(2)}</td>
                         </tr>
                     `).join('')}
                 </tbody>
@@ -555,22 +547,15 @@ async function renderShiftDetail(shiftId) {
     // Calculate Sales & Returns for Reconciliation
     const startTime = new Date(fullShift.start_time);
     const endTime = fullShift.end_time ? new Date(fullShift.end_time) : new Date();
-    const userEmail = fullShift.user_id;
-
-    // Fetch all transactions in range to filter for sales and exchanges
-    const txs = await db.transactions
-        .where('timestamp').between(startTime.toISOString(), endTime.toISOString(), true, true)
-        .toArray();
-
-    let calcSales = 0;
-    let calcExchange = 0;
+    const userEmailNormalized = (fullShift.user_id || "").trim().toLowerCase();
 
     txs.forEach(tx => {
+        const txUserNormalized = (tx.user_email || "").trim().toLowerCase();
         // Sales: Cash payments by this user
-        if (tx.user_email === userEmail && !tx.is_voided) {
+        if (txUserNormalized === userEmailNormalized && !tx.is_voided) {
             const pm = (tx.payment_method || 'Cash').toLowerCase();
             if (pm === 'cash') {
-                calcSales += (tx.total_amount || 0);
+                calcSales += (parseFloat(tx.total_amount) || 0);
             }
         }
 
@@ -578,7 +563,8 @@ async function renderShiftDetail(shiftId) {
         if (tx.exchanges && Array.isArray(tx.exchanges)) {
             tx.exchanges.forEach(exch => {
                 const exchTime = new Date(exch.timestamp);
-                if (exchTime >= startTime && exchTime <= endTime && exch.processed_by === userEmail) {
+                const exchUserNormalized = (exch.processed_by || "").trim().toLowerCase();
+                if (exchTime >= startTime && exchTime <= endTime && exchUserNormalized === userEmailNormalized) {
                     const returned = (exch.returned || []).reduce((s, i) => s + (parseFloat(i.selling_price || 0) * (parseFloat(i.qty) || 1)), 0);
                     const taken = (exch.taken || []).reduce((s, i) => s + (parseFloat(i.selling_price || 0) * (parseFloat(i.qty) || 1)), 0);
                     calcExchange += (taken - returned);
@@ -588,7 +574,13 @@ async function renderShiftDetail(shiftId) {
     });
 
     const netAdjustments = (fullShift.adjustments || []).reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
-    const calculatedExpected = (fullShift.opening_cash || 0) + calcSales + calcExchange + netAdjustments;
+    const remittances = fullShift.remittances || [];
+    const totalRemittances = remittances.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+    const expenses = fullShift.closing_receipts || [];
+    const totalExpenses = expenses.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+
+    const grossAccountability = (parseFloat(fullShift.opening_cash) || 0) + calcSales + calcExchange + netAdjustments;
+    const expectedInDrawer = grossAccountability - totalRemittances - totalExpenses;
 
     // Detail Header (in Metrics Area)
     metricsContainer.innerHTML = `
@@ -617,22 +609,25 @@ async function renderShiftDetail(shiftId) {
              </div>
              <div class="bg-gray-50 p-2 rounded border border-gray-200 relative group">
                 <div class="text-xs text-gray-500 uppercase">Expected</div>
-                <div class="font-bold text-gray-800">₱${(calculatedExpected).toFixed(2)}</div>
+                <div class="font-bold text-gray-800">₱${(expectedInDrawer).toFixed(2)}</div>
                 <!-- Tooltip for Breakdown -->
                 <div class="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-48 bg-gray-800 text-white text-xs rounded p-2 hidden group-hover:block z-20 shadow-lg text-left">
-                    <div>Op: ₱${(fullShift.opening_cash || 0).toFixed(2)}</div>
+                    <div>Op: ₱${(parseFloat(fullShift.opening_cash) || 0).toFixed(2)}</div>
                     <div>+ Sales: ₱${calcSales.toFixed(2)}</div>
                     <div>${calcExchange >= 0 ? '+' : '-'} Exch: ₱${Math.abs(calcExchange).toFixed(2)}</div>
                     <div>${netAdjustments >= 0 ? '+' : '-'} Adj: ₱${Math.abs(netAdjustments).toFixed(2)}</div>
+                    <div>- Remit: ₱${totalRemittances.toFixed(2)}</div>
+                    <div>- Exp: ₱${totalExpenses.toFixed(2)}</div>
+                    <div class="border-t mt-1 pt-1 font-bold">= Drawer: ₱${expectedInDrawer.toFixed(2)}</div>
                 </div>
              </div>
              <div class="bg-gray-50 p-2 rounded border border-gray-200">
                 <div class="text-xs text-gray-500 uppercase">Closing</div>
-                <div class="font-bold text-gray-800">₱${(fullShift.closing_cash || 0).toFixed(2)}</div>
+                <div class="font-bold text-gray-800">₱${(parseFloat(fullShift.closing_cash) || 0).toFixed(2)}</div>
              </div>
-             <div class="${(shift.variance < 0 ? 'bg-red-50 border-red-100 text-red-800' : 'bg-green-50 border-green-100 text-green-800')} p-2 rounded border">
+             <div class="${((fullShift.closing_cash + totalRemittances + totalExpenses - grossAccountability) < 0 ? 'bg-red-50 border-red-100 text-red-800' : 'bg-green-50 border-green-100 text-green-800')} p-2 rounded border">
                 <div class="text-xs opacity-75 uppercase">Variance</div>
-                <div class="font-bold">₱${(shift.variance || 0).toFixed(2)}</div>
+                <div class="font-bold">₱${((parseFloat(fullShift.closing_cash || 0) + totalRemittances + totalExpenses) - grossAccountability).toFixed(2)}</div>
              </div>
         </div>
 
@@ -654,9 +649,6 @@ async function renderShiftDetail(shiftId) {
     `;
 
     // Detail Body (Adjustments & Remittances)
-    const adjustments = fullShift.adjustments || [];
-    const remittances = fullShift.remittances || [];
-
     contentContainer.innerHTML = `
         <div class="space-y-6">
             <!-- Adjustments -->
