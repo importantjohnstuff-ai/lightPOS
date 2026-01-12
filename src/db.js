@@ -57,6 +57,9 @@ if (use_sqlite) {
     dexieDb.version(37).stores({
         supplier_config: 'supplier_id, delivery_cadence, lead_time_days, monthly_otb, sync_status, _version, _updatedAt, _deleted'
     });
+    dexieDb.version(38).stores({
+        items: '++id, name, barcode, category, supplier_id, updatedAt, sync_status, _version, _updatedAt, _deleted'
+    });
     repository = DexieRepository;
     dbPromise = Promise.resolve(dexieDb); // Resolve with the Dexie instance
 }

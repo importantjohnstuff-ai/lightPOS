@@ -173,22 +173,42 @@ async function auditCategory(categoryName, itemsInCat, validCategories, aiSettin
 }
 
 async function analyzeParents(items, aiSettings) {
-    self.postMessage({ type: 'progress', message: "Clustering items by name..." });
+    self.postMessage({ type: 'progress', message: "Clustering items by name (Fuzzy)..." });
 
-    // 1. Bundle items by name similarity (First 2 words)
-    const bundles = {};
+    // 1. Fuzzy Clustering
+    const clusters = [];
+    const THRESHOLD = 0.8; // Similarity threshold (0-1)
+
     items.forEach(item => {
-        // Normalize: lowercase, remove special chars except space/nums
-        const cleanName = item.name.toLowerCase().replace(/[^\w\s]/g, '');
-        const words = cleanName.split(/\s+/).filter(w => w.length > 0);
-        const key = words.slice(0, 2).join(" "); // First 2 words as key
+        // Normalize
+        const cleanName = item.name.toLowerCase().replace(/[^\w\s]/g, '').trim();
 
-        if (!bundles[key]) bundles[key] = [];
-        bundles[key].push(item);
+        // Find best cluster
+        let bestCluster = null;
+        let bestScore = 0;
+
+        for (const cluster of clusters) {
+            // Compare with the first item in cluster (representative)
+            const repName = cluster[0]._cleanName;
+            const score = getSimilarity(cleanName, repName);
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestCluster = cluster;
+            }
+        }
+
+        item._cleanName = cleanName; // Store temp
+
+        if (bestCluster && bestScore >= THRESHOLD) {
+            bestCluster.push(item);
+        } else {
+            clusters.push([item]);
+        }
     });
 
-    // 2. Filter out groups with only 1 item (no relationships possible)
-    const multiItemBundles = Object.values(bundles).filter(group => group.length > 1);
+    // 2. Filter out groups with only 1 item
+    const multiItemBundles = clusters.filter(group => group.length > 1);
 
     if (multiItemBundles.length === 0) {
         self.postMessage({ type: 'success', result: { links: [] } });
@@ -275,4 +295,35 @@ async function callLLM(settings, prompt) {
         content = content.split("```")[1].split("```")[0];
     }
     return JSON.parse(content);
+}
+
+// --- Helpers ---
+
+function getSimilarity(s1, s2) {
+    if (s1 === s2) return 1;
+    if (!s1 || !s2) return 0;
+    const longer = s1.length > s2.length ? s1 : s2;
+    const darker = longer.length;
+    if (darker === 0) return 1.0;
+    return (darker - levenshteinDistance(s1, s2)) / darker;
+}
+
+function levenshteinDistance(a, b) {
+    const matrix = [];
+    for (let i = 0; i <= b.length; i++) {
+        matrix[i] = [i];
+    }
+    for (let j = 0; j <= a.length; j++) {
+        matrix[0][j] = j;
+    }
+    for (let i = 1; i <= b.length; i++) {
+        for (let j = 1; j <= a.length; j++) {
+            if (b.charAt(i - 1) == a.charAt(j - 1)) {
+                matrix[i][j] = matrix[i - 1][j - 1];
+            } else {
+                matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1));
+            }
+        }
+    }
+    return matrix[b.length][a.length];
 }
