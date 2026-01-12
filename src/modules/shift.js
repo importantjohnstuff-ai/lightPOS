@@ -679,7 +679,7 @@ export function showCloseShiftModal(onSuccess) {
             showExpenseSelector((selectedExp) => {
                 sessionExpenses.push(selectedExp);
                 renderShiftUI();
-            });
+            }, sessionExpenses);
         });
 
         document.querySelectorAll(".btn-remove-session-exp").forEach(btn => {
@@ -709,14 +709,60 @@ export function showCloseShiftModal(onSuccess) {
                 if (active) {
                     if (!active.closing_receipts) active.closing_receipts = [];
                     for (const exp of sessionExpenses) {
-                        const expenseRecord = {
-                            id: generateUUID(),
-                            ...exp,
-                            date: new Date().toISOString().split('T')[0],
-                            user_id: active.user_id,
-                            created_at: new Date()
-                        };
-                        active.closing_receipts.push(expenseRecord);
+                        // If it's linked, we don't save it to the 'expenses' table again, just to the shift receipts
+                        if (exp._isLinked) {
+                            active.closing_receipts.push({
+                                ...exp,
+                                linked_expense_id: exp.id // Keep reference
+                            });
+                        } else {
+                            // New expense created in modal
+                            const expenseRecord = {
+                                id: generateUUID(),
+                                ...exp,
+                                date: new Date().toISOString().split('T')[0],
+                                user_id: active.user_id,
+                                created_at: new Date()
+                            };
+                            // Save to global expenses
+                            try {
+                                // Since we don't have a direct 'add' for expenses here without importing everything,
+                                // we assume we need to save it. But wait, if we add it here, we should also save it to DB.
+                                // The original code didn't seem to save to 'expenses' table explicitly?
+                                // Ah, the original code ONLY added to active.closing_receipts.
+                                // BUT usually expenses should be in the expense module too.
+                                // Let's check if the user wants them in the expense module.
+                                // "make sure to not add the expense receipts to the expense moudle" <- USER SAID THIS for the QUICK SELECT
+                                // But for NEW ones? The user said "add to expense receipts".
+                                // Actually, if I created a NEW one using "+ Add New", it probably SHOULD go to expenses?
+                                // Let's stick to the current logic for NEW ones (which seemed to just add to closing_receipts in the snippet provided, 
+                                // wait, let me re-read the snippet I saw earlier).
+
+                                // Re-reading snippet:
+                                // "Record session expenses to the shift and regular expense table"
+                                // "active.closing_receipts.push(expenseRecord);"
+                                // It seems it ONLY pushed to closing_receipts. It did NOT save to 'expenses' table separately unless SyncEngine/Repository handles deep nested upserts?
+                                // Repository.upsert('shifts', active) saves the shift.
+                                // If I want it in expenses table, I should save it there too.
+                                // However, the current code I read in Step 20 only updated 'shifts'. 
+                                // "Record session expenses to the shift and regular expense table" comment exists but I don't see the code saving to 'expenses' collection.
+                                // Wait, if I look at `expenses.js`, it fetches from `Repository.getAll('expenses')`.
+                                // If they are only in `shifts.closing_receipts`, they won't show in `expenses.js`.
+
+                                // User request: "in the close shift modal i want a button to quick select an expense to add to expense receipts but make sure to not add the expense receipts to the expense moudle"
+                                // This implies:
+                                // 1. Select existing expense -> Add to shift receipt. DO NOT create another expense record (duplicate).
+                                // 2. Add NEW expense -> Likely should behave as before.
+
+                                // So for _isLinked: TRUE, we just push to closing_receipts.
+                                // For _isLinked: FALSE (New), we currently just push to closing_receipts. 
+                                // If the original behavior was just pushing to closing_receipts, then we keep it.
+
+                                active.closing_receipts.push(expenseRecord);
+                            } catch (e) {
+                                console.error("Error saving new expense", e);
+                            }
+                        }
                     }
                     await Repository.upsert('shifts', active);
                     currentShift = active;
@@ -748,7 +794,7 @@ export function showCloseShiftModal(onSuccess) {
     renderShiftUI();
 }
 
-async function showExpenseSelector(onSelect) {
+async function showExpenseSelector(onSelect, excludeList = []) {
     const div = document.createElement("div");
     div.className = "fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-[110]"; // Higher z-index
 
@@ -756,8 +802,14 @@ async function showExpenseSelector(onSelect) {
     let expenses = [];
     try {
         const all = await Repository.getAll('expenses');
-        // Filter for specific date (today) or expand logic as needed
+        // Filter for specific date (today)
         expenses = all.filter(e => e.date === today);
+
+        // Filter out items that are already in the current session
+        if (excludeList && excludeList.length > 0) {
+            const excludeIds = new Set(excludeList.map(item => item.id)); // Use ID if available
+            expenses = expenses.filter(e => !excludeIds.has(e.id));
+        }
     } catch (e) {
         console.error("Error fetching expenses", e);
     }
