@@ -18,7 +18,7 @@ function showApp(user) {
     console.log("User authenticated:", user.email);
     loginView.classList.add("hidden");
     appContainer.classList.remove("hidden");
-    
+
     // Initialize App Shell
     renderSidebar();
     initRouter();
@@ -78,11 +78,11 @@ async function checkAppInitialization() {
             // Initialization Mode
             document.getElementById('login-view').classList.add('hidden');
             document.getElementById('init-view').classList.remove('hidden');
-            
+
             const initBtn = document.getElementById('btn-initialize');
             const newBtn = initBtn.cloneNode(true);
             initBtn.parentNode.replaceChild(newBtn, initBtn);
-            
+
             newBtn.addEventListener('click', initializeApplication);
         }
     } catch (error) {
@@ -136,7 +136,7 @@ async function initializeApplication() {
         };
 
         await Repository.upsert('users', defaultUser);
-        
+
         alert("Application Initialized Successfully!\n\nDefault Credentials:\nEmail: admin@lightpos.com\nPassword: admin123");
         window.location.reload();
     } catch (e) {
@@ -154,10 +154,10 @@ formLogin.addEventListener("submit", async (e) => {
     e.preventDefault();
     const email = document.getElementById("email").value.trim();
     const password = document.getElementById("password").value;
-    
+
     loginError.classList.add("hidden");
     console.log("Attempting login for:", email);
-    
+
     try {
         const result = await login(email, password);
         console.log("Login Result:", result);
@@ -180,3 +180,41 @@ btnGoogleLogin.addEventListener("click", async () => {
     loginError.classList.add("hidden");
     alert("Google Login is not supported in this version.");
 });
+
+// 4. Handle Dev Reset
+const btnDevReset = document.getElementById("btn-dev-reset");
+if (btnDevReset) {
+    btnDevReset.addEventListener("click", async () => {
+        if (confirm("⚠️ WARNING: This will WIPE ALL DATA and reset the system to factory defaults. Are you sure?")) {
+            try {
+                btnDevReset.textContent = "Resetting...";
+                btnDevReset.disabled = true;
+
+                // 1. Wipe Server
+                const response = await fetch('api/sync.php?action=reset_all', { method: 'POST' });
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    // 2. Wipe Local Dexie
+                    try {
+                        const db = await dbPromise;
+                        await db.delete(); // Delete the entire database
+                        alert("System Reset Complete! Page will reload.");
+                        window.location.reload();
+                    } catch (e) {
+                        console.error("Local wipe error:", e);
+                        alert("Server reset, but local wipe failed. Please clear browser data manually.");
+                        window.location.reload();
+                    }
+                } else {
+                    throw new Error(result.message || "Unknown server error");
+                }
+            } catch (e) {
+                console.error("Reset Error:", e);
+                alert("Reset Failed: " + e.message);
+                btnDevReset.textContent = "⚠️ Reset System (Dev)";
+                btnDevReset.disabled = false;
+            }
+        }
+    });
+}
