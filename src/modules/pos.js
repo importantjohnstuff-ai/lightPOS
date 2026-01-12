@@ -1816,6 +1816,16 @@ async function addToCart(item, qty = 1) {
 function removeFromCart(index) {
     posCart.splice(index, 1);
     renderCart();
+
+    // Auto-focus search box after deletion
+    const desktopSearch = document.getElementById("pos-search");
+    const mobileSearch = document.getElementById("mobile-pos-search");
+
+    if (desktopSearch && (desktopSearch.offsetWidth > 0 || desktopSearch.offsetHeight > 0)) {
+        desktopSearch.focus();
+    } else if (mobileSearch && (mobileSearch.offsetWidth > 0 || mobileSearch.offsetHeight > 0)) {
+        mobileSearch.focus();
+    }
 }
 
 function updateQty(index, newQty) {
