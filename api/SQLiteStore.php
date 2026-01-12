@@ -122,37 +122,44 @@ class SQLiteStore {
         }
 
         if (empty($dbRecord[$idColumn])) {
-            // The original JSON record might have the key, even if it's not a DB column (e.g. 'id' for sync_metadata)
-            if (isset($record[$idColumn])) {
-                $dbRecord[$idColumn] = $record[$idColumn];
-            } else {
-                throw new Exception("Record for collection '$collection' is missing required ID field '$idColumn'");
-            }
-        }
-
+    public function upsert($collection, $dbRecord) {
         $columns = array_keys($dbRecord);
-        // Use positional placeholders to avoid named-parameter edge cases across PDO drivers
-        $placeholders = array_fill(0, count($columns), '?');
+        $idColumn = $this->getIdColumn($collection);
 
-        // Bind params in the exact order of $columns
+        // 1. Try INSERT OR IGNORE
+        // Use positional placeholders
+        $placeholders = array_fill(0, count($columns), '?');
         $bindParams = array_values($dbRecord);
 
-        // Use excluded.column syntax to avoid PDO parameter duplication errors
-        // Filter out the ID column from the update set to avoid redundant updates
-        $updateColumns = array_filter($columns, fn($c) => $c !== $idColumn);
-        $updateSet = array_map(fn($c) => "$c = excluded.$c", $updateColumns);
+        $sql = "INSERT OR IGNORE INTO $collection (" . implode(', ', $columns) . ") 
+                VALUES (" . implode(', ', $placeholders) . ")";
+
+        // error_log("SQLiteStore::upsert INSERT: $sql"); 
         
-        $conflictAction = empty($updateSet) ? "DO NOTHING" : "DO UPDATE SET " . implode(', ', $updateSet);
-
-        $sql = "INSERT INTO $collection (" . implode(', ', $columns) . ") 
-                VALUES (" . implode(', ', $placeholders) . ")
-                ON CONFLICT($idColumn) $conflictAction";
-
-        error_log("SQLiteStore::upsert SQL: $sql");
-        error_log("SQLiteStore::upsert BindParams (positional): " . json_encode($bindParams));
-
         $stmt = $this->pdo->prepare($sql);
         $this->executeWithRetry($stmt, $bindParams);
+
+        // 2. If row wasn't inserted (rowCount == 0), it exists -> UPDATE
+        if ($stmt->rowCount() === 0) {
+            // Remove the ID from the SET clause (primary key shouldn't change)
+            $updateColumns = array_filter($columns, fn($c) => $c !== $idColumn);
+            $updateSet = array_map(fn($c) => "$c = ?", $updateColumns);
+            
+            if (!empty($updateSet)) {
+                $sqlUtils = "UPDATE $collection SET " . implode(', ', $updateSet) . " WHERE $idColumn = ?";
+                
+                // Prepare params for update: values for columns + id value at the end
+                $updateParams = [];
+                foreach ($updateColumns as $col) {
+                    $updateParams[] = $dbRecord[$col];
+                }
+                $updateParams[] = $dbRecord[$idColumn];
+
+                // error_log("SQLiteStore::upsert UPDATE: $sqlUtils");
+                $stmtUpdate = $this->pdo->prepare($sqlUtils);
+                $this->executeWithRetry($stmtUpdate, $updateParams);
+            }
+        }
     }
 
     public function delete($collection, $id) {
