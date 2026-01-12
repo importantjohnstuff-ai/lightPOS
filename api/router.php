@@ -4,6 +4,11 @@ header("Content-Type: application/json; charset=UTF-8");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With");
 
+// DEBUG: Enable error display to debug 500 crashes
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 // Add a special action to clear OPcache for debugging
 if (isset($_GET['action']) && $_GET['action'] === 'clear_opcache') {
     if (function_exists('opcache_reset')) {
