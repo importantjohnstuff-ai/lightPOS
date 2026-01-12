@@ -637,7 +637,9 @@ export function showCloseShiftModal(onSuccess) {
                     <div>
                         <div class="flex justify-between items-center mb-2">
                              <label class="text-[10px] font-black text-gray-400 uppercase">Expense Receipts</label>
-                             <button type="button" id="btn-add-modal-exp" class="text-[10px] font-black bg-red-50 text-red-600 px-2 py-1 rounded border border-red-200 hover:bg-red-100">+ Add Expense</button>
+                             <div class="flex gap-2">
+                                <button type="button" id="btn-add-receipt-main" class="text-[10px] font-black bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100">+ Add Receipt</button>
+                             </div>
                         </div>
                         <div id="session-expenses-list" class="max-h-40 overflow-y-auto">
                             ${expenseRows || '<div class="text-center py-4 text-gray-300 text-xs italic border-2 border-dashed rounded-lg">No receipts added</div>'}
@@ -662,13 +664,23 @@ export function showCloseShiftModal(onSuccess) {
                 </form>
             </div>
         `;
+        console.log("DEBUG: renderShiftUI generating body with buttons:", body.includes("btn-select-modal-exp") ? "YES" : "NO");
         div.innerHTML = body;
 
         // Bind inner actions
-        document.getElementById("btn-add-modal-exp").addEventListener("click", () => {
-            showMiniExpenseForm((newExp) => {
-                sessionExpenses.push(newExp);
-                renderShiftUI();
+        document.getElementById("btn-add-receipt-main").addEventListener("click", () => {
+            showAddReceiptPrompt((choice) => {
+                if (choice === 'existing') {
+                    showExpenseSelector((selectedExp) => {
+                        sessionExpenses.push(selectedExp);
+                        renderShiftUI();
+                    }, sessionExpenses);
+                } else if (choice === 'new') {
+                    showMiniExpenseForm((newExp) => {
+                        sessionExpenses.push(newExp);
+                        renderShiftUI();
+                    });
+                }
             });
         });
 
@@ -699,14 +711,29 @@ export function showCloseShiftModal(onSuccess) {
                 if (active) {
                     if (!active.closing_receipts) active.closing_receipts = [];
                     for (const exp of sessionExpenses) {
-                        const expenseRecord = {
-                            id: generateUUID(),
-                            ...exp,
-                            date: new Date().toISOString().split('T')[0],
-                            user_id: active.user_id,
-                            created_at: new Date()
-                        };
-                        active.closing_receipts.push(expenseRecord);
+                        // If it's linked, we don't save it to the 'expenses' table again, just to the shift receipts
+                        if (exp._isLinked) {
+                            active.closing_receipts.push({
+                                ...exp,
+                                linked_expense_id: exp.id // Keep reference
+                            });
+                        } else {
+                            // New expense created in modal
+                            const expenseRecord = {
+                                id: generateUUID(),
+                                ...exp,
+                                date: new Date().toISOString().split('T')[0],
+                                user_id: active.user_id,
+                                created_at: new Date()
+                            };
+                            // Save to global expenses
+                            try {
+                                await Repository.upsert('expenses', expenseRecord);
+                                active.closing_receipts.push(expenseRecord);
+                            } catch (e) {
+                                console.error("Error saving new expense", e);
+                            }
+                        }
                     }
                     await Repository.upsert('shifts', active);
                     currentShift = active;
@@ -1443,4 +1470,37 @@ export async function printZReport(data) {
         </html>
     `);
     printWindow.document.close();
+}
+
+function showAddReceiptPrompt(onChoice) {
+    const div = document.createElement("div");
+    div.className = "fixed inset-0 bg-gray-900 bg-opacity-90 flex items-center justify-center z-[70]";
+    div.innerHTML = `
+        <div class="bg-white rounded-lg shadow-xl p-6 w-80 transform scale-in">
+            <h3 class="font-bold text-gray-800 mb-4 text-center">Add Receipt</h3>
+            <div class="flex flex-col gap-3">
+                <button id="btn-choice-existing" class="bg-blue-50 text-blue-700 border border-blue-200 py-3 rounded-lg font-bold hover:bg-blue-100 transition">
+                    Select from Expenses
+                </button>
+                <div class="text-center text-xs text-gray-400 font-bold">- OR -</div>
+                <button id="btn-choice-new" class="bg-red-50 text-red-700 border border-red-200 py-3 rounded-lg font-bold hover:bg-red-100 transition">
+                    New Shift Expense
+                </button>
+                <button id="btn-choice-cancel" class="mt-2 text-gray-500 hover:text-gray-700 text-sm font-medium">Cancel</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(div);
+
+    document.getElementById("btn-choice-existing").addEventListener("click", () => {
+        div.remove();
+        onChoice('existing');
+    });
+
+    document.getElementById("btn-choice-new").addEventListener("click", () => {
+        div.remove();
+        onChoice('new');
+    });
+
+    document.getElementById("btn-choice-cancel").addEventListener("click", () => div.remove());
 }
