@@ -145,6 +145,10 @@ if ($method === 'POST' && isset($_GET['action']) && $_GET['action'] === 'reset_a
         foreach ($toWipe as $col) {
             $store->wipe($col);
         }
+        $store->commit();
+
+        // Transaction 2: Seed (Must be separate to avoid lock contention on XAMPP/SQLite)
+        $store->beginTransaction();
 
         // Re-seed Admin
         $defaultAdmin = [
@@ -154,7 +158,7 @@ if ($method === 'POST' && isset($_GET['action']) && $_GET['action'] === 'reset_a
             "is_active" => true,
             "_version" => 1,
             "_updatedAt" => round(microtime(true) * 1000),
-            "_deleted" => false,
+            "_deleted" => 0,
             "permissions_json" => json_encode([
                 "pos" => ["read" => true, "write" => true], "customers" => ["read" => true, "write" => true],
                 "items" => ["read" => true, "write" => true], "suppliers" => ["read" => true, "write" => true],
@@ -162,7 +166,7 @@ if ($method === 'POST' && isset($_GET['action']) && $_GET['action'] === 'reset_a
                 "reports" => ["read" => true, "write" => true], "expenses" => ["read" => true, "write" => true],
                 "users" => ["read" => true, "write" => true], "shifts" => ["read" => true, "write" => true],
                 "migrate" => ["read" => true, "write" => true], "returns" => ["read" => true, "write" => true],
-                "settings" => ["read" => true, "write" => true]
+                "settings" => ["read" => true, "write" => true], "purchase_orders" => ["read" => true, "write" => true]
             ])
         ];
         $store->upsert('users', $defaultAdmin);

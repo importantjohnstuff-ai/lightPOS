@@ -9,13 +9,16 @@ class SQLiteStore {
 
     public function __construct() {
         $this->pdo = Database::getInstance()->getConnection();
-        // Enable WAL mode for better concurrency and set timeout for locks
-        $this->pdo->exec("PRAGMA journal_mode=WAL;");
+        // Disable WAL mode to prevent locking issues on some filesystems
+        $this->pdo->exec("PRAGMA journal_mode=DELETE;");
         $this->pdo->exec("PRAGMA busy_timeout = 5000;");
-        // Enable emulated prepares to handle parameter reuse and older drivers better
         // Disable emulated prepares to use native SQLite binding (prevents Error 21 in some envs)
-        $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
-        error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=false");
+        try {
+            $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
+            error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=false");
+        } catch (Exception $e) {
+            error_log("SQLiteStore warning: Could not set ATTR_EMULATE_PREPARES: " . $e->getMessage());
+        }
         $this->collections = [
             'items', 'transactions', 'users', 'customers', 'suppliers',
             'shifts', 'expenses', 'returns', 'stock_movements',
@@ -110,16 +113,8 @@ class SQLiteStore {
             }
         }
 
-        $idColumn = 'id';
-        if ($collection === 'users') {
-            $idColumn = 'email';
-        } elseif ($collection === 'sync_metadata') {
-            $idColumn = 'key';
-        } elseif ($collection === 'supplier_config') {
-            $idColumn = 'supplier_id';
-        } elseif ($collection === 'inventory_metrics') {
-            $idColumn = 'sku_id';
-        }
+        // Use the centralized helper to determine ID column
+        $idColumn = $this->getIdColumn($collection);
 
         if (empty($dbRecord[$idColumn])) {
             // The original JSON record might have the key, even if it's not a DB column (e.g. 'id' for sync_metadata)
@@ -130,46 +125,88 @@ class SQLiteStore {
             }
         }
 
+        // Validation: Ensure mandatory fields (like ID) are present
+        if (!isset($dbRecord[$idColumn])) {
+            throw new Exception("Missing ID column '$idColumn' for collection '$collection'");
+        }
+
         $columns = array_keys($dbRecord);
 
-        // 1. Try INSERT OR IGNORE
-        // Use positional placeholders
-        $placeholders = array_fill(0, count($columns), '?');
-        $bindParams = array_values($dbRecord);
-
-        $sql = "INSERT OR IGNORE INTO $collection (" . implode(', ', $columns) . ") 
-                VALUES (" . implode(', ', $placeholders) . ")";
+        // 1. Check if record exists
+        $sqlCheck = "SELECT 1 FROM $collection WHERE $idColumn = ?";
+        $stmtCheck = $this->pdo->prepare($sqlCheck);
+        $stmtCheck->execute([$dbRecord[$idColumn]]);
+        $exists = $stmtCheck->fetchColumn();
+        $stmtCheck->closeCursor(); 
         
-        $stmt = $this->pdo->prepare($sql);
-        $this->executeWithRetry($stmt, $bindParams);
-
-        // 2. If row wasn't inserted (rowCount == 0), it exists -> UPDATE
-        if ($stmt->rowCount() === 0) {
-            // Remove the ID from the SET clause (primary key shouldn't change)
+        if ($exists) {
+            // UPDATE
             $updateColumns = array_filter($columns, fn($c) => $c !== $idColumn);
             $updateSet = array_map(fn($c) => "$c = ?", $updateColumns);
             
             if (!empty($updateSet)) {
                 $sqlUtils = "UPDATE $collection SET " . implode(', ', $updateSet) . " WHERE $idColumn = ?";
+                $stmtUpdate = $this->pdo->prepare($sqlUtils);
                 
-                // Prepare params for update: values for columns + id value at the end
                 $updateParams = [];
                 foreach ($updateColumns as $col) {
                     $updateParams[] = $dbRecord[$col];
                 }
                 $updateParams[] = $dbRecord[$idColumn];
 
-                $stmtUpdate = $this->pdo->prepare($sqlUtils);
-                $this->executeWithRetry($stmtUpdate, $updateParams);
+                // Explicitly bind update params
+                foreach ($updateParams as $i => $val) {
+                    $type = PDO::PARAM_STR;
+                    if (is_null($val)) { 
+                        $type = PDO::PARAM_NULL; 
+                    } elseif (is_bool($val)) { 
+                        // Convert bool to 0/1
+                        $val = $val ? 1 : 0;
+                    }
+                    
+                    // Force cast to string for all non-null values to properly leverage PARAM_STR
+                    if ($type === PDO::PARAM_STR && !is_null($val)) {
+                        $val = (string)$val;
+                    }
+                    
+                    $stmtUpdate->bindValue($i + 1, $val, $type);
+                }
+
+                $this->executeWithRetry($stmtUpdate, null, $updateParams);
             }
+        } else {
+            // INSERT
+            // Use positional placeholders
+            $placeholders = array_fill(0, count($columns), '?');
+            $bindParams = array_values($dbRecord);
+
+            $sql = "INSERT INTO $collection (" . implode(', ', $columns) . ") 
+                    VALUES (" . implode(', ', $placeholders) . ")";
+            
+            $stmt = $this->pdo->prepare($sql);
+            
+            // Explicitly bind insert params
+            foreach ($bindParams as $i => $val) {
+                $type = PDO::PARAM_STR;
+                if (is_null($val)) {
+                    $type = PDO::PARAM_NULL;
+                } elseif (is_bool($val)) {
+                     $val = $val ? 1 : 0;
+                }
+                
+                // Force cast to string
+                if ($type === PDO::PARAM_STR && !is_null($val)) {
+                    $val = (string)$val;
+                }
+
+                $stmt->bindValue($i + 1, $val, $type);
+            }
+            
+            $this->executeWithRetry($stmt, null, $bindParams);
         }
     }
 
-    public function delete($collection, $id) {
-        if (!in_array($collection, $this->collections)) {
-            throw new Exception("Unknown collection: $collection");
-        }
-        
+    public function getIdColumn($collection) {
         $idColumn = 'id';
         if ($collection === 'users') {
             $idColumn = 'email';
@@ -180,9 +217,19 @@ class SQLiteStore {
         } elseif ($collection === 'inventory_metrics') {
             $idColumn = 'sku_id';
         }
+        return $idColumn;
+    }
+
+    public function delete($collection, $id) {
+        if (!in_array($collection, $this->collections)) {
+            throw new Exception("Unknown collection: $collection");
+        }
+        
+        $idColumn = $this->getIdColumn($collection);
         
         $stmt = $this->pdo->prepare("UPDATE $collection SET _deleted = 1, _updatedAt = ?, _version = COALESCE(_version, 0) + 1 WHERE $idColumn = ?");
         $this->executeWithRetry($stmt, [round(microtime(true) * 1000), $id]);
+        $stmt->closeCursor();
     }
 
     public function wipe($collection) {
@@ -191,13 +238,18 @@ class SQLiteStore {
         }
         $stmt = $this->pdo->prepare("DELETE FROM $collection");
         $this->executeWithRetry($stmt);
+        $stmt->closeCursor();
     }
 
-    private function executeWithRetry($stmt, $params = []) {
+    private function executeWithRetry($stmt, $params = null, $debugParams = null) {
         $retries = 0;
         while (true) {
             try {
-                $stmt->execute($params);
+                if ($params !== null) {
+                    $stmt->execute($params);
+                } else {
+                    $stmt->execute();
+                }
                 return;
             } catch (PDOException $e) {
                 // Check for "database is locked" error (SQLSTATE HY000, Error 5)
@@ -207,7 +259,8 @@ class SQLiteStore {
                     continue;
                 }
                 // Enhance error message with SQL and Params for debugging
-                $debugMsg = $e->getMessage() . " | SQL: " . $stmt->queryString . " | Params: " . json_encode($params);
+                $logParams = $params ?? $debugParams ?? 'null';
+                $debugMsg = $e->getMessage() . " | SQL: " . $stmt->queryString . " | Params: " . json_encode($logParams);
                 throw new Exception($debugMsg, (int)$e->getCode(), $e);
             }
         }

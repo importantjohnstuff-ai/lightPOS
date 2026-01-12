@@ -11,7 +11,17 @@ try {
     $store = new PDO('sqlite::memory:');
     $store->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     // Determine native vs emulated default
-    echo "ATTR_EMULATE_PREPARES default: " . ($store->getAttribute(PDO::ATTR_EMULATE_PREPARES) ? 'true' : 'false') . "\n";
+    try {
+        echo "ATTR_EMULATE_PREPARES default: " . ($store->getAttribute(PDO::ATTR_EMULATE_PREPARES) ? 'true' : 'false') . "\n";
+    } catch (Exception $e) {
+        echo "ATTR_EMULATE_PREPARES check failed: " . $e->getMessage() . "\n";
+    }
+
+    echo "\n--- Users in DB ---\n";
+    $stmt = $db->query("SELECT email, name FROM users");
+    $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    print_r($users);
+
 } catch (Exception $e) {
     echo "DB Error: " . $e->getMessage() . "\n";
 }

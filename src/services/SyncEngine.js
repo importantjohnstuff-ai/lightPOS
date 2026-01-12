@@ -44,7 +44,7 @@ export const SyncEngine = {
     async push() {
         const db = await dbPromise;
         const outboxItems = await db.outbox.toArray();
-        console.log("SyncEngine: Outbox items to push:", outboxItems.map(i => ({id: i.id, collection: i.collection, docId: i.docId, payloadKeys: Object.keys(i.payload)})));
+        console.log("SyncEngine: Outbox items to push:", outboxItems.map(i => ({ id: i.id, collection: i.collection, docId: i.docId, payloadKeys: Object.keys(i.payload) })));
         if (outboxItems.length === 0) return;
 
         const response = await fetch(SYNC_URL, {
@@ -91,9 +91,9 @@ export const SyncEngine = {
             await this.performFullRestore();
             return; // Stop normal pull process
         }
-        
+
         const { deltas, serverTime } = data;
-        
+
         console.log(`SyncEngine: Received serverTime: ${serverTime}`);
         console.log('SyncEngine: Received deltas from server:', JSON.parse(JSON.stringify(deltas)));
 
@@ -104,28 +104,84 @@ export const SyncEngine = {
 
             try {
                 await db.transaction('rw', [db[collection], db.outbox], async () => {
-                    for (const item of items) {
-                        const idField = db[collection].schema.primKey.name;
-                        const docId = item[idField];
-                        const local = await db[collection].get(docId);
-                        
-                        const localVersion = local?._version || 0;
-                        const serverVersion = item._version || 0;
-                        const localUpdated = local?._updatedAt || 0;
-                        const serverUpdated = item._updatedAt || 0;
+                    const idField = db[collection].schema.primKey.name;
+                    // Prepare IDs for bulk fetch
+                    const serverItemsMap = new Map();
+                    const idsToFetch = [];
 
-                        const shouldUpdate = !local || serverVersion > localVersion || (serverVersion === localVersion && serverUpdated > localUpdated);
+                    for (const item of items) {
+                        const docId = item[idField];
+                        if (docId !== undefined && docId !== null) {
+                            idsToFetch.push(docId);
+                            serverItemsMap.set(docId, item);
+                        }
+                    }
+
+                    // Bulk Get existing local items
+                    const localItems = await db[collection].bulkGet(idsToFetch);
+
+                    const itemsToPut = [];
+                    const docIdsToClearOutbox = [];
+
+                    for (let i = 0; i < idsToFetch.length; i++) {
+                        const docId = idsToFetch[i];
+                        const serverItem = serverItemsMap.get(docId);
+                        const localItem = localItems[i]; // Corresponding local item (or undefined)
+
+                        const localVersion = localItem?._version || 0;
+                        const serverVersion = serverItem._version || 0;
+                        const localUpdated = localItem?._updatedAt || 0;
+                        const serverUpdated = serverItem._updatedAt || 0;
+
+                        // Conflict Resolution:
+                        // Update if:
+                        // 1. Local doesn't exist
+                        // 2. Server version is strictly higher
+                        // 3. Versions match but Server is newer (Clock Drift / LWW tie-breaker)
+                        const shouldUpdate = !localItem ||
+                            serverVersion > localVersion ||
+                            (serverVersion === localVersion && serverUpdated > localUpdated);
 
                         if (shouldUpdate) {
-                            console.log(`SyncEngine: Updating local record ${docId} in ${collection}. Server: v${serverVersion}@${serverUpdated}, Local: ${local ? `v${localVersion}@${localUpdated}` : 'null'}`);
-                            await db[collection].put(item);
-                            await db.outbox.where({ collection, docId }).delete();
+                            // logging every single item is too noisy for bulk ops
+                            // console.log(`SyncEngine: Queueing update for ${docId}`);
+                            itemsToPut.push(serverItem);
+                            docIdsToClearOutbox.push(docId);
+                        }
+                    }
+
+                    if (itemsToPut.length > 0) {
+                        console.log(`SyncEngine: Bulk updating ${itemsToPut.length} items in [${collection}]`);
+                        await db[collection].bulkPut(itemsToPut);
+
+                        // Bulk clear outbox for these items
+                        // We need to find the Primary Keys of the outbox entries that match [collection + docId]
+                        // Since 'outbox' has a compound index [collection+docId], we can use it.
+                        // However, anyOf() with compound keys can be tricky in some Dexie versions.
+                        // Safe fallback: Find them using complex query or simple iteration if index exists.
+
+                        try {
+                            const outboxKeysToDelete = [];
+                            // Optimization: Fetch all outbox items for this collection (usually few) and filter in memory
+                            // This avoids N queries.
+                            const outboxItems = await db.outbox.where('collection').equals(collection).toArray();
+
+                            for (const outboxItem of outboxItems) {
+                                if (docIdsToClearOutbox.includes(outboxItem.docId)) {
+                                    outboxKeysToDelete.push(outboxItem.id);
+                                }
+                            }
+
+                            if (outboxKeysToDelete.length > 0) {
+                                await db.outbox.bulkDelete(outboxKeysToDelete);
+                            }
+                        } catch (e) {
+                            console.warn("Soft error clearing outbox:", e);
                         }
                     }
                 });
             } catch (error) {
-                console.error(`SyncEngine: FAILED to process collection [${collection}]. The entire transaction for this collection was rolled back.`, error);
-                console.error(`SyncEngine: Data for this collection was:`, items);
+                console.error(`SyncEngine: FAILED to process collection [${collection}]. Transaction rolled back.`, error);
             }
         }
 
@@ -155,9 +211,9 @@ export const SyncEngine = {
 
             // Clear local timestamp to force a full re-sync to get consistent server timestamps
             await db.sync_metadata.delete('last_pull_timestamp');
-            
+
             window.dispatchEvent(new CustomEvent('restore-finished'));
-            
+
             // Trigger a new sync to align everything
             this.sync();
 

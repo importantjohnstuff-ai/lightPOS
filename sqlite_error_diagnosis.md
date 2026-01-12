@@ -554,4 +554,41 @@ Despite previous attempts, the error persisted on the Fedora server environment 
 - Add an automated test for the user creation + login path (unit/integration) to catch regressions. (TODO #6)
 - Consider a small repair job (`repair_users`) for any imported users whose `password_hash` was stored incorrectly; the endpoint is already available.
 
-> ✅ Status: Fix implemented, verified on the reproduced flow, and documented here.
+## System Reset & Admin Update Failure (Persistent Error 21) (Current)
+
+### Problem Description
+1.  **System Reset Failure:** The "Reset System (Dev)" button failed to complete, often leaving the database locked or the client in a broken state. `repro_reset.php` confirmed that the operation hung or crashed when transitioning from `wipe` (DELETE) to `upsert` (SELECT/INSERT) within a single transaction.
+2.  **Admin Update Failure:** Even after fixing the reset, updating the default admin's permissions failed with `SQLSTATE[HY000]: General error: 21 bad parameter or other API misuse`. This occurred specifically when the `role` field was `NULL`.
+3.  **Environment:** XAMPP on Fedora (PHP 8.2.12, SQLite 3).
+
+### Diagnosis
+1.  **Locking / WAL Mode:** The XAMPP environment's SQLite driver exhibited severe locking issues when using WAL (Write-Ahead Logging) mode, particularly when mixing heavy write operations (DELETE FROM table) with read operations in the same transaction. The database would "hang" indefinitely.
+2.  **Split Transactions:** The `reset_all` logic was originally a single large transaction. The driver could not handle the "Wipe" (Delete) followed immediately by "Seed" (Insert) in the same transaction block without locking up.
+3.  **Emulated Prepares & NULLs:** The persistent `Error 21` during updates was traced to `PDO::ATTR_EMULATE_PREPARES = true`. In this specific environment/driver combination, enabling emulated prepares caused `NULL` values (like the admin `role`) to be bound incorrectly (likely as empty strings or invalid types) during `UPDATE` operations, triggering the "bad parameter" error.
+
+### Correct Fix
+1.  **Disable WAL Mode:** We explicitly disabled WAL mode in `SQLiteStore.php`, `router.php`, and `Database.php` (`PRAGMA journal_mode=DELETE;`). This forced synchronous, simpler locking which resolved the "hangs".
+2.  **Split Transactions:** We refactored `api/sync.php` (and verified with `repro_reset.php`) to strictly separate the "Wipe" phase from the "Seed" phase into two distinct, committed transactions.
+    ```php
+    // Transaction 1: Wipe
+    $store->beginTransaction();
+    $store->wipe(...);
+    $store->commit();
+    
+    // Transaction 2: Seed
+    $store->beginTransaction();
+    $store->upsert(...);
+    $store->commit();
+    ```
+3.  **Disable Emulated Prepares:** We set `PDO::ATTR_EMULATE_PREPARES` to `false` in `SQLiteStore.php`. This forces the use of **Native SQLite Binding**, which correctly handles `NULL` parameters and resolved the `Error 21` during user updates.
+
+### Verification Tools
+Two reproduction scripts were created and preserved for future debugging:
+-   `api/repro_reset.php`: Simulates the separated Wipe/Seed transactions to verify the Reset logic.
+-   `api/repro_update_admin.php`: Simulates updating a user with a `NULL` role to verify the fix for Error 21.
+
+### Update (User Creation / INSERT Error 21)
+Even after the above fixes, `INSERT` operations (specifically creating new users) continued to fail with `Error 21` on boolean and large integer fields. 
+**Final Resolution:** We modified `SQLiteStore.php` to bind **ALL** scalar values (Integers, Floats, Booleans, Strings) as `PDO::PARAM_STR` (except `NULL` which remains `PDO::PARAM_NULL`). SQLite's affinity system handles the conversion from string to the correct type (INTEGER/REAL) reliably, bypassing the strict type checking bugs in the PHP PDO driver for this environment.
+> ✅ Status: Verified with `api/repro_insert_user.php`.
+

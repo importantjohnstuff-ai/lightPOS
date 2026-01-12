@@ -24,8 +24,8 @@ require_once __DIR__ . '/SQLiteStore.php';
 
 // --- START Schema Initialization Logic ---
 function ensureSchema($pdo) {
-    // Enable WAL mode for better concurrency
-    $pdo->exec("PRAGMA journal_mode=WAL;");
+    // Disable WAL mode to prevent locking issues on some filesystems
+    $pdo->exec("PRAGMA journal_mode=DELETE;");
     $pdo->exec("PRAGMA busy_timeout = 5000;");
 
     // Check if the 'settings' table exists
@@ -55,6 +55,27 @@ function ensureSchema($pdo) {
         if ($schemaPo) {
             $pdo->exec($schemaPo);
             error_log("PO Module schema initialized successfully.");
+        }
+    }
+
+    // Check if 'sync_metadata' exists (Critical for sync)
+    $stmtMeta = $pdo->prepare("PRAGMA table_info(sync_metadata)");
+    $stmtMeta->execute();
+    $metaCols = $stmtMeta->fetchAll(PDO::FETCH_COLUMN, 1);
+
+    if (empty($metaCols)) {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS sync_metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            _updatedAt INTEGER,
+            _deleted INTEGER DEFAULT 0
+        )");
+        error_log("DB Migration: Created sync_metadata table.");
+    } else {
+        // Fix for missing _deleted column if created by previous broken patch
+        if (!in_array('_deleted', $metaCols)) {
+            $pdo->exec("ALTER TABLE sync_metadata ADD COLUMN _deleted INTEGER DEFAULT 0");
+            error_log("DB Migration: Added _deleted column to sync_metadata.");
         }
     }
 

@@ -10,7 +10,8 @@ class Database {
         try {
             $this->pdo = new PDO('sqlite:' . $dbPath);
             $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            $this->pdo->exec('PRAGMA journal_mode=WAL;');
+            $this->pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+            $this->pdo->exec("PRAGMA journal_mode=DELETE;");
         } catch (PDOException $e) {
             // Handle connection error
             die("Database connection failed: " . $e->getMessage());

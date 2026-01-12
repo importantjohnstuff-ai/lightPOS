@@ -1767,6 +1767,7 @@ async function downloadLocalBackup() {
         'adjustments', 'stockins', 'suspended_transactions', 'notifications', 'users'
     ];
 
+    const db = await dbPromise;
     const backupData = {};
     const btn = document.getElementById("btn-download-backup-local");
     const originalText = btn.innerHTML;
@@ -1841,16 +1842,24 @@ async function handleRestoreBackup(e) {
         backupData = backupData.settings.deltas;
     }
 
-    const collections = Object.entries(backupData);
-    let totalCollections = 0;
-    let totalItems = 0;
-    let details = "";
+    const syncableCollections = [
+        'items', 'transactions', 'customers', 'suppliers', 'expenses',
+        'shifts', 'returns', 'stock_movements', 'stock_logs',
+        'adjustments', 'stockins', 'suspended_transactions', 'users'
+    ];
+
+    let businessItemsPlanned = 0;
+    let businessItemsRestored = 0;
 
     for (const [name, data] of collections) {
         if (Array.isArray(data)) {
             totalCollections++;
             totalItems += data.length;
             details += `- ${name}: ${data.length}\n`;
+
+            if (syncableCollections.includes(name)) {
+                businessItemsPlanned += data.length;
+            }
         }
     }
 
@@ -1860,7 +1869,7 @@ async function handleRestoreBackup(e) {
         return;
     }
 
-    let summary = `Backup Analysis:\n\nCollections: ${totalCollections}\nTotal Items: ${totalItems}\n\nDetails:\n${details}`;
+    let summary = `Backup Analysis:\n\nCollections: ${totalCollections}\nTotal Items: ${totalItems}\n(Business Records: ${businessItemsPlanned})\n\nDetails:\n${details}`;
 
     if (isDryRun) {
         summary += `\n[DRY RUN MODE]: No data will be written to the server. This is a simulation to check file integrity.\n\nProceed with simulation?`;
@@ -1901,6 +1910,8 @@ async function handleRestoreBackup(e) {
         for (const [fileName, data] of collections) {
             if (!Array.isArray(data)) continue;
 
+            const isSyncable = syncableCollections.includes(fileName);
+
             // Update timestamps to ensure the sync engine sees this as "new" data
             data.forEach(item => {
                 if (item && typeof item === 'object') {
@@ -1935,6 +1946,8 @@ async function handleRestoreBackup(e) {
 
                 const currentChunkSize = chunk.length;
                 itemsRestoredSoFar += currentChunkSize;
+                if (isSyncable) businessItemsRestored += currentChunkSize;
+
                 const percent = totalItemsToRestore > 0 ? Math.round((itemsRestoredSoFar / totalItemsToRestore) * 100) : 100;
 
                 if (progressBar) progressBar.style.width = `${percent}%`;
@@ -1963,10 +1976,29 @@ async function handleRestoreBackup(e) {
             });
         }
 
+        const completionMessage = `Restore processing complete!
+
+Summary:
+----------------------------------------
+Input File Name: ${file.name}
+Input File Size: ${(file.size / 1024).toFixed(2)} KB
+Collections Found: ${totalCollections}
+
+Planned Restore:
+- Total Items: ${totalItemsToRestore}
+- Business Records: ${businessItemsPlanned} (Counts towards Sync)
+
+Actual Execution:
+- Items Sent: ${itemsRestoredSoFar}
+- Business Sent: ${businessItemsRestored}
+----------------------------------------
+
+${isDryRun ? "Simulation ended. No changes marked on server." : "System restored successfully! The app will now reload and re-sync all data."}`;
+
         if (isDryRun) {
             if (progressBar) progressBar.style.width = "100%";
             if (progressText) progressText.textContent = "Simulation complete! No errors found.";
-            alert("Dry Run Successful!\n\nThe backup file is valid and can be safely restored.");
+            alert(completionMessage);
         } else {
             if (progressBar) progressBar.style.width = "100%";
             if (progressText) progressText.textContent = "Restore complete! Reloading...";
@@ -1975,7 +2007,7 @@ async function handleRestoreBackup(e) {
             // by deleting the local database.
             await db.delete();
 
-            alert("System restored successfully! The app will now reload and re-sync all data from the server.");
+            alert(completionMessage);
             window.location.reload();
         }
     } catch (error) {

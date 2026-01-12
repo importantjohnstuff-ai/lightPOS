@@ -110,8 +110,8 @@ export function requireShift(callback) {
     }
 }
 
-export async function calculateExpectedCash(shift = currentShift, txList = null) {
-    if (!shift) return 0;
+export async function getShiftFinancials(shift = currentShift, txList = null) {
+    if (!shift) return { opening: 0, sales: 0, adjustments: 0, returns_net: 0, remittances: 0, gross: 0, expected_in_drawer: 0 };
 
     // Query local Dexie transactions for this user since shift start
     const startTime = new Date(shift.start_time);
@@ -123,7 +123,7 @@ export async function calculateExpectedCash(shift = currentShift, txList = null)
         const txTime = new Date(tx.timestamp);
         return txTime >= startTime && txTime <= endTime &&
             tx.user_email === userEmail && !tx.is_voided &&
-            tx.payment_method === 'Cash';
+            (tx.payment_method === 'Cash' || !tx.payment_method);
     });
 
     let totalSales = 0;
@@ -135,7 +135,15 @@ export async function calculateExpectedCash(shift = currentShift, txList = null)
     const adjustments = shift.adjustments || [];
     const totalAdjustments = adjustments.reduce((sum, adj) => sum + (parseFloat(adj.amount) || 0), 0);
 
-    // Calculate returns/exchanges impact
+    // Remittances
+    const remittances = shift.remittances || [];
+    const totalRemittances = remittances.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+
+    // Expenses (Closing Receipts)
+    const expenses = shift.closing_receipts || [];
+    const totalExpenses = expenses.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+
+    // Calculate returns/exchanges impact (Net Cash Effect)
     let totalExchangeCash = 0;
     allTransactions.forEach(tx => {
         if (tx.exchanges && Array.isArray(tx.exchanges)) {
@@ -145,6 +153,8 @@ export async function calculateExpectedCash(shift = currentShift, txList = null)
                 if (exchTime >= startTime && exchTime <= endTime && exch.processed_by === userEmail) {
                     const returnedTotal = (exch.returned || []).reduce((sum, item) => sum + (item.selling_price * (item.qty || 1)), 0);
                     const takenTotal = (exch.taken || []).reduce((sum, item) => sum + (item.selling_price * (item.qty || 1)), 0);
+                    // If Taken > Returned, customer paid more cash (Positive)
+                    // If Returned > Taken, store paid cash out (Negative)
                     const net = takenTotal - returnedTotal;
                     totalExchangeCash += net;
                 }
@@ -152,7 +162,26 @@ export async function calculateExpectedCash(shift = currentShift, txList = null)
         }
     });
 
-    return (shift.opening_cash || 0) + totalSales + totalAdjustments + totalExchangeCash;
+    const gross = (shift.opening_cash || 0) + totalSales + totalAdjustments + totalExchangeCash;
+    // Expected in Drawer = Gross - Remittances - Expenses
+    const expected_in_drawer = gross - totalRemittances - totalExpenses;
+
+    return {
+        opening: shift.opening_cash || 0,
+        sales: totalSales,
+        adjustments: totalAdjustments,
+        remittances: totalRemittances,
+        expenses: totalExpenses,
+        returns_net: totalExchangeCash,
+        gross_accountability: gross,
+        expected_in_drawer: expected_in_drawer
+    };
+}
+
+export async function calculateExpectedCash(shift = currentShift, txList = null) {
+    // Legacy support: Returns Gross Accountability (for history table logic)
+    const fins = await getShiftFinancials(shift, txList);
+    return fins.gross_accountability;
 }
 
 export async function recordRemittance(amount, reason) {
@@ -187,29 +216,35 @@ export async function recordRemittance(amount, reason) {
 export async function closeShift(closingCash) {
     if (!currentShift) return;
 
-    const expected = await calculateExpectedCash();
     const closing = parseFloat(closingCash);
+    const financials = await getShiftFinancials(currentShift);
 
     const updatedShift = {
         ...currentShift,
         end_time: new Date(),
         closing_cash: closing,
-        expected_cash: expected,
+        expected_cash: financials.gross_accountability, // Persist gross for history logic
         status: "closed"
     };
 
     await Repository.upsert('shifts', updatedShift);
     SyncEngine.sync();
 
+    // Print Z-Report
+    await printZReport({ ...updatedShift, ...financials });
+
     window.dispatchEvent(new CustomEvent('shift-updated'));
 
+    // Variance = (Drawer + Remits + Expenses) - Gross
+    const variance = (closing + financials.remittances + financials.expenses) - financials.gross_accountability;
+
     // Check for discrepancy notification threshold
-    await checkShiftDiscrepancy(expected, closing);
+    await checkShiftDiscrepancy(financials.expected_in_drawer, closing);
 
     const summary = {
-        expected: expected,
+        expected: financials.expected_in_drawer,
         actual: closing,
-        difference: closing - expected
+        difference: variance
     };
 
     currentShift = null;
@@ -436,7 +471,7 @@ async function selectShift(shift) {
             </div>${shift.status === 'open' ? '' : `
             <div class="p-3 bg-gray-50 rounded border">
                 <div class="text-[10px] text-gray-500 uppercase font-bold">Expected Cash</div>
-                <div class="text-lg font-bold text-blue-600">₱${expected.toFixed(2)}</div>
+                <div class="text-lg font-bold text-blue-600">₱${(expected - (shift.remittances?.reduce((s, r) => s + parseFloat(r.amount), 0) || 0)).toFixed(2)}</div>
             </div>`}
             <div class="p-3 bg-gray-50 rounded border">
                 <div class="text-[10px] text-gray-500 uppercase font-bold">Cashout/Remit</div>
@@ -1191,5 +1226,77 @@ async function printTransaction(tx, isReprint = false) {
         ${showHR ? '<div class="hr"></div>' : ''}
         <div style="text-align:right;font-weight:bold;">Total: ${tx.total_amount.toFixed(2)}</div>
     </body></html>`);
+    printWindow.document.close();
+}
+
+export async function printZReport(data) {
+    // data contains shift object mixed with financials
+    const settings = await getSystemSettings();
+    const store = settings.store || { name: "LightPOS", data: "" };
+
+    const defaultPrint = {
+        paper_width: 76,
+        header: { font_size: 14, font_family: "monospace", bold: true },
+        body: { font_size: 12, font_family: "monospace" }
+    };
+    const p = { ...defaultPrint, ...(settings.print || {}) };
+    const getStyle = (s) => `font-size: ${s.font_size}px; font-family: ${s.font_family}; font-weight: ${s.bold ? 'bold' : 'normal'};`;
+
+    const printWindow = window.open('', '_blank', 'width=300,height=600');
+
+    // Variance calculation for Receipt
+    // Variance = (Closing + Remits + Expenses) - (Open + Sales + Adj + Returns)
+    const accountability = data.gross_accountability;
+    const turnover = data.closing_cash + data.remittances + (data.expenses || 0);
+    const variance = turnover - accountability;
+
+    printWindow.document.write(`
+        <html>
+        <head>
+            <style>
+                @page { margin: 0; }
+                body { width: ${p.paper_width}mm; padding: 5mm; margin: 0; ${getStyle(p.body)} color: #000; }
+                .text-center { text-align: center; }
+                .text-right { text-align: right; }
+                .bold { font-weight: bold; }
+                .hr { border-bottom: 1px dashed #000; margin: 5px 0; }
+                table { width: 100%; border-collapse: collapse; }
+                .header-sec { ${getStyle(p.header)} }
+                .row { display: flex; justify-content: space-between; }
+                .indent { padding-left: 10px; }
+            </style>
+        </head>
+        <body onload="window.print();window.close();">
+            <div class="text-center header-sec">
+                ${store.name}<br>Z-REPORT (Shift Close)
+            </div>
+            <div class="hr"></div>
+            <div>
+                User: ${data.user_id}<br>
+                Start: ${new Date(data.start_time).toLocaleString()}<br>
+                End: ${new Date().toLocaleString()}
+            </div>
+            <div class="hr"></div>
+            
+            <div class="bold">CASH BREAKDOWN</div>
+            <div class="row"><span>Opening Cash:</span> <span>${data.opening.toFixed(2)}</span></div>
+            <div class="row"><span>+ Sales (Cash):</span> <span>${data.sales.toFixed(2)}</span></div>
+            <div class="row"><span>+ Adjustments:</span> <span>${data.adjustments.toFixed(2)}</span></div>
+            <div class="row"><span>+ Net Returns:</span> <span>${data.returns_net.toFixed(2)}</span></div>
+            <div class="hr"></div>
+            <div class="row bold"><span>= Gross Account:</span> <span>${data.gross_accountability.toFixed(2)}</span></div>
+            <div class="row"><span>- Remittances:</span> <span>${data.remittances.toFixed(2)}</span></div>
+            <div class="row"><span>- Expenses:</span> <span>${(data.expenses || 0).toFixed(2)}</span></div>
+            <div class="hr" style="border-bottom: 2px solid #000"></div>
+            <div class="row bold" style="font-size: 1.1em"><span>EXPECTED IN DRAWER:</span> <span>${data.expected_in_drawer.toFixed(2)}</span></div>
+            <br>
+            <div class="row"><span>ACTUAL COUNT:</span> <span>${data.closing_cash.toFixed(2)}</span></div>
+            <div class="row bold"><span>VARIANCE:</span> <span>${variance.toFixed(2)}</span></div>
+            
+            <div class="hr"></div>
+            <div class="text-center italic">Signature: ________________</div>
+        </body>
+        </html>
+    `);
     printWindow.document.close();
 }
