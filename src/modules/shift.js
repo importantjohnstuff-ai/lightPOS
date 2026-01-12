@@ -111,7 +111,7 @@ export function requireShift(callback) {
 }
 
 export async function getShiftFinancials(shift = currentShift, txList = null) {
-    if (!shift) return { opening: 0, sales: 0, adjustments: 0, returns_net: 0, remittances: 0, gross: 0, expected_in_drawer: 0 };
+    if (!shift) return { opening: 0, sales: 0, adjustments: 0, returns_net: 0, remittances: 0, expenses: 0, gross_accountability: 0, expected_in_drawer: 0 };
 
     // Query local Dexie transactions for this user since shift start
     const startTime = new Date(shift.start_time);
@@ -123,19 +123,19 @@ export async function getShiftFinancials(shift = currentShift, txList = null) {
         const txTime = new Date(tx.timestamp);
         return txTime >= startTime && txTime <= endTime &&
             tx.user_email === userEmail && !tx.is_voided &&
-            (tx.payment_method === 'Cash' || !tx.payment_method);
+            (tx.payment_method?.toLowerCase() === 'cash' || !tx.payment_method);
     });
 
     let totalSales = 0;
     transactions.forEach(tx => {
-        totalSales += tx.total_amount || 0;
+        totalSales += parseFloat(tx.total_amount || 0);
     });
 
     // Add adjustments
     const adjustments = shift.adjustments || [];
     const totalAdjustments = adjustments.reduce((sum, adj) => sum + (parseFloat(adj.amount) || 0), 0);
 
-    // Remittances
+    // Remittances (Cash-out)
     const remittances = shift.remittances || [];
     const totalRemittances = remittances.reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
 
@@ -151,8 +151,8 @@ export async function getShiftFinancials(shift = currentShift, txList = null) {
                 const exchTime = new Date(exch.timestamp);
                 // Check if exchange happened during this shift by this user
                 if (exchTime >= startTime && exchTime <= endTime && exch.processed_by === userEmail) {
-                    const returnedTotal = (exch.returned || []).reduce((sum, item) => sum + (item.selling_price * (item.qty || 1)), 0);
-                    const takenTotal = (exch.taken || []).reduce((sum, item) => sum + (item.selling_price * (item.qty || 1)), 0);
+                    const returnedTotal = (exch.returned || []).reduce((sum, item) => sum + (parseFloat(item.selling_price || 0) * (parseFloat(item.qty) || 1)), 0);
+                    const takenTotal = (exch.taken || []).reduce((sum, item) => sum + (parseFloat(item.selling_price || 0) * (parseFloat(item.qty) || 1)), 0);
                     // If Taken > Returned, customer paid more cash (Positive)
                     // If Returned > Taken, store paid cash out (Negative)
                     const net = takenTotal - returnedTotal;
@@ -162,12 +162,12 @@ export async function getShiftFinancials(shift = currentShift, txList = null) {
         }
     });
 
-    const gross = (shift.opening_cash || 0) + totalSales + totalAdjustments + totalExchangeCash;
+    const gross = (parseFloat(shift.opening_cash) || 0) + totalSales + totalAdjustments + totalExchangeCash;
     // Expected in Drawer = Gross - Remittances - Expenses
     const expected_in_drawer = gross - totalRemittances - totalExpenses;
 
     return {
-        opening: shift.opening_cash || 0,
+        opening: parseFloat(shift.opening_cash) || 0,
         sales: totalSales,
         adjustments: totalAdjustments,
         remittances: totalRemittances,
@@ -436,15 +436,13 @@ async function selectShift(shift) {
 
     const isClosed = shift.status === 'closed';
     // Always recalculate to ensure accuracy against transactions
-    const expected = await calculateExpectedCash(shift);
+    const financials = await getShiftFinancials(shift);
+    const expected = financials.expected_in_drawer;
+    const gross = financials.gross_accountability;
 
     let variance = 0;
     if (isClosed) {
-        const cashout = shift.cashout || 0;
-        const receipts = shift.closing_receipts || [];
-        const totalExpenses = receipts.reduce((sum, r) => sum + (r.amount || 0), 0);
-        const turnover = (shift.closing_cash || 0) + totalExpenses + cashout;
-        variance = turnover - expected;
+        variance = (shift.closing_cash || 0) - expected;
     }
 
     const varianceClass = variance < 0 ? "text-red-600 bg-red-50" : (variance > 0 ? "text-green-600 bg-green-50" : "text-gray-600 bg-gray-50");
@@ -470,12 +468,12 @@ async function selectShift(shift) {
                 <div class="text-lg font-bold text-gray-800">₱${(shift.opening_cash || 0).toFixed(2)}</div>
             </div>${shift.status === 'open' ? '' : `
             <div class="p-3 bg-gray-50 rounded border">
-                <div class="text-[10px] text-gray-500 uppercase font-bold">Expected Cash</div>
-                <div class="text-lg font-bold text-blue-600">₱${(expected - (shift.remittances?.reduce((s, r) => s + parseFloat(r.amount), 0) || 0)).toFixed(2)}</div>
+                <div class="text-[10px] text-gray-500 uppercase font-bold">Expected in Drawer</div>
+                <div class="text-lg font-bold text-blue-600">₱${expected.toFixed(2)}</div>
             </div>`}
             <div class="p-3 bg-gray-50 rounded border">
                 <div class="text-[10px] text-gray-500 uppercase font-bold">Cashout/Remit</div>
-                <div class="text-lg font-bold text-purple-600">₱${(shift.cashout || 0).toFixed(2)}</div>
+                <div class="text-lg font-bold text-purple-600">₱${financials.remittances.toFixed(2)}</div>
             </div>
             <div class="p-3 bg-gray-50 rounded border">
                 <div class="text-[10px] text-gray-500 uppercase font-bold">Closing Cash</div>

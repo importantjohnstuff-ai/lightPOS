@@ -81,7 +81,7 @@ function generateSalesSummary(payload) {
 }
 
 function generateShiftReports(payload) {
-    const { shifts, transactions, startDate, endDate } = payload; // transactions added
+    const { shifts, transactions, startDate, endDate } = payload;
     const start = new Date(startDate);
     const end = new Date(endDate);
 
@@ -94,15 +94,6 @@ function generateShiftReports(payload) {
     // Sort by Date Descending
     filteredShifts.sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
 
-    // Optimize Transaction Lookup: Organize by User? Or just iterate?
-    // Since we scan shifts, for each shift we need its transactions.
-    // Iterating all transactions for each shift is O(S * T). S=30, T=1000 => 30k ops. Fine.
-    // If T=100k, S=100 => 10M ops. Maybe aggregate first.
-    // Let's pre-sort transactions by timestamp?
-    // Or just group transactions by user and then filter by time.
-
-    // Simple filter for now.
-
     // Calculate Aggregates
     const totalShifts = filteredShifts.length;
     let totalVariance = 0;
@@ -111,43 +102,65 @@ function generateShiftReports(payload) {
 
     filteredShifts.forEach(s => {
         const sStart = new Date(s.start_time);
-        const sEnd = s.end_time ? new Date(s.end_time) : new Date(); // If open, until now
+        const sEnd = s.end_time ? new Date(s.end_time) : new Date();
+        const userEmail = s.user_id;
 
-        // Calculate Sales for this shift
+        // 1. Calculate Sales (Cash only) for this shift
         let shiftSales = 0;
+        let shiftExchangeCash = 0;
+
         if (transactions && transactions.length) {
             transactions.forEach(tx => {
-                const tDate = new Date(tx.timestamp);
-                if (tx.user_email === s.user_id && tDate >= sStart && tDate <= sEnd && !tx.is_voided) {
-                    shiftSales += parseFloat(tx.total_amount || 0);
+                const txTime = new Date(tx.timestamp);
+
+                // Regular Sales
+                if (tx.user_email === userEmail && txTime >= sStart && txTime <= sEnd && !tx.is_voided) {
+                    const pm = (tx.payment_method || 'Cash').toLowerCase();
+                    if (pm === 'cash') {
+                        shiftSales += parseFloat(tx.total_amount || 0);
+                    }
+                }
+
+                // Exchanges/Returns within this shift
+                if (tx.exchanges && Array.isArray(tx.exchanges)) {
+                    tx.exchanges.forEach(exch => {
+                        const exchTime = new Date(exch.timestamp);
+                        if (exchTime >= sStart && exchTime <= sEnd && exch.processed_by === userEmail) {
+                            const returnedTotal = (exch.returned || []).reduce((sum, item) => sum + (parseFloat(item.selling_price || 0) * (parseFloat(item.qty) || 1)), 0);
+                            const takenTotal = (exch.taken || []).reduce((sum, item) => sum + (parseFloat(item.selling_price || 0) * (parseFloat(item.qty) || 1)), 0);
+                            shiftExchangeCash += (takenTotal - returnedTotal);
+                        }
+                    });
                 }
             });
         }
+
+        // 2. Adjustments
+        const shiftAdjustments = (s.adjustments || []).reduce((sum, adj) => sum + (parseFloat(adj.amount) || 0), 0);
+
+        // 3. Dynamic Expected Cash (Gross Accountability)
+        // Formula: Opening + Sales + Exchanges + Adjustments
+        const dynamicExpected = (parseFloat(s.opening_cash) || 0) + shiftSales + shiftExchangeCash + shiftAdjustments;
+
+        // 4. Turnover & Variance
+        const closing = parseFloat(s.closing_cash || 0);
+        const cashout = (s.remittances || []).reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+        const expenses = (s.closing_receipts || []).reduce((sum, r) => sum + (parseFloat(r.amount) || 0), 0);
+
+        const turnover = closing + cashout + expenses;
+        const variance = (s.status === 'closed') ? (turnover - dynamicExpected) : 0;
+
+        // Cache results back to shift object for the mapper
+        s._dynamicExpected = dynamicExpected;
         s._calculatedSales = shiftSales;
+        s._calculatedVariance = variance;
+        s._calculatedTurnover = turnover;
+        s._calculatedCashout = cashout;
+
         totalSalesGlobal += shiftSales;
-
         if (s.status === 'closed') {
-            const expected = s.expected_cash || 0;
-            const closing = s.closing_cash || 0;
-            const cashout = s.cashout || 0;
-            const receipts = s.closing_receipts || [];
-            const expenses = receipts.reduce((sum, r) => sum + (r.amount || 0), 0);
-
-            // Variance Logic
-            // In shift.js: turnover = closing + expenses + cashout
-            // Variance = turnover - expected
-            // Note: expected SHOULD include sales already.
-
-            const turnover = closing + expenses + cashout;
-            const variance = turnover - expected;
-
             totalVariance += variance;
             totalCashout += cashout;
-            s._calculatedVariance = variance;
-            s._calculatedTurnover = turnover;
-        } else {
-            s._calculatedVariance = 0;
-            s._calculatedTurnover = 0;
         }
     });
 
@@ -158,16 +171,16 @@ function generateShiftReports(payload) {
             end_time: s.end_time,
             status: s.status,
             user_id: s.user_id,
-            opening_cash: s.opening_cash,
-            closing_cash: s.closing_cash,
-            expected_cash: s.expected_cash,
-            cashout: s.cashout,
-            total_sales: s._calculatedSales, // Returned
+            opening_cash: parseFloat(s.opening_cash || 0),
+            closing_cash: parseFloat(s.closing_cash || 0),
+            expected_cash: s._dynamicExpected, // Now dynamic!
+            cashout: s._calculatedCashout,
+            total_sales: s._calculatedSales,
             adjustment_count: (s.adjustments || []).length,
             variance: s._calculatedVariance,
             turnover: s._calculatedTurnover,
             forced_closed: s.forced_closed,
-            remittance_total: (s.remittances || []).reduce((sum, r) => sum + r.amount, 0)
+            remittance_total: s._calculatedCashout
         })),
         summary: {
             totalShifts,

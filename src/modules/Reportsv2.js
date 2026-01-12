@@ -579,8 +579,8 @@ async function renderShiftDetail(shiftId) {
             tx.exchanges.forEach(exch => {
                 const exchTime = new Date(exch.timestamp);
                 if (exchTime >= startTime && exchTime <= endTime && exch.processed_by === userEmail) {
-                    const returned = (exch.returned || []).reduce((s, i) => s + (i.selling_price * (i.qty || 1)), 0);
-                    const taken = (exch.taken || []).reduce((s, i) => s + (i.selling_price * (i.qty || 1)), 0);
+                    const returned = (exch.returned || []).reduce((s, i) => s + (parseFloat(i.selling_price || 0) * (parseFloat(i.qty) || 1)), 0);
+                    const taken = (exch.taken || []).reduce((s, i) => s + (parseFloat(i.selling_price || 0) * (parseFloat(i.qty) || 1)), 0);
                     calcExchange += (taken - returned);
                 }
             });

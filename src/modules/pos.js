@@ -1,5 +1,5 @@
 import { checkPermission, requestManagerApproval } from "../auth.js";
-import { checkActiveShift, requireShift, showCloseShiftModal, recordRemittance } from "./shift.js";
+import { checkActiveShift, requireShift, showCloseShiftModal, recordRemittance, getShiftFinancials } from "./shift.js";
 import { addNotification } from "../services/notification-service.js";
 import { getSystemSettings } from "./settings.js";
 import { generateUUID, showToast as showGlobalToast } from "../utils.js";
@@ -983,12 +983,17 @@ async function renderPosInterface(content) {
             const shifts = await Repository.getAll('shifts');
             const activeShift = shifts.find(s => s.user_id === user.email && s.status === 'open');
             if (activeShift) {
+                // Calculate financials dynamically at closure
+                const financials = await getShiftFinancials(activeShift);
+
                 activeShift.status = 'closed';
                 activeShift.end_time = new Date().toISOString();
                 activeShift.closing_cash = cashTotal;
                 activeShift.cashout = cashout;
                 activeShift.closing_receipts = receipts;
                 activeShift.total_closing_amount = grandTotal;
+                activeShift.expected_cash = financials.gross_accountability; // Use Gross for accountability
+                activeShift.variance = grandTotal - financials.gross_accountability;
                 activeShift.precounted_bills = parseFloat(document.getElementById("precounted-bills").value) || 0;
                 activeShift.precounted_coins = parseFloat(document.getElementById("precounted-coins").value) || 0;
 
@@ -1004,7 +1009,7 @@ async function renderPosInterface(content) {
                 }
 
                 if (confirm("Shift closed successfully. Would you like to print the closing report?")) {
-                    printShiftReport(activeShift);
+                    printShiftReport({ ...activeShift, ...financials });
                 }
 
                 loadPosView();
@@ -1094,8 +1099,12 @@ async function renderPosInterface(content) {
                 </div>
                 ${showHR ? '<div class="hr"></div>' : ''}
                 <table>
-                    <tr><td>Opening Cash</td><td class="text-right">₱${(shift.opening_cash || 0).toFixed(2)}</td></tr>
-                    <tr><td>Expected Cash</td><td class="text-right">₱${(shift.expected_cash || 0).toFixed(2)}</td></tr>
+                    <tr><td>Opening Cash</td><td class="text-right">₱${(shift.opening || shift.opening_cash || 0).toFixed(2)}</td></tr>
+                    <tr><td>+ Sales (Cash)</td><td class="text-right">₱${(shift.sales || 0).toFixed(2)}</td></tr>
+                    <tr><td>+ Adjustments</td><td class="text-right">₱${(shift.adjustments || 0).toFixed(2)}</td></tr>
+                    <tr><td>+ Net Returns</td><td class="text-right">₱${(shift.returns_net || 0).toFixed(2)}</td></tr>
+                    <tr class="bold"><td>= Gross Account</td><td class="text-right">₱${(shift.gross_accountability || shift.expected_cash || 0).toFixed(2)}</td></tr>
+                    <tr class="hr"><td colspan="2"></td></tr>
                     <tr class="bold"><td>Physical Cash</td><td class="text-right">₱${(shift.closing_cash || 0).toFixed(2)}</td></tr>
                     ${shift.precounted_bills ? `
                         <tr><td style="font-size: 0.9em; padding-left: 10px;">- Precounted Bills</td><td class="text-right" style="font-size: 0.9em;">₱${shift.precounted_bills.toFixed(2)}</td></tr>
@@ -1104,7 +1113,10 @@ async function renderPosInterface(content) {
                         <tr><td style="font-size: 0.9em; padding-left: 10px;">- Precounted Coins</td><td class="text-right" style="font-size: 0.9em;">₱${shift.precounted_coins.toFixed(2)}</td></tr>
                     ` : ''}
                     ${shift.cashout ? `
-                        <tr><td>Cashout</td><td class="text-right">₱${shift.cashout.toFixed(2)}</td></tr>
+                        <tr><td>- Remitted</td><td class="text-right">₱${shift.cashout.toFixed(2)}</td></tr>
+                    ` : ''}
+                    ${shift.expenses ? `
+                        <tr><td>- Expenses</td><td class="text-right">₱${shift.expenses.toFixed(2)}</td></tr>
                     ` : ''}
                 </table>
                 ${receiptsHtml ? `
