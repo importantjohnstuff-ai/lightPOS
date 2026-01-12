@@ -122,9 +122,15 @@ class SQLiteStore {
         }
 
         if (empty($dbRecord[$idColumn])) {
-    public function upsert($collection, $dbRecord) {
+            // The original JSON record might have the key, even if it's not a DB column (e.g. 'id' for sync_metadata)
+            if (isset($record[$idColumn])) {
+                $dbRecord[$idColumn] = $record[$idColumn];
+            } else {
+                throw new Exception("Record for collection '$collection' is missing required ID field '$idColumn'");
+            }
+        }
+
         $columns = array_keys($dbRecord);
-        $idColumn = $this->getIdColumn($collection);
 
         // 1. Try INSERT OR IGNORE
         // Use positional placeholders
@@ -133,8 +139,6 @@ class SQLiteStore {
 
         $sql = "INSERT OR IGNORE INTO $collection (" . implode(', ', $columns) . ") 
                 VALUES (" . implode(', ', $placeholders) . ")";
-
-        // error_log("SQLiteStore::upsert INSERT: $sql"); 
         
         $stmt = $this->pdo->prepare($sql);
         $this->executeWithRetry($stmt, $bindParams);
@@ -155,7 +159,6 @@ class SQLiteStore {
                 }
                 $updateParams[] = $dbRecord[$idColumn];
 
-                // error_log("SQLiteStore::upsert UPDATE: $sqlUtils");
                 $stmtUpdate = $this->pdo->prepare($sqlUtils);
                 $this->executeWithRetry($stmtUpdate, $updateParams);
             }
