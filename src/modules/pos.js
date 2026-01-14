@@ -646,7 +646,7 @@ async function renderPosInterface(content) {
                                         <button id="btn-add-shift-receipt" class="text-[10px] bg-blue-100 text-blue-600 px-2 py-1 rounded font-bold hover:bg-blue-200 transition uppercase tracking-wide">+ Add Receipt</button>
                                     </div>
                                 </div>
-                                <div class="flex-1 overflow-y-auto max-h-40 space-y-2" id="shift-receipts-list">
+                                <div class="flex-1 overflow-y-auto max-h-40 space-y-2 pr-2" id="shift-receipts-list">
                                     <!-- Receipts injected here -->
                                 </div>
                             </div>
