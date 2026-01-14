@@ -1324,32 +1324,46 @@ async function renderPosInterface(content) {
         }
     });
 
+    document.getElementById("discount-code-input").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            document.getElementById("btn-apply-discount").click();
+        }
+    });
+
     const selectPayment = document.getElementById("select-payment-method");
     selectPayment.addEventListener("change", (e) => {
         const method = e.target.value;
         const tenderedContainer = document.getElementById("tendered-container");
         const btnConfirm = document.getElementById("btn-confirm-pay");
-        const total = parseFloat(document.getElementById("modal-checkout").dataset.total) || 0;
+        const modal = document.getElementById("modal-checkout");
+        const total = parseFloat(modal.dataset.total) || 0;
+        const discount = parseFloat(modal.dataset.discount) || 0;
+        const netTotal = total - discount;
 
         if (method === "Points") {
             tenderedContainer.classList.add("hidden");
             const points = selectedCustomer.loyalty_points || 0;
-            btnConfirm.disabled = points < total;
-            if (points < total) {
+            btnConfirm.disabled = points < netTotal;
+            if (points < netTotal) {
                 showToast("Insufficient loyalty points.", true);
             }
         } else {
             tenderedContainer.classList.remove("hidden");
             const tendered = parseFloat(document.getElementById("input-tendered").value) || 0;
-            btnConfirm.disabled = tendered < total;
+            btnConfirm.disabled = tendered < netTotal;
         }
     });
 
     const inputTendered = document.getElementById("input-tendered");
     inputTendered.addEventListener("input", (e) => {
         const tendered = parseFloat(e.target.value) || 0;
-        const total = parseFloat(document.getElementById("modal-checkout").dataset.total) || 0;
-        const change = tendered - total;
+        const modal = document.getElementById("modal-checkout");
+        const total = parseFloat(modal.dataset.total) || 0;
+        const discount = parseFloat(modal.dataset.discount) || 0;
+        const netTotal = total - discount;
+
+        const change = tendered - netTotal;
         const btnConfirm = document.getElementById("btn-confirm-pay");
 
         if (change >= 0) {
