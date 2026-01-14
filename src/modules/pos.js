@@ -1820,7 +1820,7 @@ async function addToCart(item, qty = 1) {
     if (existingItem) {
         existingItem.qty += qty;
     } else {
-        posCart.push({ ...item, qty: qty });
+        posCart.unshift({ ...item, qty: qty });
     }
     renderCart();
 }
