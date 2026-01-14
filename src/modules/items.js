@@ -18,7 +18,7 @@ export async function loadItemsView() {
     const db = await dbPromise;
     const content = document.getElementById("main-content");
     const canWrite = checkPermission("items", "write");
-    
+
     content.innerHTML = `
         <div class="max-w-7xl mx-auto lg:h-[calc(100vh-140px)] flex flex-col">
             <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
@@ -154,7 +154,10 @@ export async function loadItemsView() {
                             </div>
                             <div class="mb-4">
                                 <label class="block text-gray-700 text-sm font-bold mb-2">Barcode</label>
-                                <input type="text" id="item-barcode" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                                <div class="flex gap-2">
+                                    <input type="text" id="item-barcode" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                                    <button type="button" id="btn-gen-barcode" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold px-3 py-2 rounded text-xs transition whitespace-nowrap" title="Generate Random Hex Barcode">Generate</button>
+                                </div>
                             </div>
                             <div class="mb-4">
                                 <label class="block text-gray-700 text-sm font-bold mb-2">Category</label>
@@ -237,7 +240,7 @@ export async function loadItemsView() {
         const term = e.target.value.toLowerCase();
         parentIdInput.value = ""; // Reset ID on type
         const currentId = document.getElementById("item-id")?.value;
-        const filtered = itemsData.filter(i => 
+        const filtered = itemsData.filter(i =>
             i.id !== currentId && i.name.toLowerCase().includes(term)
         );
         renderParentOptions(filtered);
@@ -273,6 +276,35 @@ export async function loadItemsView() {
         });
     }
     document.getElementById("btn-cancel-item")?.addEventListener("click", () => modal?.classList.add("hidden"));
+
+    // Generate Barcode Logic
+    const generateUniqueBarcode = () => {
+        const hexChars = "0123456789ABCDEF";
+        let code = "";
+        let isUnique = false;
+        let attempts = 0;
+
+        while (!isUnique && attempts < 100) {
+            code = "";
+            for (let i = 0; i < 6; i++) {
+                code += hexChars[Math.floor(Math.random() * 16)];
+            }
+            if (!itemsData.some(i => i.barcode === code)) {
+                isUnique = true;
+            }
+            attempts++;
+        }
+        return isUnique ? code : ""; // Fallback if super unlucky
+    };
+
+    document.getElementById("btn-gen-barcode")?.addEventListener("click", () => {
+        const unique = generateUniqueBarcode();
+        if (unique) {
+            document.getElementById("item-barcode").value = unique;
+        } else {
+            alert("Could not generate a unique barcode. Please try again.");
+        }
+    });
 
     // Search & Filter Listeners
     document.getElementById("search-items")?.addEventListener("input", (e) => {
@@ -337,12 +369,12 @@ export async function loadItemsView() {
     document.getElementById("form-add-item")?.addEventListener("submit", async (e) => {
         e.preventDefault();
         const db = await dbPromise;
-        
+
         const itemId = document.getElementById("item-id").value;
         const barcode = document.getElementById("item-barcode").value.trim();
         const name = document.getElementById("item-name").value.trim();
         const category = document.getElementById("item-category").value.trim();
-        
+
         const itemData = {
             name: name,
             barcode: barcode,
@@ -391,7 +423,7 @@ export async function loadItemsView() {
 
         try {
             const finalData = itemId ? { ...itemData, id: itemId } : { ...itemData, id: generateUUID() };
-            
+
             // Use Repository for versioned, offline-first write
             await Repository.upsert('items', finalData);
 
@@ -431,8 +463,8 @@ function applyFiltersAndSort() {
     // Filter
     if (filterState.search) {
         const term = filterState.search.toLowerCase();
-        filtered = filtered.filter(item => 
-            (item.name || "").toLowerCase().includes(term) || 
+        filtered = filtered.filter(item =>
+            (item.name || "").toLowerCase().includes(term) ||
             (item.barcode || "").toLowerCase().includes(term) ||
             (item.category || "").toLowerCase().includes(term)
         );
@@ -562,7 +594,7 @@ function renderItems(items, totalCount) {
                 </button>
             </td>
         `;
-        
+
         const openEditModal = () => {
             if (!canWrite) return;
             document.getElementById("item-modal-title").textContent = "Edit Item";
@@ -577,16 +609,16 @@ function renderItems(items, totalCount) {
             document.getElementById("item-min-stock").value = item.min_stock;
             document.getElementById("item-unit").value = item.base_unit || "";
             document.getElementById("item-conv").value = item.conv_factor || "";
-            
+
             populateSupplierDropdown();
-            
+
             document.getElementById("item-supplier").value = item.supplier_id || "";
-            
+
             // Populate Parent Search
             const parentItem = itemsData.find(p => p.id === item.parent_id);
             document.getElementById("item-parent-search").value = parentItem ? parentItem.name : "";
             document.getElementById("item-parent-id").value = item.parent_id || "";
-            
+
             document.getElementById("modal-add-item").classList.remove("hidden");
         };
 
@@ -677,13 +709,13 @@ async function refreshItemInsights() {
                 }
             }
         });
-    
+
     // 2. Render Chart
     renderItemSalesChart(itemSales, item.id, chartDays);
 
     // 3. Calculate Stats
     const totalQty = itemSales.reduce((sum, t) => sum + (t.items.find(i => i.id === item.id)?.qty || 0), 0);
-    
+
     let effectiveDays = chartDays;
     if (firstSaleDate) {
         const now = new Date();
@@ -708,7 +740,7 @@ async function refreshItemInsights() {
         return sum + (entry ? (entry.selling_price * entry.qty) : 0);
     }, 0);
     const marginPct = ((item.selling_price - item.cost_price) / item.selling_price) * 100;
-    
+
     const badge = document.getElementById("item-quadrant-badge");
     if (revenue > 1000 && marginPct > 30) {
         badge.textContent = "Winner"; badge.className = "px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-green-100 text-green-700";
@@ -868,7 +900,7 @@ async function openComparisonModal() {
             </div>
         `;
         container.appendChild(col);
-        
+
         // Render Chart
         const ctx = document.getElementById(`compare-chart-${i}`).getContext('2d');
         const dailyData = {};
