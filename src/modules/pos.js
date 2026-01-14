@@ -1294,6 +1294,36 @@ async function renderPosInterface(content) {
     document.getElementById("btn-checkout").addEventListener("click", openCheckout);
     document.getElementById("btn-cancel-checkout").addEventListener("click", closeCheckout);
 
+    document.getElementById("btn-apply-discount").addEventListener("click", () => {
+        const codeInput = document.getElementById("discount-code-input");
+        const code = codeInput.value.trim().toLowerCase();
+        const modal = document.getElementById("modal-checkout");
+        const totalOriginal = parseFloat(modal.dataset.total);
+
+        if (code === "pollenstaff") {
+            const discountAmount = totalOriginal * 0.07;
+            const newTotal = totalOriginal - discountAmount;
+
+            const discountDisplay = document.getElementById("discount-display");
+            discountDisplay.textContent = `Discount Applied: pollenstaff (-₱${discountAmount.toFixed(2)})`;
+            discountDisplay.classList.remove("hidden");
+
+            const totalEl = document.getElementById("checkout-total");
+            totalEl.innerHTML = `<span class="line-through text-gray-400 text-sm mr-2">₱${totalOriginal.toFixed(2)}</span> ₱${newTotal.toFixed(2)}`;
+
+            modal.dataset.discount = discountAmount;
+            modal.dataset.discountCode = "pollenstaff";
+
+            showToast("Discount Applied: 7% Off");
+        } else {
+            showToast("Invalid Discount Code", true);
+            modal.dataset.discount = "0";
+            modal.dataset.discountCode = "";
+            document.getElementById("discount-display").classList.add("hidden");
+            document.getElementById("checkout-total").textContent = `₱${totalOriginal.toFixed(2)}`;
+        }
+    });
+
     const selectPayment = document.getElementById("select-payment-method");
     selectPayment.addEventListener("change", (e) => {
         const method = e.target.value;
@@ -2160,35 +2190,7 @@ function closeCheckout() {
     document.getElementById("modal-checkout").classList.add("hidden");
 }
 
-document.getElementById("btn-apply-discount")?.addEventListener("click", () => {
-    const codeInput = document.getElementById("discount-code-input");
-    const code = codeInput.value.trim().toLowerCase(); // Case-insensitive check
-    const modal = document.getElementById("modal-checkout");
-    const totalOriginal = parseFloat(modal.dataset.total); // Original subtotal
 
-    if (code === "pollenstaff") {
-        const discountAmount = totalOriginal * 0.07;
-        const newTotal = totalOriginal - discountAmount;
-
-        const discountDisplay = document.getElementById("discount-display");
-        discountDisplay.textContent = `Discount Applied: pollenstaff (-₱${discountAmount.toFixed(2)})`;
-        discountDisplay.classList.remove("hidden");
-
-        const totalEl = document.getElementById("checkout-total");
-        totalEl.innerHTML = `<span class="line-through text-gray-400 text-sm mr-2">₱${totalOriginal.toFixed(2)}</span> ₱${newTotal.toFixed(2)}`;
-
-        modal.dataset.discount = discountAmount;
-        modal.dataset.discountCode = "pollenstaff";
-
-        showToast("Discount Applied: 7% Off");
-    } else {
-        showToast("Invalid Discount Code", true);
-        modal.dataset.discount = "0";
-        modal.dataset.discountCode = "";
-        document.getElementById("discount-display").classList.add("hidden");
-        document.getElementById("checkout-total").textContent = `₱${totalOriginal.toFixed(2)}`;
-    }
-});
 
 async function processTransaction() {
     const btnConfirm = document.getElementById("btn-confirm-pay");
