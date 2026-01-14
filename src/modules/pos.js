@@ -641,7 +641,10 @@ async function renderPosInterface(content) {
                             <div class="flex-1 flex flex-col bg-gray-50 p-4 rounded-lg border min-h-[150px]">
                                 <div class="flex justify-between items-center mb-2 border-b pb-1">
                                     <h4 class="font-bold text-gray-700 uppercase text-xs tracking-wider">Expense Receipts</h4>
-                                    <button id="btn-add-shift-receipt" class="text-[10px] bg-blue-100 text-blue-600 px-2 py-1 rounded font-bold hover:bg-blue-200 transition uppercase tracking-wide">+ Add Receipt</button>
+                                    <div class="flex gap-1">
+                                        <button id="btn-pick-shift-receipt" class="text-[10px] bg-purple-100 text-purple-600 px-2 py-1 rounded font-bold hover:bg-purple-200 transition uppercase tracking-wide">Pick Exp</button>
+                                        <button id="btn-add-shift-receipt" class="text-[10px] bg-blue-100 text-blue-600 px-2 py-1 rounded font-bold hover:bg-blue-200 transition uppercase tracking-wide">+ Add Receipt</button>
+                                    </div>
                                 </div>
                                 <div class="flex-1 overflow-y-auto max-h-40 space-y-2" id="shift-receipts-list">
                                     <!-- Receipts injected here -->
@@ -663,6 +666,27 @@ async function renderPosInterface(content) {
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pick Expense Modal -->
+        <div id="modal-pick-expense" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-[60]">
+            <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-lg h-[60vh] flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-bold text-gray-800">Pick Today's Expenses</h3>
+                    <button id="btn-close-pick-expense" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+                </div>
+                <div class="mb-2">
+                     <input type="text" id="pick-expense-search" placeholder="Search expenses..." class="w-full p-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+                </div>
+                <div class="flex-1 overflow-y-auto border rounded bg-gray-50 p-2" id="pick-expense-list">
+                    <!-- Expenses injected here -->
+                    <div class="text-center text-gray-400 italic mt-4">Loading...</div>
+                </div>
+                <div class="mt-4 flex justify-end gap-2">
+                    <button id="btn-cancel-pick-expense" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                    <button id="btn-confirm-pick-expense" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded shadow">Add Selected</button>
                 </div>
             </div>
         </div>
@@ -940,13 +964,13 @@ async function renderPosInterface(content) {
             modal.dataset.grandTotal = grandTotal;
         };
 
-        // Add Receipt Logic
-        document.getElementById("btn-add-shift-receipt").onclick = () => {
+        // Helper to add receipt row
+        const addReceiptRow = (desc = "", amount = "") => {
             const row = document.createElement("div");
             row.className = "flex gap-2 receipt-row";
             row.innerHTML = `
-                <input type="text" placeholder="Description" class="flex-1 border rounded p-1 text-xs receipt-desc outline-none focus:ring-1 focus:ring-blue-500">
-                <input type="number" placeholder="Amount" class="w-24 border rounded p-1 text-xs text-right receipt-amount outline-none focus:ring-1 focus:ring-blue-500" step="0.01">
+                <input type="text" placeholder="Description" class="flex-1 border rounded p-1 text-xs receipt-desc outline-none focus:ring-1 focus:ring-blue-500" value="${desc}">
+                <input type="number" placeholder="Amount" class="w-24 border rounded p-1 text-xs text-right receipt-amount outline-none focus:ring-1 focus:ring-blue-500" step="0.01" value="${amount}">
                 <button class="text-red-500 hover:text-red-700 btn-remove-receipt">&times;</button>
             `;
             row.querySelector(".btn-remove-receipt").onclick = () => {
@@ -955,7 +979,96 @@ async function renderPosInterface(content) {
             };
             row.querySelector(".receipt-amount").oninput = updateTotals;
             receiptsList.appendChild(row);
+            return row;
+        };
+
+        // Add Receipt Button Click
+        document.getElementById("btn-add-shift-receipt").onclick = () => {
+            const row = addReceiptRow();
             row.querySelector(".receipt-desc").focus();
+        };
+
+        // Pick Expense Logic
+        const pickModal = document.getElementById("modal-pick-expense");
+        const pickList = document.getElementById("pick-expense-list");
+        const pickSearch = document.getElementById("pick-expense-search");
+
+        document.getElementById("btn-pick-shift-receipt").onclick = async () => {
+            pickModal.classList.remove("hidden");
+            pickList.innerHTML = '<div class="text-center text-gray-500 p-4">Loading expenses...</div>';
+
+            try {
+                const allExpenses = await Repository.getAll('expenses');
+                const today = new Date().toISOString().split('T')[0];
+
+                // Filter today's expenses
+                const todayExpenses = allExpenses.filter(e => e.date === today);
+
+                const renderExpenses = (filterText = "") => {
+                    const term = filterText.toLowerCase();
+                    const filtered = todayExpenses.filter(e =>
+                        e.description.toLowerCase().includes(term) ||
+                        (e.supplier_name && e.supplier_name.toLowerCase().includes(term))
+                    );
+
+                    pickList.innerHTML = "";
+                    if (filtered.length === 0) {
+                        pickList.innerHTML = '<div class="text-center text-gray-400 p-2 text-sm">No matching expenses found for today.</div>';
+                        return;
+                    }
+
+                    filtered.forEach(exp => {
+                        const div = document.createElement("div");
+                        div.className = "flex items-center gap-2 p-2 border-b last:border-0 hover:bg-purple-50 cursor-pointer";
+                        div.innerHTML = `
+                            <input type="checkbox" class="form-checkbox h-4 w-4 text-purple-600 cursor-pointer exp-checkbox" data-desc="${exp.description}" data-amt="${exp.amount}" data-supplier="${exp.supplier_name || ''}">
+                            <div class="flex-1 text-sm">
+                                <div class="font-bold text-gray-700">${exp.description}</div>
+                                <div class="text-[10px] text-gray-500">${exp.supplier_name || 'No Supplier'}</div>
+                            </div>
+                            <div class="font-bold text-gray-800">₱${exp.amount.toFixed(2)}</div>
+                        `;
+
+                        // Toggle checkbox on row click
+                        div.addEventListener("click", (e) => {
+                            if (e.target.type !== 'checkbox') {
+                                const cb = div.querySelector("input[type='checkbox']");
+                                cb.checked = !cb.checked;
+                            }
+                        });
+
+                        pickList.appendChild(div);
+                    });
+                };
+
+                renderExpenses();
+
+                pickSearch.oninput = (e) => renderExpenses(e.target.value);
+                pickSearch.value = "";
+                pickSearch.focus();
+
+            } catch (err) {
+                console.error(err);
+                pickList.innerHTML = '<div class="text-center text-red-500 p-2">Error loading expenses.</div>';
+            }
+        };
+
+        const closePickModal = () => pickModal.classList.add("hidden");
+        document.getElementById("btn-close-pick-expense").onclick = closePickModal;
+        document.getElementById("btn-cancel-pick-expense").onclick = closePickModal;
+
+        document.getElementById("btn-confirm-pick-expense").onclick = () => {
+            const checkboxes = pickList.querySelectorAll(".exp-checkbox:checked");
+            checkboxes.forEach(cb => {
+                const desc = cb.dataset.desc;
+                const amt = cb.dataset.amt;
+                const supplier = cb.dataset.supplier;
+
+                const finalDesc = supplier ? `${desc} (${supplier})` : desc;
+                addReceiptRow(finalDesc, amt);
+            });
+            updateTotals();
+            closePickModal();
         };
 
         document.getElementById("precounted-bills").addEventListener("input", updateTotals);
