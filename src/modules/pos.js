@@ -461,6 +461,14 @@ async function renderPosInterface(content) {
                 <div class="mb-4 text-center">
                     <div class="text-sm text-gray-600">Total Amount</div>
                     <div id="checkout-total" class="text-3xl font-bold text-blue-600">₱0.00</div>
+                    <div id="discount-display" class="hidden text-sm text-green-600 font-bold mt-1"></div>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Discount Code</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="discount-code-input" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase" placeholder="Enter code">
+                        <button id="btn-apply-discount" class="bg-purple-100 hover:bg-purple-200 text-purple-700 font-bold px-3 py-2 rounded text-xs transition whitespace-nowrap">Apply</button>
+                    </div>
                 </div>
                 <div class="mb-4">
                     <label class="block text-gray-700 text-sm font-bold mb-2">Payment Method</label>
@@ -2124,7 +2132,14 @@ function openCheckout() {
     const selectPayment = document.getElementById("select-payment-method");
 
     modal.dataset.total = total;
+    modal.dataset.discount = "0";
+    modal.dataset.discountCode = "";
+
     totalEl.textContent = `₱${total.toFixed(2)}`;
+    document.getElementById("discount-code-input").value = "";
+    document.getElementById("discount-display").textContent = "";
+    document.getElementById("discount-display").classList.add("hidden");
+
     inputTendered.value = "";
     btnConfirm.disabled = true;
     selectPayment.value = "Cash";
@@ -2145,6 +2160,36 @@ function closeCheckout() {
     document.getElementById("modal-checkout").classList.add("hidden");
 }
 
+document.getElementById("btn-apply-discount")?.addEventListener("click", () => {
+    const codeInput = document.getElementById("discount-code-input");
+    const code = codeInput.value.trim().toLowerCase(); // Case-insensitive check
+    const modal = document.getElementById("modal-checkout");
+    const totalOriginal = parseFloat(modal.dataset.total); // Original subtotal
+
+    if (code === "pollenstaff") {
+        const discountAmount = totalOriginal * 0.07;
+        const newTotal = totalOriginal - discountAmount;
+
+        const discountDisplay = document.getElementById("discount-display");
+        discountDisplay.textContent = `Discount Applied: pollenstaff (-₱${discountAmount.toFixed(2)})`;
+        discountDisplay.classList.remove("hidden");
+
+        const totalEl = document.getElementById("checkout-total");
+        totalEl.innerHTML = `<span class="line-through text-gray-400 text-sm mr-2">₱${totalOriginal.toFixed(2)}</span> ₱${newTotal.toFixed(2)}`;
+
+        modal.dataset.discount = discountAmount;
+        modal.dataset.discountCode = "pollenstaff";
+
+        showToast("Discount Applied: 7% Off");
+    } else {
+        showToast("Invalid Discount Code", true);
+        modal.dataset.discount = "0";
+        modal.dataset.discountCode = "";
+        document.getElementById("discount-display").classList.add("hidden");
+        document.getElementById("checkout-total").textContent = `₱${totalOriginal.toFixed(2)}`;
+    }
+});
+
 async function processTransaction() {
     const btnConfirm = document.getElementById("btn-confirm-pay");
     const inputTendered = document.getElementById("input-tendered");
@@ -2160,7 +2205,11 @@ async function processTransaction() {
     btnConfirm.textContent = "Processing...";
 
     const settings = await getSystemSettings();
-    const total = parseFloat(document.getElementById("modal-checkout").dataset.total);
+    const originalTotal = parseFloat(document.getElementById("modal-checkout").dataset.total);
+    const discountAmount = parseFloat(document.getElementById("modal-checkout").dataset.discount || 0);
+    const discountCode = document.getElementById("modal-checkout").dataset.discountCode || "";
+
+    const total = originalTotal - discountAmount; // Net Total
     const tendered = paymentMethod === "Points" ? total : (parseFloat(inputTendered.value) || 0);
 
     if (paymentMethod !== "Points" && tendered < total) {
@@ -2193,7 +2242,9 @@ async function processTransaction() {
         customer_name: selectedCustomer.name,
         points_earned: pointsEarned,
         timestamp: new Date().toISOString(),
-        is_voided: false
+        is_voided: false,
+        discount_code: discountCode,
+        discount_amount: discountAmount
     };
 
     try {
