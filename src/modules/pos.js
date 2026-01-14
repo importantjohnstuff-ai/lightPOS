@@ -129,8 +129,31 @@ document.addEventListener("keydown", (e) => {
         if (btnPrint) btnPrint.click();
     } else if (e.key === "Escape") {
         e.preventDefault();
-        document.getElementById("modal-suspended")?.classList.add("hidden");
-        document.getElementById("modal-pos-history")?.classList.add("hidden");
+
+        const modals = [
+            "modal-suspended",
+            "modal-pos-history",
+            "modal-checkout",
+            "modal-quick-customer",
+            "modal-remittance",
+            "modal-close-shift",
+            "mobile-pos-camera-overlay",
+            "mobile-payment-overlay",
+            "mobile-change-overlay"
+        ];
+
+        let modalClosed = false;
+        modals.forEach(id => {
+            const el = document.getElementById(id);
+            if (el && !el.classList.contains("hidden")) {
+                el.classList.add("hidden");
+                modalClosed = true;
+            }
+        });
+
+        if (!modalClosed) {
+            document.getElementById("btn-clear-posCart")?.click();
+        }
     }
 });
 
