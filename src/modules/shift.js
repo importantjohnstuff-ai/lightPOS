@@ -462,23 +462,27 @@ async function selectShift(shift) {
             <div class="font-medium text-gray-800">${shift.end_time ? new Date(shift.end_time).toLocaleString() : 'Active'}</div>
         </div>
 
-        <div class="grid grid-cols-2 gap-4 mb-6">
-            <div class="p-3 bg-gray-50 rounded border">
-                <div class="text-[10px] text-gray-500 uppercase font-bold">Opening Cash</div>
-                <div class="text-lg font-bold text-gray-800">₱${(shift.opening_cash || 0).toFixed(2)}</div>
-            </div>${shift.status === 'open' ? '' : `
-            <div class="p-3 bg-gray-50 rounded border">
-                <div class="text-[10px] text-gray-500 uppercase font-bold">Expected in Drawer</div>
-                <div class="text-lg font-bold text-blue-600">₱${expected.toFixed(2)}</div>
-            </div>`}
-            <div class="p-3 bg-gray-50 rounded border">
-                <div class="text-[10px] text-gray-500 uppercase font-bold">Cashout/Remit</div>
-                <div class="text-lg font-bold text-purple-600">₱${financials.remittances.toFixed(2)}</div>
-            </div>
-            <div class="p-3 bg-gray-50 rounded border">
-                <div class="text-[10px] text-gray-500 uppercase font-bold">Closing Cash</div>
-                <div class="text-lg font-bold text-gray-800">₱${(shift.closing_cash || 0).toFixed(2)}</div>
-            </div>
+        <div class="overflow-x-auto mb-6">
+            <table class="w-full text-sm border-collapse border border-gray-200">
+                <thead class="bg-gray-100 uppercase text-xs text-gray-600">
+                    <tr>
+                        <th class="border p-2 text-right">Opening Cash</th>
+                        <th class="border p-2 text-right">Cash Count</th>
+                        <th class="border p-2 text-right">Precounted Money</th>
+                        <th class="border p-2 text-right">Cashout</th>
+                        <th class="border p-2 text-right">Expenses</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="bg-white">
+                        <td class="border p-2 text-right font-bold text-gray-800">₱${(shift.opening_cash || 0).toFixed(2)}</td>
+                        <td class="border p-2 text-right font-bold text-blue-600">₱${(shift.closing_cash || 0).toFixed(2)}</td>
+                        <td class="border p-2 text-right font-bold text-gray-800">₱${((shift.precounted_bills || 0) + (shift.precounted_coins || 0)).toFixed(2)}</td>
+                        <td class="border p-2 text-right font-bold text-purple-600">₱${financials.remittances.toFixed(2)}</td>
+                        <td class="border p-2 text-right font-bold text-red-600">₱${financials.expenses.toFixed(2)}</td>
+                    </tr>
+                </tbody>
+            </table>
         </div>
 
         <div class="mb-6 p-4 ${varianceClass} rounded border border-opacity-20 flex justify-between items-center">
