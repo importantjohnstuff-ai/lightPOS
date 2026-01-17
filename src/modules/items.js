@@ -21,9 +21,9 @@ export async function loadItemsView() {
 
     content.innerHTML = `
         <div class="max-w-7xl mx-auto lg:h-[calc(100vh-140px)] flex flex-col">
-            <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 min-h-0">
-                <!-- Left Column: Items List (5/12) -->
-                <div class="lg:col-span-5 flex flex-col h-full min-h-[400px] lg:min-h-0">
+            <div class="flex flex-col lg:flex-row gap-0 flex-1 min-h-0 relative" id="items-split-container">
+                <!-- Left Column: Items List -->
+                <div id="items-list-panel" class="flex flex-col h-full min-h-[400px] lg:min-h-0 w-full lg:w-[45%] pr-4 transition-all duration-75">
                     <div class="flex flex-col mb-4 flex-shrink-0">
                         <div class="flex justify-between items-center mb-4">
                             <h2 class="text-2xl font-bold text-gray-800">Items</h2>
@@ -70,8 +70,13 @@ export async function loadItemsView() {
                     </div>
                 </div>
 
-                <!-- Right Column: Item Insights (7/12) -->
-                <div id="item-insights-panel" class="lg:col-span-7 hidden flex flex-col h-full min-h-[400px] lg:min-h-0 overflow-y-auto space-y-6 pr-2">
+                <!-- Resize Handle -->
+                <div id="items-resize-handle" class="hidden lg:flex w-4 cursor-col-resize items-center justify-center hover:bg-blue-50 group">
+                    <div class="w-1 h-12 bg-gray-300 rounded group-hover:bg-blue-400 transition-colors"></div>
+                </div>
+
+                <!-- Right Column: Item Insights -->
+                <div id="item-insights-panel" class="hidden lg:flex flex-col h-full min-h-[400px] lg:min-h-0 overflow-y-auto space-y-6 flex-1 pl-4">
                     <!-- Header & Quadrant -->
                     <div class="bg-white shadow-md rounded p-6 border-t-4 border-blue-500 flex-shrink-0">
                         <div class="flex justify-between items-start">
@@ -261,6 +266,45 @@ export async function loadItemsView() {
             parentList.classList.add("hidden");
         }
     });
+
+    // Resizable Split View Logic
+    const handle = document.getElementById("items-resize-handle");
+    const leftPanel = document.getElementById("items-list-panel");
+    const container = document.getElementById("items-split-container");
+
+    let isResizing = false;
+
+    if (handle) {
+        handle.addEventListener("mousedown", (e) => {
+            isResizing = true;
+            document.body.style.cursor = "col-resize";
+            document.body.style.userSelect = "none"; // Prevent text selection
+        });
+
+        document.addEventListener("mousemove", (e) => {
+            if (!isResizing) return;
+
+            const containerRect = container.getBoundingClientRect();
+            const newLeftWidth = e.clientX - containerRect.left;
+
+            // Constrain width (min 20%, max 80%)
+            const minWidth = containerRect.width * 0.2;
+            const maxWidth = containerRect.width * 0.8;
+
+            if (newLeftWidth >= minWidth && newLeftWidth <= maxWidth) {
+                leftPanel.style.width = `${newLeftWidth}px`;
+                leftPanel.style.flex = "none"; // Disable flex grow/shrink to respect width
+            }
+        });
+
+        document.addEventListener("mouseup", () => {
+            if (isResizing) {
+                isResizing = false;
+                document.body.style.cursor = "";
+                document.body.style.userSelect = "";
+            }
+        });
+    }
 
     // Event Listeners
     const modal = document.getElementById("modal-add-item");
