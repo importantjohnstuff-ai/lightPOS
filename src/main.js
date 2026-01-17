@@ -175,46 +175,8 @@ formLogin.addEventListener("submit", async (e) => {
     }
 });
 
-// 3. Handle Google Login
+// 4. Handle Google Login
 btnGoogleLogin.addEventListener("click", async () => {
     loginError.classList.add("hidden");
     alert("Google Login is not supported in this version.");
 });
-
-// 4. Handle Dev Reset
-const btnDevReset = document.getElementById("btn-dev-reset");
-if (btnDevReset) {
-    btnDevReset.addEventListener("click", async () => {
-        if (confirm("⚠️ WARNING: This will WIPE ALL DATA and reset the system to factory defaults. Are you sure?")) {
-            try {
-                btnDevReset.textContent = "Resetting...";
-                btnDevReset.disabled = true;
-
-                // 1. Wipe Server
-                const response = await fetch('api/sync.php?action=reset_all', { method: 'POST' });
-                const result = await response.json();
-
-                if (result.status === 'success') {
-                    // 2. Wipe Local Dexie
-                    try {
-                        const db = await dbPromise;
-                        await db.delete(); // Delete the entire database
-                        alert("System Reset Complete! Page will reload.");
-                        window.location.reload();
-                    } catch (e) {
-                        console.error("Local wipe error:", e);
-                        alert("Server reset, but local wipe failed. Please clear browser data manually.");
-                        window.location.reload();
-                    }
-                } else {
-                    throw new Error(result.message || "Unknown server error");
-                }
-            } catch (e) {
-                console.error("Reset Error:", e);
-                alert("Reset Failed: " + e.message);
-                btnDevReset.textContent = "⚠️ Reset System (Dev)";
-                btnDevReset.disabled = false;
-            }
-        }
-    });
-}
