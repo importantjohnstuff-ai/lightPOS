@@ -1488,26 +1488,23 @@ async function processImport(items) {
         id: generateUUID(),
         ...item,
         cost_price: parseFloat(item.cost_price) || 0,
-        // ... rest of mapping
-    }));
-    // ... rest of logic
-    selling_price: parseFloat(item.selling_price) || 0,
+        selling_price: parseFloat(item.selling_price) || 0,
         stock_level: parseFloat(item.stock_level) || 0,
-            min_stock: parseFloat(item.min_stock) || 0,
-                supplier_id: item.supplier_id || ""
-}));
-progressBar.style.width = "70%";
-progressText.textContent = "Saving to local database...";
+        min_stock: parseFloat(item.min_stock) || 0,
+        supplier_id: item.supplier_id || ""
+    }));
+    progressBar.style.width = "70%";
+    progressText.textContent = "Saving to local database...";
 
-for (const item of newItems) {
-    await Repository.upsert('items', item);
-}
+    for (const item of newItems) {
+        await Repository.upsert('items', item);
+    }
 
-progressText.textContent = "Syncing...";
-SyncEngine.sync();
+    progressText.textContent = "Syncing...";
+    SyncEngine.sync();
 
-progressBar.style.width = "100%";
-progressText.textContent = "Import Complete!";
+    progressBar.style.width = "100%";
+    progressText.textContent = "Import Complete!";
 }
 
 async function analyzeSync() {
