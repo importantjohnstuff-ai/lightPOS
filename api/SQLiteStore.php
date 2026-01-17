@@ -24,7 +24,7 @@ class SQLiteStore {
             'shifts', 'expenses', 'returns', 'stock_movements',
             'adjustments', 'stockins', 'suspended_transactions', 'sync_metadata',
             'stock_logs', 'settings', 'notifications',
-            'purchase_orders', 'supplier_config', 'inventory_metrics'
+            'purchase_orders', 'supplier_config', 'inventory_metrics', 'discount_codes'
         ];
     }
 

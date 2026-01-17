@@ -160,6 +160,18 @@ CREATE TABLE settings (
 CREATE INDEX idx_settings_updatedAt ON settings(_updatedAt);
 
 
+CREATE TABLE discount_codes (
+    id TEXT PRIMARY KEY,
+    code TEXT,
+    type TEXT,
+    value REAL,
+    is_active INTEGER,
+    _version INTEGER,
+    _updatedAt INTEGER,
+    _deleted INTEGER DEFAULT 0
+);
+CREATE INDEX idx_discount_codes_updatedAt ON discount_codes(_updatedAt);
+
 -- Sync and client-side specific tables
 
 CREATE TABLE sync_metadata (

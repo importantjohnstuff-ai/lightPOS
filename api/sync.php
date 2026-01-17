@@ -28,7 +28,8 @@ if (!is_writable($dataDir)) {
 $store = new SQLiteStore();
 
 // Ensure Schema exists (Self-Healing)
-function ensureSchema($pdo) {
+function ensureSchema($pdo)
+{
     // Check if the 'settings' table exists, as it's a good indicator of an initialized DB
     $stmt = $pdo->prepare("PRAGMA table_info(settings)");
     $stmt->execute();
@@ -64,17 +65,24 @@ function ensureSchema($pdo) {
     $stmt = $pdo->query("SELECT COUNT(*) FROM users");
     if ($stmt && $stmt->fetchColumn() == 0) {
         $defaultPermissions = json_encode([
-            "pos" => ["read" => true, "write" => true], "customers" => ["read" => true, "write" => true],
-            "items" => ["read" => true, "write" => true], "suppliers" => ["read" => true, "write" => true],
-            "stockin" => ["read" => true, "write" => true], "stock-count" => ["read" => true, "write" => true],
-            "reports" => ["read" => true, "write" => true], "expenses" => ["read" => true, "write" => true],
-            "users" => ["read" => true, "write" => true], "shifts" => ["read" => true, "write" => true],
-            "migrate" => ["read" => true, "write" => true], "returns" => ["read" => true, "write" => true],
-            "settings" => ["read" => true, "write" => true], "purchase_orders" => ["read" => true, "write" => true]
+            "pos" => ["read" => true, "write" => true],
+            "customers" => ["read" => true, "write" => true],
+            "items" => ["read" => true, "write" => true],
+            "suppliers" => ["read" => true, "write" => true],
+            "stockin" => ["read" => true, "write" => true],
+            "stock-count" => ["read" => true, "write" => true],
+            "reports" => ["read" => true, "write" => true],
+            "expenses" => ["read" => true, "write" => true],
+            "users" => ["read" => true, "write" => true],
+            "shifts" => ["read" => true, "write" => true],
+            "migrate" => ["read" => true, "write" => true],
+            "returns" => ["read" => true, "write" => true],
+            "settings" => ["read" => true, "write" => true],
+            "purchase_orders" => ["read" => true, "write" => true]
         ]);
         $passwordHash = md5('admin123');
         $now = round(microtime(true) * 1000);
-        
+
         $sql = "INSERT INTO users (email, name, password_hash, is_active, permissions_json, _version, _updatedAt, _deleted) 
                 VALUES ('admin@lightpos.com', 'Administrator', '$passwordHash', 1, '$defaultPermissions', 1, $now, 0)";
         $pdo->exec($sql);
@@ -85,7 +93,8 @@ function ensureSchema($pdo) {
 ensureSchema($store->pdo);
 
 // Ensure PO Schema exists (Self-Healing for new module)
-function ensurePoSchema($pdo) {
+function ensurePoSchema($pdo)
+{
     $stmt = $pdo->prepare("PRAGMA table_info(inventory_metrics)");
     $stmt->execute();
     if (empty($stmt->fetchAll())) {
@@ -130,15 +139,51 @@ function ensurePoSchema($pdo) {
 }
 ensurePoSchema($store->pdo);
 
+// Ensure Discount Codes Schema exists
+function ensureDiscountCodesSchema($pdo)
+{
+    $stmt = $pdo->prepare("PRAGMA table_info(discount_codes)");
+    $stmt->execute();
+    if (empty($stmt->fetchAll())) {
+        $sql = "CREATE TABLE discount_codes (
+            id TEXT PRIMARY KEY,
+            code TEXT,
+            type TEXT,
+            value REAL,
+            is_active INTEGER,
+            _version INTEGER,
+            _updatedAt INTEGER,
+            _deleted INTEGER DEFAULT 0
+        );
+        CREATE INDEX idx_discount_codes_updatedAt ON discount_codes(_updatedAt);";
+
+        $pdo->exec($sql);
+        error_log("Discount Codes schema initialized via sync.php");
+    }
+}
+ensureDiscountCodesSchema($store->pdo);
+
 $method = $_SERVER['REQUEST_METHOD'];
 
 // 1. Handle Nuclear Reset (Bypass Lock)
 if ($method === 'POST' && isset($_GET['action']) && $_GET['action'] === 'reset_all') {
     $toWipe = [
-        'items', 'transactions', 'shifts', 'expenses', 'stock_movements', 
-        'adjustments', 'customers', 'suppliers', 'stockins', 
-        'suspended_transactions', 'returns', 'notifications', 'stock_logs', 'settings',
-        'users', 'sync_metadata'
+        'items',
+        'transactions',
+        'shifts',
+        'expenses',
+        'stock_movements',
+        'adjustments',
+        'customers',
+        'suppliers',
+        'stockins',
+        'suspended_transactions',
+        'returns',
+        'notifications',
+        'stock_logs',
+        'settings',
+        'users',
+        'sync_metadata'
     ];
     try {
         $store->beginTransaction();
@@ -160,18 +205,25 @@ if ($method === 'POST' && isset($_GET['action']) && $_GET['action'] === 'reset_a
             "_updatedAt" => round(microtime(true) * 1000),
             "_deleted" => 0,
             "permissions_json" => json_encode([
-                "pos" => ["read" => true, "write" => true], "customers" => ["read" => true, "write" => true],
-                "items" => ["read" => true, "write" => true], "suppliers" => ["read" => true, "write" => true],
-                "stockin" => ["read" => true, "write" => true], "stock-count" => ["read" => true, "write" => true],
-                "reports" => ["read" => true, "write" => true], "expenses" => ["read" => true, "write" => true],
-                "users" => ["read" => true, "write" => true], "shifts" => ["read" => true, "write" => true],
-                "migrate" => ["read" => true, "write" => true], "returns" => ["read" => true, "write" => true],
-                "settings" => ["read" => true, "write" => true], "purchase_orders" => ["read" => true, "write" => true]
+                "pos" => ["read" => true, "write" => true],
+                "customers" => ["read" => true, "write" => true],
+                "items" => ["read" => true, "write" => true],
+                "suppliers" => ["read" => true, "write" => true],
+                "stockin" => ["read" => true, "write" => true],
+                "stock-count" => ["read" => true, "write" => true],
+                "reports" => ["read" => true, "write" => true],
+                "expenses" => ["read" => true, "write" => true],
+                "users" => ["read" => true, "write" => true],
+                "shifts" => ["read" => true, "write" => true],
+                "migrate" => ["read" => true, "write" => true],
+                "returns" => ["read" => true, "write" => true],
+                "settings" => ["read" => true, "write" => true],
+                "purchase_orders" => ["read" => true, "write" => true]
             ])
         ];
         $store->upsert('users', $defaultAdmin);
         $store->upsert('sync_metadata', ['key' => 'db_initialized', 'value' => '1']);
-        
+
         if (file_exists($restoreLockFile)) {
             unlink($restoreLockFile);
         }
@@ -193,7 +245,7 @@ if (file_exists($restoreLockFile)) {
         $stmt = $store->pdo->prepare("SELECT value FROM sync_metadata WHERE key = 'db_initialized'");
         $stmt->execute();
         $initialized = $stmt->fetchColumn();
-        
+
         if ($initialized == '1') {
             unlink($restoreLockFile);
         } else {
@@ -222,7 +274,7 @@ if ($method === 'POST') {
             $payload = $change['payload'];
 
             error_log("Processing change for collection: $collection. Payload keys: " . implode(',', array_keys($payload)));
-            
+
             // Extra logging for users to help debug create/login issues
             if ($collection === 'users') {
                 $emailForLog = $payload['email'] ?? '[no-email]';
@@ -250,10 +302,10 @@ if ($method === 'POST') {
                 $pwinfo = isset($payload['password_hash']) ? (strlen($payload['password_hash']) . ' chars; hex=' . (ctype_xdigit($payload['password_hash']) ? 'yes' : 'no')) : 'none';
                 error_log("SYNC: Processed user payload for $emailForLog. password_hash info: $pwinfo");
             }
-            
+
             // The logic inside upsert now handles conflict resolution
             $store->upsert($collection, $payload);
-            
+
             if ($collection === 'transactions') {
                 $pushedTransactions[] = $payload;
             }
@@ -272,7 +324,7 @@ if ($method === 'POST') {
         http_response_code(500);
         echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
     }
-    
+
     exit;
 }
 
@@ -296,12 +348,26 @@ if ($method === 'GET') {
 
 
     // PULL: Return deltas based on timestamp
-    $since = isset($_GET['since']) ? (int)$_GET['since'] : 0;
+    $since = isset($_GET['since']) ? (int) $_GET['since'] : 0;
     $collections = [
-        'items', 'transactions', 'shifts', 'expenses', 'users', 'stock_movements', 
-        'adjustments', 'customers', 'suppliers', 'stockins', 'suspended_transactions', 
-        'returns', 'notifications', 'stock_logs', 'settings',
-        'purchase_orders', 'supplier_config', 'inventory_metrics'
+        'items',
+        'transactions',
+        'shifts',
+        'expenses',
+        'users',
+        'stock_movements',
+        'adjustments',
+        'customers',
+        'suppliers',
+        'stockins',
+        'suspended_transactions',
+        'returns',
+        'notifications',
+        'stock_logs',
+        'settings',
+        'purchase_orders',
+        'supplier_config',
+        'inventory_metrics'
     ];
     $response = [];
     $debug_info = [
