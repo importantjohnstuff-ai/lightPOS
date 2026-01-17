@@ -82,17 +82,19 @@ export async function loadCustomersView() {
                         <div class="bg-gray-50 px-4 py-2 border-b">
                             <h3 class="text-xs font-bold text-gray-500 uppercase">Top 10 Purchased Items</h3>
                         </div>
-                        <table class="min-w-full table-auto">
-                            <thead>
-                                <tr class="text-[10px] text-gray-500 uppercase bg-gray-100">
-                                    <th class="py-2 px-4 text-left">Item Name</th>
-                                    <th class="py-2 px-4 text-right">Qty</th>
-                                </tr>
-                            </thead>
-                            <tbody id="customer-top-items-body" class="text-xs text-gray-600">
-                                <!-- Top Items Rows -->
-                            </tbody>
-                        </table>
+                        <div class="max-h-60 overflow-y-auto">
+                            <table class="min-w-full table-auto">
+                                <thead>
+                                    <tr class="text-[10px] text-gray-500 uppercase bg-gray-100 sticky top-0">
+                                        <th class="py-2 px-4 text-left">Item Name</th>
+                                        <th class="py-2 px-4 text-right">Qty</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="customer-top-items-body" class="text-xs text-gray-600">
+                                    <!-- Top Items Rows -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
