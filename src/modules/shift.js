@@ -526,6 +526,110 @@ async function selectShift(shift) {
     document.getElementById("btn-detail-history")?.addEventListener("click", () => showShiftHistoryModal(shift.adjustments || []));
     document.getElementById("btn-detail-transactions")?.addEventListener("click", () => showShiftTransactions(shift));
     document.getElementById("btn-detail-xreport")?.addEventListener("click", () => showXReport());
+
+    // Row Click Listeners
+    document.getElementById("row-detail-cash-count")?.addEventListener("click", () => showCashBreakdownModal(shift));
+    document.getElementById("row-detail-precounted")?.addEventListener("click", () => showPrecountedModal(shift));
+    document.getElementById("row-detail-expenses")?.addEventListener("click", () => showShiftExpensesModal(shift));
+}
+
+function showCashBreakdownModal(shift) {
+    const breakdown = shift.cash_breakdown || {};
+    const hasData = Object.keys(breakdown).length > 0;
+
+    const div = document.createElement("div");
+    div.className = "fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-[70]";
+
+    // Sort denominations high to low
+    const denoms = Object.keys(breakdown).sort((a, b) => parseFloat(b) - parseFloat(a));
+
+    const rows = denoms.map(denom => `
+        <div class="flex justify-between border-b py-2 last:border-0">
+            <div class="font-bold text-gray-700">₱${denom}</div>
+            <div class="text-gray-900 mx-2">x ${breakdown[denom]}</div>
+            <div class="font-bold text-gray-900">₱${(parseFloat(denom) * breakdown[denom]).toLocaleString()}</div>
+        </div>
+    `).join("");
+
+    div.innerHTML = `
+        <div class="bg-white rounded-lg shadow-xl p-6 w-96 max-w-full">
+            <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                Cash Count Details
+            </h3>
+            <div class="mb-4 text-sm bg-gray-50 rounded p-3">
+                ${hasData ? rows : '<div class="text-center text-gray-500 italic">No breakdown details available.</div>'}
+            </div>
+            <div class="flex justify-end pt-2 border-t">
+                 <div class="flex-1 text-left font-bold text-lg text-blue-800 self-center">Total: ₱${(shift.closing_cash || 0).toLocaleString()}</div>
+                 <button class="bg-gray-800 text-white px-4 py-2 rounded font-bold hover:bg-gray-700 transition" onclick="this.closest('.fixed').remove()">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(div);
+}
+
+function showPrecountedModal(shift) {
+    const bills = parseFloat(shift.precounted_bills) || 0;
+    const coins = parseFloat(shift.precounted_coins) || 0;
+
+    const div = document.createElement("div");
+    div.className = "fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-[70]";
+    div.innerHTML = `
+        <div class="bg-white rounded-lg shadow-xl p-6 w-80 max-w-full">
+            <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                Precounted Money
+            </h3>
+            <div class="space-y-3 mb-6">
+                <div class="flex justify-between items-center p-3 bg-green-50 rounded border border-green-100">
+                    <span class="text-sm font-bold text-gray-600 uppercase">Bills</span>
+                    <span class="text-xl font-bold text-green-700">₱${bills.toLocaleString()}</span>
+                </div>
+                <div class="flex justify-between items-center p-3 bg-yellow-50 rounded border border-yellow-100">
+                    <span class="text-sm font-bold text-gray-600 uppercase">Coins</span>
+                    <span class="text-xl font-bold text-yellow-700">₱${coins.toLocaleString()}</span>
+                </div>
+            </div>
+            <div class="flex justify-end">
+                 <button class="bg-gray-800 text-white px-4 py-2 rounded font-bold hover:bg-gray-700 transition w-full" onclick="this.closest('.fixed').remove()">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(div);
+}
+
+function showShiftExpensesModal(shift) {
+    const expenses = shift.closing_receipts || [];
+    const div = document.createElement("div");
+    div.className = "fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-[70]";
+
+    const rows = expenses.map(exp => `
+        <div class="flex justify-between items-center py-2 border-b last:border-0 hover:bg-gray-50 px-2">
+            <div>
+                <div class="font-bold text-gray-700 text-sm">${exp.description}</div>
+                ${exp.category ? `<div class="text-[10px] text-gray-400 uppercase">${exp.category}</div>` : ''}
+            </div>
+            <div class="font-bold text-red-600">₱${(exp.amount || 0).toLocaleString()}</div>
+        </div>
+    `).join("");
+
+    div.innerHTML = `
+        <div class="bg-white rounded-lg shadow-xl p-6 w-96 max-w-full max-h-[80vh] flex flex-col">
+            <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 2H7a2 2 0 00-2 2v15a2 2 0 002 2z"></path></svg>
+                Shift Expenses
+            </h3>
+            <div class="flex-1 overflow-y-auto mb-4 border rounded bg-white">
+                ${expenses.length > 0 ? rows : '<div class="p-4 text-center text-gray-500 italic">No expenses recorded.</div>'}
+            </div>
+             <div class="flex justify-end pt-2 border-t">
+                 <div class="flex-1 text-left font-bold text-lg text-red-800 self-center">Total: ₱${expenses.reduce((s, e) => s + (e.amount || 0), 0).toLocaleString()}</div>
+                 <button class="bg-gray-800 text-white px-4 py-2 rounded font-bold hover:bg-gray-700 transition" onclick="this.closest('.fixed').remove()">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(div);
 }
 
 function showOpenShiftModal(onSuccess) {
