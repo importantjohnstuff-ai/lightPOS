@@ -2284,7 +2284,7 @@ async function handleAddDiscountCode() {
     };
 
     try {
-        await Repository.create('discount_codes', newDiscount);
+        await Repository.upsert('discount_codes', newDiscount);
 
         // Reset Inputs
         codeInput.value = '';
@@ -2306,7 +2306,7 @@ async function handleDeleteDiscountCode(e) {
         const id = btn.dataset.id;
 
         try {
-            await Repository.delete('discount_codes', id);
+            await Repository.remove('discount_codes', id);
             loadDiscountCodes();
         } catch (err) {
             console.error("Failed to delete", err);
