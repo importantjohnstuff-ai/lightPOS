@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS = {
     rewards: { ratio: 100 },
     shift: { threshold: 0 },
     pos: { auto_print: false },
+    security: { manager_password: "" },
     print: {
         paper_width: 76,
         show_dividers: true,
@@ -384,6 +385,14 @@ export async function loadSettingsView() {
                                         <input type="checkbox" id="set-auto-print" class="form-checkbox h-5 w-5 text-blue-600">
                                         <span class="ml-2 text-sm font-bold text-gray-700">Auto-print receipt after payment</span>
                                     </label>
+                        </div>
+                        <div class="mt-6 pt-6 border-t">
+                            <h4 class="text-xs font-bold text-gray-500 uppercase mb-2">Security</h4>
+                            <div class="max-w-xs">
+                                <label class="block text-sm font-bold text-gray-700 mb-2">Manager Password</label>
+                                <input type="password" id="set-manager-password" class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Leave blank if not required">
+                                <p class="text-[10px] text-gray-500 mt-1">This password will be required for high-clearance actions (e.g., voiding transactions, editing closed shifts).</p>
+                            </div>
                         </div>
                         <div class="mt-6 pt-6 border-t">
                             <h4 class="text-xs font-bold text-gray-500 uppercase mb-2">Developer Tools</h4>
@@ -921,6 +930,9 @@ async function loadSettings() {
             if (settings.pos) {
                 document.getElementById("set-auto-print").checked = settings.pos.auto_print || false;
             }
+            if (settings.security) {
+                document.getElementById("set-manager-password").value = settings.security.manager_password || "";
+            }
             if (settings.print) {
                 const p = settings.print;
                 document.getElementById("set-print-width").value = p.paper_width || 76;
@@ -1039,6 +1051,9 @@ async function handleSave(e) {
         },
         pos: {
             auto_print: document.getElementById("set-auto-print").checked
+        },
+        security: {
+            manager_password: document.getElementById("set-manager-password").value
         },
         print: {
             paper_width: parseInt(document.getElementById("set-print-width").value) || 76,
