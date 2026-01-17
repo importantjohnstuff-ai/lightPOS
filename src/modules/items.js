@@ -217,6 +217,15 @@ export async function loadItemsView() {
                             </div>
                         </div>
         
+                        <div class="flex items-center justify-between mt-6">
+                            <button type="button" id="btn-cancel-item" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded focus:outline-none">Cancel</button>
+                            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none">Save Item</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
         <!-- Bulk Edit Modal -->
         <div id="modal-bulk-edit" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full z-50">
             <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
@@ -246,14 +255,6 @@ export async function loadItemsView() {
                 </div>
             </div>
         </div>
-                        
-                        <div class="flex items-center justify-between mt-6">
-                            <button type="button" id="btn-cancel-item" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded focus:outline-none">Cancel</button>
-                            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none">Save Item</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
         </div>
     `;
 
