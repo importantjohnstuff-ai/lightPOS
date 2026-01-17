@@ -1141,6 +1141,14 @@ async function renderPosInterface(content) {
                 activeShift.precounted_bills = parseFloat(document.getElementById("precounted-bills").value) || 0;
                 activeShift.precounted_coins = parseFloat(document.getElementById("precounted-coins").value) || 0;
 
+                const cashBreakdown = {};
+                modal.querySelectorAll(".denom-input").forEach(input => {
+                    const denom = input.dataset.denom;
+                    const count = parseInt(input.value) || 0;
+                    if (count > 0) cashBreakdown[denom] = count;
+                });
+                activeShift.cash_breakdown = cashBreakdown;
+
                 await Repository.upsert('shifts', activeShift);
 
                 modal.classList.add("hidden");

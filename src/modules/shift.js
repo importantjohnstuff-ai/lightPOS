@@ -469,20 +469,29 @@ async function selectShift(shift) {
                         <td class="border p-2 font-bold text-gray-600 w-1/2">Opening Cash</td>
                         <td class="border p-2 text-right font-bold text-gray-800">₱${(shift.opening_cash || 0).toFixed(2)}</td>
                     </tr>
-                    <tr class="bg-white border-b">
-                        <td class="border p-2 font-bold text-gray-600 w-1/2">Cash Count</td>
+                    <tr class="bg-white border-b hover:bg-blue-50 cursor-pointer transition-colors" id="row-detail-cash-count">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2 flex items-center justify-between">
+                            <span>Cash Count</span>
+                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                        </td>
                         <td class="border p-2 text-right font-bold text-blue-600">₱${(shift.closing_cash || 0).toFixed(2)}</td>
                     </tr>
-                    <tr class="bg-gray-50 border-b">
-                        <td class="border p-2 font-bold text-gray-600 w-1/2">Precounted Money</td>
+                    <tr class="bg-gray-50 border-b hover:bg-blue-50 cursor-pointer transition-colors" id="row-detail-precounted">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2 flex items-center justify-between">
+                            <span>Precounted Money</span>
+                             <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                        </td>
                         <td class="border p-2 text-right font-bold text-gray-800">₱${((shift.precounted_bills || 0) + (shift.precounted_coins || 0)).toFixed(2)}</td>
                     </tr>
                     <tr class="bg-white border-b">
                         <td class="border p-2 font-bold text-gray-600 w-1/2">Cashout</td>
                         <td class="border p-2 text-right font-bold text-purple-600">₱${financials.remittances.toFixed(2)}</td>
                     </tr>
-                    <tr class="bg-gray-50 border-b">
-                        <td class="border p-2 font-bold text-gray-600 w-1/2">Expenses</td>
+                    <tr class="bg-gray-50 border-b hover:bg-blue-50 cursor-pointer transition-colors" id="row-detail-expenses">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2 flex items-center justify-between">
+                            <span>Expenses</span>
+                             <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                        </td>
                         <td class="border p-2 text-right font-bold text-red-600">₱${financials.expenses.toFixed(2)}</td>
                     </tr>
                 </tbody>
