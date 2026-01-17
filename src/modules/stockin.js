@@ -37,7 +37,7 @@ async function loadPoToReceive() {
         // PO Receiving is always Stock In
         currentMode = 'in';
         updateUIMode();
-        
+
         try {
             const po = JSON.parse(poJson);
             const poItems = JSON.parse(po.items_json || '[]');
@@ -209,7 +209,7 @@ function attachEventListeners() {
         if (!searchResults.contains(document.activeElement)) searchResults.classList.add('hidden');
     }, 200));
     stockinForm.addEventListener('submit', handleAddItemToCart);
-    
+
     document.getElementById('save-stock-in-btn')?.addEventListener('click', saveStockIn);
     document.getElementById('clear-cart-btn')?.addEventListener('click', clearCart);
     document.getElementById('btn-refresh-history')?.addEventListener('click', loadStockInHistory);
@@ -321,7 +321,8 @@ function addToCart(item, quantity) {
             id: item.id,
             name: item.name,
             quantity: quantity,
-            cost_price: item.cost_price || 0
+            cost_price: item.cost_price || 0,
+            selling_price: item.selling_price || 0
         });
     }
     renderStockInCart();
@@ -352,7 +353,7 @@ function handleSearch(e) {
         (item.barcode && item.barcode.includes(lowerQuery))
     ).slice(0, 10);
 
-    searchResults.innerHTML = results.map(item => 
+    searchResults.innerHTML = results.map(item =>
         `<div class="p-2 hover:bg-gray-100 cursor-pointer search-result-item focus:bg-blue-100 focus:outline-none" tabindex="0" data-id="${item.id}">${item.name}</div>`
     ).join('');
     searchResults.classList.remove('hidden');
@@ -416,7 +417,7 @@ function renderStockInCart() {
 
     cartActions.classList.remove('hidden');
     supplierSection.classList.remove('hidden');
-    
+
     let grandTotal = 0;
     const isOut = currentMode === 'out';
 
@@ -431,6 +432,9 @@ function renderStockInCart() {
                     <span class="text-xs font-bold ${isOut ? 'text-red-600' : 'text-green-600'}">${isOut ? '-' : '+'}</span>
                     <input type="number" min="1" class="w-16 border rounded text-center py-1 cart-qty-input" data-index="${index}" value="${item.quantity}">
                 </div>
+            </td>
+            <td class="p-2 text-right">
+                <span class="text-gray-600">₱${(item.selling_price || 0).toFixed(2)}</span>
             </td>
             <td class="p-2 text-right">
                 <div class="flex items-center justify-end">
@@ -453,6 +457,7 @@ function renderStockInCart() {
                 <tr class="border-b">
                     <th class="text-left p-2 font-semibold">Item</th>
                     <th class="text-center p-2 font-semibold">Qty</th>
+                    <th class="text-right p-2 font-semibold">Price</th>
                     <th class="text-right p-2 font-semibold">Cost</th>
                     <th class="text-right p-2 font-semibold">Subtotal</th>
                     <th class="text-right p-2 font-semibold">Actions</th>
@@ -463,7 +468,7 @@ function renderStockInCart() {
             </tbody>
             <tfoot>
                 <tr class="font-bold text-blue-600">
-                    <td colspan="3" class="p-2 text-right">Total Invoice Value:</td>
+                    <td colspan="4" class="p-2 text-right">Total Invoice Value:</td>
                     <td class="p-2 text-right">₱${grandTotal.toFixed(2)}</td>
                     <td></td>
                 </tr>
@@ -580,7 +585,7 @@ async function saveStockIn() {
         }
 
         alert(`Stock-${isOut ? 'out' : 'in'} successful! Data is saved locally and will sync with the server.`);
-        
+
         stockInCart = [];
         renderStockInCart();
         await loadStockInHistory();
@@ -601,7 +606,7 @@ async function loadStockInHistory() {
     try {
         const history = await Repository.getAll('stockins');
         historyCache = history;
-        
+
         const startStr = document.getElementById('history-start-date').value;
         const endStr = document.getElementById('history-end-date').value;
         const limit = parseInt(document.getElementById('history-limit').value) || 20;
