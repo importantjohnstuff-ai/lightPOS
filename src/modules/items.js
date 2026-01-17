@@ -30,15 +30,16 @@ export async function loadItemsView() {
                     <div class="flex flex-col mb-4 flex-shrink-0">
                         <div class="flex justify-between items-center mb-4">
                             <h2 class="text-2xl font-bold text-gray-800">Items</h2>
-                            <button id="btn-compare-mode" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2 px-4 rounded transition duration-150 whitespace-nowrap text-xs">
-                                Compare
-                            </button>
-                            <button id="btn-bulk-edit" class="hidden bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded transition duration-150 whitespace-nowrap text-xs">
-                                Bulk Edit
-                            </button>
-                            <button id="btn-add-item" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-150 whitespace-nowrap text-xs ${canWrite ? '' : 'hidden'}">
-                                + Add
-                            </button>
+                            <div class="flex gap-2">
+                                <button id="btn-compare-mode" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2 px-4 rounded transition duration-150 whitespace-nowrap text-xs">
+                                    Compare
+                                </button>
+                                <button id="btn-bulk-edit" class="hidden bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded transition duration-150 whitespace-nowrap text-xs">
+                                    Bulk Edit
+                                </button>
+                                <button id="btn-add-item" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-150 whitespace-nowrap text-xs ${canWrite ? '' : 'hidden'}">
+                                    + Add
+                                </button>
                             </div>
                         </div>
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
