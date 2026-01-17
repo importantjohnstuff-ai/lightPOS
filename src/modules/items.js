@@ -14,10 +14,13 @@ let compareMode = false;
 let selectedForCompare = [];
 let comparisonCharts = [];
 
+let selectedItemIds = new Set();
+
 export async function loadItemsView() {
     const db = await dbPromise;
     const content = document.getElementById("main-content");
     const canWrite = checkPermission("items", "write");
+    selectedItemIds.clear(); // Reset selection on load
 
     content.innerHTML = `
         <div class="max-w-7xl mx-auto lg:h-[calc(100vh-140px)] flex flex-col">
@@ -27,9 +30,11 @@ export async function loadItemsView() {
                     <div class="flex flex-col mb-4 flex-shrink-0">
                         <div class="flex justify-between items-center mb-4">
                             <h2 class="text-2xl font-bold text-gray-800">Items</h2>
-                            <div class="flex gap-2">
                             <button id="btn-compare-mode" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2 px-4 rounded transition duration-150 whitespace-nowrap text-xs">
                                 Compare
+                            </button>
+                            <button id="btn-bulk-edit" class="hidden bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded transition duration-150 whitespace-nowrap text-xs">
+                                Bulk Edit
                             </button>
                             <button id="btn-add-item" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-150 whitespace-nowrap text-xs ${canWrite ? '' : 'hidden'}">
                                 + Add
@@ -52,6 +57,7 @@ export async function loadItemsView() {
                             <table class="min-w-full table-auto">
                                 <thead class="sticky top-0 z-10 bg-gray-100">
                                     <tr class="bg-gray-100 text-gray-600 uppercase text-[10px] leading-normal">
+                                        <th class="py-3 px-4 text-left w-10"><input type="checkbox" id="check-all-items"></th>
                                         <th class="py-3 px-4 text-left cursor-pointer" data-sort="name">Name</th>
                                         <th class="py-3 px-4 text-right cursor-pointer" data-sort="cost_price">Cost</th>
                                         <th class="py-3 px-4 text-right cursor-pointer" data-sort="selling_price">Price</th>
@@ -209,6 +215,36 @@ export async function loadItemsView() {
                                 <input type="number" id="item-conv" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. 12">
                             </div>
                         </div>
+        
+        <!-- Bulk Edit Modal -->
+        <div id="modal-bulk-edit" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <div class="mt-3">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900 text-center mb-4">Bulk Edit Items</h3>
+                    <p class="text-xs text-gray-500 text-center mb-4" id="bulk-edit-count">Editing 0 items</p>
+                    <form id="form-bulk-edit">
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Cost Price (Leave empty to keep)</label>
+                            <input type="number" step="0.01" id="bulk-cost" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="No Change">
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Selling Price (Leave empty to keep)</label>
+                            <input type="number" step="0.01" id="bulk-price" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="No Change">
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Supplier (Select to change)</label>
+                            <select id="bulk-supplier" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">No Change</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center justify-between mt-6">
+                            <button type="button" id="btn-cancel-bulk" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded focus:outline-none">Cancel</button>
+                            <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none">Apply Changes</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
                         
                         <div class="flex items-center justify-between mt-6">
                             <button type="button" id="btn-cancel-item" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded focus:outline-none">Cancel</button>
@@ -305,6 +341,85 @@ export async function loadItemsView() {
             }
         });
     }
+
+    // Bulk Edit Handlers
+    document.getElementById("check-all-items")?.addEventListener("change", (e) => {
+        const checkboxes = document.querySelectorAll(".item-check");
+        if (e.target.checked) {
+            checkboxes.forEach(cb => {
+                cb.checked = true;
+                selectedItemIds.add(cb.dataset.id);
+            });
+        } else {
+            checkboxes.forEach(cb => {
+                cb.checked = false;
+            });
+            selectedItemIds.clear(); // Clear local state only for visible? Or global? Assuming visible for now.
+            // Actually, "Select All" usually implies visible items.
+            // Let's iterate visible inputs to be safe.
+        }
+        updateBulkButton();
+    });
+
+    document.getElementById("btn-bulk-edit")?.addEventListener("click", () => {
+        if (selectedItemIds.size === 0) return;
+        document.getElementById("bulk-edit-count").textContent = `Editing ${selectedItemIds.size} items`;
+
+        // Populate bulk supplier dropdown
+        const select = document.getElementById("bulk-supplier");
+        select.innerHTML = '<option value="">No Change</option>';
+        suppliersList.forEach(sup => {
+            const option = document.createElement("option");
+            option.value = sup.id;
+            option.textContent = sup.name;
+            select.appendChild(option);
+        });
+
+        document.getElementById("form-bulk-edit").reset();
+        document.getElementById("modal-bulk-edit").classList.remove("hidden");
+    });
+
+    document.getElementById("btn-cancel-bulk")?.addEventListener("click", () => {
+        document.getElementById("modal-bulk-edit").classList.add("hidden");
+    });
+
+    document.getElementById("form-bulk-edit")?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const costInput = document.getElementById("bulk-cost").value;
+        const priceInput = document.getElementById("bulk-price").value;
+        const supplierInput = document.getElementById("bulk-supplier").value;
+
+        if (!costInput && !priceInput && !supplierInput) {
+            document.getElementById("modal-bulk-edit").classList.add("hidden");
+            return;
+        }
+
+        const updates = {};
+        if (costInput) updates.cost_price = parseFloat(costInput);
+        if (priceInput) updates.selling_price = parseFloat(priceInput);
+        if (supplierInput) updates.supplier_id = supplierInput;
+
+        try {
+            const updatePromises = Array.from(selectedItemIds).map(async (id) => {
+                const item = await Repository.get('items', id);
+                if (item) {
+                    await Repository.upsert('items', { ...item, ...updates });
+                }
+            });
+
+            await Promise.all(updatePromises);
+
+            showToast(`Updated ${selectedItemIds.size} items successfully.`);
+            selectedItemIds.clear();
+            document.getElementById("check-all-items").checked = false;
+            document.getElementById("modal-bulk-edit").classList.add("hidden");
+            fetchItems();
+        } catch (err) {
+            console.error(err);
+            alert("Failed to update items.");
+        }
+    });
+
 
     // Event Listeners
     const modal = document.getElementById("modal-add-item");
@@ -629,11 +744,14 @@ function renderItems(items, totalCount) {
 
     items.forEach(item => {
         const row = document.createElement("tr");
+        const isSelected = selectedItemIds.has(item.id);
         row.className = `border-b border-gray-200 hover:bg-blue-50 cursor-pointer transition-colors ${selectedItemId === item.id ? 'bg-blue-50' : ''}`;
+
         const supplier = suppliersList.find(s => s.id === item.supplier_id)?.name || '-';
         const parent = itemsData.find(i => i.id === item.parent_id)?.name || '-';
 
         row.innerHTML = `
+            <td class="py-3 px-4 text-left"><input type="checkbox" class="item-check" data-id="${item.id}" ${isSelected ? 'checked' : ''}></td>
             <td class="py-3 px-4 text-left font-medium">${item.name}</td>
             <td class="py-3 px-4 text-right">₱${(item.cost_price || 0).toFixed(2)}</td>
             <td class="py-3 px-4 text-right">₱${(item.selling_price || 0).toFixed(2)}</td>
@@ -652,6 +770,8 @@ function renderItems(items, totalCount) {
 
         const openEditModal = () => {
             if (!canWrite) return;
+            // ... (keep existing openEditModal logic)
+            // WE NEED TO RE-IMPLEMENT THIS because I can't match "..."
             document.getElementById("item-modal-title").textContent = "Edit Item";
             document.getElementById("item-stock").disabled = true;
             document.getElementById("item-id").value = item.id;
@@ -678,7 +798,14 @@ function renderItems(items, totalCount) {
         };
 
         row.addEventListener("click", (e) => {
-            if (e.target.closest("button")) return;
+            if (e.target.closest("button") || e.target.classList.contains("item-check")) return;
+
+            // Handle clicking checkboxes
+            if (e.target.tagName === 'INPUT' && e.target.type === 'checkbox') {
+                // Let the change event handler handle it (attached below)
+                return;
+            }
+
             if (compareMode) {
                 const idx = selectedForCompare.findIndex(i => i.id === item.id);
                 if (idx > -1) {
@@ -694,6 +821,16 @@ function renderItems(items, totalCount) {
             }
         });
 
+        // Checkbox listener
+        row.querySelector(".item-check").addEventListener("change", (e) => {
+            if (e.target.checked) {
+                selectedItemIds.add(item.id);
+            } else {
+                selectedItemIds.delete(item.id);
+            }
+            updateBulkButton();
+        });
+
         row.querySelector(".edit-btn").addEventListener("click", (e) => {
             e.stopPropagation();
             openEditModal();
@@ -701,10 +838,12 @@ function renderItems(items, totalCount) {
 
         row.querySelector(".delete-btn").addEventListener("click", async (e) => {
             e.stopPropagation();
-            if (confirm(`Delete item "${item.name}" ? `)) {
+            if (confirm(`Delete item "${item.name}"?`)) {
                 const id = e.currentTarget.getAttribute("data-id");
                 try {
                     await Repository.remove('items', id);
+                    selectedItemIds.delete(id); // Remove from selection
+                    updateBulkButton();
                     await fetchItems();
                 } catch (error) {
                     console.error("Error deleting item:", error);
@@ -715,6 +854,17 @@ function renderItems(items, totalCount) {
 
         tbody.appendChild(row);
     });
+}
+
+function updateBulkButton() {
+    const btn = document.getElementById("btn-bulk-edit");
+    if (!btn) return;
+    if (selectedItemIds.size > 0) {
+        btn.classList.remove("hidden");
+        btn.textContent = `Bulk Edit (${selectedItemIds.size})`;
+    } else {
+        btn.classList.add("hidden");
+    }
 }
 
 async function selectItem(item) {
