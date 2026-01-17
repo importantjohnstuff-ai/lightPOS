@@ -183,6 +183,26 @@ function render() {
                 </div>
             </div>
         </div>
+        
+        <!-- Suggest Price Modal -->
+        <div id="modal-suggest-price" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-lg p-6 w-96">
+                <h3 class="text-lg font-bold text-gray-800 mb-4">Suggest Selling Price</h3>
+                <p class="text-xs text-gray-500 mb-4">Automatically calculate selling prices for items where the cost has changed.</p>
+                <div class="mb-4">
+                    <label class="block text-sm font-bold text-gray-700 mb-1">Percentage Increase (%)</label>
+                    <input type="number" id="suggest-percent" class="w-full border rounded p-2" placeholder="e.g. 10">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-sm font-bold text-gray-700 mb-1">Cap on Addition (₱)</label>
+                    <input type="number" id="suggest-cap" class="w-full border rounded p-2" placeholder="e.g. 50">
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button id="btn-cancel-suggest" class="text-gray-500 hover:text-gray-700 font-bold py-2 px-4 rounded">Cancel</button>
+                    <button id="btn-apply-suggest" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Apply</button>
+                </div>
+            </div>
+        </div>
     `;
     updateUIMode();
     renderStockInCart();
@@ -212,7 +232,18 @@ function attachEventListeners() {
 
     document.getElementById('save-stock-in-btn')?.addEventListener('click', saveStockIn);
     document.getElementById('clear-cart-btn')?.addEventListener('click', clearCart);
+    document.getElementById('save-stock-in-btn')?.addEventListener('click', saveStockIn);
+    document.getElementById('clear-cart-btn')?.addEventListener('click', clearCart);
     document.getElementById('btn-refresh-history')?.addEventListener('click', loadStockInHistory);
+
+    // Suggest Price Modal Listeners
+    document.getElementById('start-suggest-price')?.addEventListener('click', () => {
+        document.getElementById('modal-suggest-price').classList.remove('hidden');
+    });
+    document.getElementById('btn-cancel-suggest')?.addEventListener('click', () => {
+        document.getElementById('modal-suggest-price').classList.add('hidden');
+    });
+    document.getElementById('btn-apply-suggest')?.addEventListener('click', applySuggestedPrice);
 
     cartContainer.addEventListener('change', (e) => {
         const index = parseInt(e.target.dataset.index);
@@ -324,7 +355,9 @@ function addToCart(item, quantity) {
             id: item.id,
             name: item.name,
             quantity: quantity,
+            quantity: quantity,
             cost_price: item.cost_price || 0,
+            original_cost_price: item.cost_price || 0, // Track original cost
             selling_price: item.selling_price || 0,
             is_price_active: false // Initially grayed out
         });
@@ -380,6 +413,44 @@ function handleSearch(e) {
     });
 }
 
+function applySuggestedPrice() {
+    const percentInput = document.getElementById('suggest-percent');
+    const capInput = document.getElementById('suggest-cap');
+    const percent = parseFloat(percentInput.value);
+    const cap = parseFloat(capInput.value);
+
+    if (isNaN(percent) || isNaN(cap)) {
+        alert("Please enter valid numbers for Percentage and Cap.");
+        return;
+    }
+
+    let updatedCount = 0;
+    stockInCart.forEach(item => {
+        // Only apply if cost has changed from original
+        if (item.cost_price !== item.original_cost_price) {
+            const markup = item.cost_price * (percent / 100);
+            const addedVal = Math.min(markup, cap);
+            const newPrice = item.cost_price + addedVal;
+
+            // Round to 2 decimals
+            item.selling_price = Math.round(newPrice * 100) / 100;
+            item.is_price_active = true;
+            updatedCount++;
+        }
+    });
+
+    if (updatedCount > 0) {
+        renderStockInCart();
+        document.getElementById('modal-suggest-price').classList.add('hidden');
+        // Simple feedback
+        const btn = document.getElementById('start-suggest-price');
+        if (btn) btn.textContent = `✅ Updated ${updatedCount} items!`;
+        setTimeout(() => { if (btn) btn.innerHTML = `✨ Suggest Selling Price`; }, 2000);
+    } else {
+        alert("No items found with modified costs.");
+    }
+}
+
 async function handleAddItemToCart(e) {
     e.preventDefault();
     const itemId = document.getElementById('selected-item-id').value;
@@ -420,7 +491,23 @@ function renderStockInCart() {
     }
 
     cartActions.classList.remove('hidden');
+    cartActions.classList.remove('hidden');
     supplierSection.classList.remove('hidden');
+
+    // Add Suggest Price Button if not exists
+    let suggestBtn = document.getElementById('start-suggest-price');
+    if (!suggestBtn) {
+        const btnContainer = document.createElement('div');
+        btnContainer.className = "mt-2";
+        btnContainer.innerHTML = `<button id="start-suggest-price" class="text-blue-600 text-xs hover:underline font-bold">✨ Suggest Selling Price</button>`;
+        supplierSection.appendChild(btnContainer);
+        // Re-attach listener since we just added it dynamically
+        setTimeout(() => {
+            document.getElementById('start-suggest-price')?.addEventListener('click', () => {
+                document.getElementById('modal-suggest-price').classList.remove('hidden');
+            });
+        }, 0);
+    }
 
     let grandTotal = 0;
     const isOut = currentMode === 'out';
