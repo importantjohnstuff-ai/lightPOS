@@ -134,6 +134,53 @@ export async function loadSettingsView() {
                             </div>
                         </div>
                     </div>
+
+                    <!-- Discount Codes Section -->
+                    <div class="bg-white p-6 rounded-lg shadow-sm border">
+                        <h3 class="text-lg font-bold mb-4">Discount Codes</h3>
+                        <div class="mb-4 flex gap-4 items-end">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-700 mb-1">Code</label>
+                                <input type="text" id="discount-code-input" class="border rounded p-2 text-sm uppercase" placeholder="SUMMER20">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-700 mb-1">Type</label>
+                                <select id="discount-type-input" class="border rounded p-2 text-sm">
+                                    <option value="percentage">Percentage (%)</option>
+                                    <option value="fixed">Fixed Amount (₱)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-700 mb-1">Value</label>
+                                <input type="number" id="discount-value-input" class="border rounded p-2 text-sm w-24" placeholder="10">
+                            </div>
+                            <div class="pb-2">
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="discount-active-input" class="form-checkbox h-4 w-4 text-blue-600" checked>
+                                    <span class="ml-2 text-xs font-bold text-gray-700">Active</span>
+                                </label>
+                            </div>
+                            <button type="button" id="btn-add-discount" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded text-sm transition">Add Code</button>
+                        </div>
+
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full text-sm border-collapse">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="p-2 text-left border-b font-bold text-gray-600">Code</th>
+                                        <th class="p-2 text-left border-b font-bold text-gray-600">Type</th>
+                                        <th class="p-2 text-right border-b font-bold text-gray-600">Value</th>
+                                        <th class="p-2 text-center border-b font-bold text-gray-600">Status</th>
+                                        <th class="p-2 text-center border-b font-bold text-gray-600">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="discount-codes-list" class="divide-y divide-gray-100">
+                                    <!-- Rows loaded via JS -->
+                                    <tr><td colspan="5" class="p-4 text-center text-gray-400">Loading codes...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Advanced Tab -->
@@ -604,8 +651,13 @@ function setupEventListeners() {
             });
 
             if (target === 'sync') renderSyncHistory();
+            if (target === 'rewards') loadDiscountCodes();
         });
     });
+
+    // Discount Codes Listeners
+    document.getElementById('btn-add-discount')?.addEventListener('click', handleAddDiscountCode);
+    document.getElementById('discount-codes-list')?.addEventListener('click', handleDeleteDiscountCode);
 
     // Logo Upload
     const logoFile = document.getElementById("set-store-logo-file");
@@ -779,7 +831,9 @@ function displayTestRunnerModal(tests) {
 
     document.body.appendChild(modal);
 
-    const updateRowUI = (index, status, error = null) => {
+    // --- Discount Codes Logic Removed from here ---
+
+    function updateRowUI(index, status, error = null) {
         const row = document.getElementById(`test-row-${index}`);
         const badge = row.querySelector('.status-badge');
         const errorDiv = row.querySelector('.error-output');
@@ -1434,23 +1488,26 @@ async function processImport(items) {
         id: generateUUID(),
         ...item,
         cost_price: parseFloat(item.cost_price) || 0,
-        selling_price: parseFloat(item.selling_price) || 0,
-        stock_level: parseFloat(item.stock_level) || 0,
-        min_stock: parseFloat(item.min_stock) || 0,
-        supplier_id: item.supplier_id || ""
+        // ... rest of mapping
     }));
-    progressBar.style.width = "70%";
-    progressText.textContent = "Saving to local database...";
+    // ... rest of logic
+    selling_price: parseFloat(item.selling_price) || 0,
+        stock_level: parseFloat(item.stock_level) || 0,
+            min_stock: parseFloat(item.min_stock) || 0,
+                supplier_id: item.supplier_id || ""
+}));
+progressBar.style.width = "70%";
+progressText.textContent = "Saving to local database...";
 
-    for (const item of newItems) {
-        await Repository.upsert('items', item);
-    }
+for (const item of newItems) {
+    await Repository.upsert('items', item);
+}
 
-    progressText.textContent = "Syncing...";
-    SyncEngine.sync();
+progressText.textContent = "Syncing...";
+SyncEngine.sync();
 
-    progressBar.style.width = "100%";
-    progressText.textContent = "Import Complete!";
+progressBar.style.width = "100%";
+progressText.textContent = "Import Complete!";
 }
 
 async function analyzeSync() {
@@ -2154,6 +2211,109 @@ export async function runDiagnosticExport() {
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = originalText;
+        }
+    }
+}
+
+// --- Discount Codes Logic (Top Level) ---
+
+async function loadDiscountCodes() {
+    const listBody = document.getElementById('discount-codes-list');
+    listBody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-gray-400">Loading...</td></tr>';
+
+    try {
+        const codes = await Repository.getAll('discount_codes') || [];
+        const activeCodes = codes.filter(c => !c._deleted);
+
+        if (activeCodes.length === 0) {
+            listBody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-gray-400 italic">No discount codes found.</td></tr>';
+            return;
+        }
+
+        listBody.innerHTML = activeCodes.map(code => `
+        <tr class="hover:bg-gray-50 group">
+            <td class="p-2 border-b font-mono font-bold text-blue-600">${code.code}</td>
+            <td class="p-2 border-b capitalize">${code.type}</td>
+            <td class="p-2 border-b text-right font-mono">${code.type === 'percentage' ? code.value + '%' : '₱' + parseFloat(code.value).toFixed(2)}</td>
+            <td class="p-2 border-b text-center">
+                <span class="px-2 py-1 rounded-full text-xs font-bold ${code.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                    ${code.is_active ? 'Active' : 'Inactive'}
+                </span>
+            </td>
+            <td class="p-2 border-b text-center">
+                <button class="btn-delete-discount text-red-400 hover:text-red-600 p-1" data-id="${code.id}">
+                    🗑️
+                </button>
+            </td>
+        </tr>
+    `).join('');
+
+    } catch (e) {
+        console.error("Error loading discount codes", e);
+        listBody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-red-500">Error loading data</td></tr>`;
+    }
+}
+
+async function handleAddDiscountCode() {
+    const codeInput = document.getElementById('discount-code-input');
+    const typeInput = document.getElementById('discount-type-input');
+    const valueInput = document.getElementById('discount-value-input');
+    const activeInput = document.getElementById('discount-active-input');
+
+    const code = codeInput.value.trim().toUpperCase();
+    const type = typeInput.value;
+    const value = parseFloat(valueInput.value);
+    const isActive = activeInput.checked;
+
+    if (!code) {
+        alert("Please enter a code.");
+        return;
+    }
+    if (isNaN(value) || value <= 0) {
+        alert("Please enter a valid positive value.");
+        return;
+    }
+
+    const newDiscount = {
+        code,
+        type,
+        value,
+        is_active: isActive,
+        id: generateUUID(),
+        sync_status: 'pending',
+        _version: 1,
+        _updatedAt: new Date().toISOString(),
+        _deleted: 0
+    };
+
+    try {
+        await Repository.create('discount_codes', newDiscount);
+
+        // Reset Inputs
+        codeInput.value = '';
+        valueInput.value = '';
+        activeInput.checked = true;
+
+        loadDiscountCodes();
+    } catch (e) {
+        console.error("Error adding discount code", e);
+        alert("Failed to add discount code.");
+    }
+}
+
+async function handleDeleteDiscountCode(e) {
+    if (e.target.classList.contains('btn-delete-discount') || e.target.closest('.btn-delete-discount')) {
+        if (!confirm("Delete this discount code?")) return;
+
+        const btn = e.target.closest('.btn-delete-discount');
+        const id = btn.dataset.id;
+
+        try {
+            await Repository.delete('discount_codes', id);
+            loadDiscountCodes();
+        } catch (err) {
+            console.error("Failed to delete", err);
+            alert("Error deleting code");
         }
     }
 }

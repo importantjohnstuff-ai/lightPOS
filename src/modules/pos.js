@@ -1302,48 +1302,51 @@ async function renderPosInterface(content) {
     document.getElementById("btn-checkout").addEventListener("click", openCheckout);
     document.getElementById("btn-cancel-checkout").addEventListener("click", closeCheckout);
 
-    document.getElementById("btn-apply-discount").addEventListener("click", () => {
+    document.getElementById("btn-apply-discount").addEventListener("click", async () => {
         const codeInput = document.getElementById("discount-code-input");
-        const code = codeInput.value.trim().toLowerCase();
+        const code = codeInput.value.trim().toUpperCase();
         const modal = document.getElementById("modal-checkout");
         const totalOriginal = parseFloat(modal.dataset.total);
+        const discountDisplay = document.getElementById("discount-display");
+        const totalEl = document.getElementById("checkout-total");
 
-        if (code === "pollenstaff") {
-            const discountAmount = totalOriginal * 0.07;
-            const newTotal = totalOriginal - discountAmount;
+        try {
+            const allCodes = await Repository.getAll('discount_codes');
+            const discount = allCodes.find(d => d.code === code && d.is_active && !d._deleted);
 
-            const discountDisplay = document.getElementById("discount-display");
-            discountDisplay.textContent = `Discount Applied: pollenstaff (-₱${discountAmount.toFixed(2)})`;
-            discountDisplay.classList.remove("hidden");
+            if (discount) {
+                let discountAmount = 0;
+                if (discount.type === 'percentage') {
+                    discountAmount = totalOriginal * (parseFloat(discount.value) / 100);
+                } else {
+                    discountAmount = parseFloat(discount.value);
+                }
 
-            const totalEl = document.getElementById("checkout-total");
-            totalEl.innerHTML = `<span class="line-through text-gray-400 text-sm mr-2">₱${totalOriginal.toFixed(2)}</span> ₱${newTotal.toFixed(2)}`;
+                // Cap discount
+                if (discountAmount > totalOriginal) discountAmount = totalOriginal;
+                if (discountAmount < 0) discountAmount = 0;
 
-            modal.dataset.discount = discountAmount;
-            modal.dataset.discountCode = "pollenstaff";
+                const newTotal = totalOriginal - discountAmount;
 
-            showToast("Discount Applied: 7% Off");
-        } else if (code === "pollenowner") {
-            const discountAmount = totalOriginal;
-            const newTotal = 0;
+                discountDisplay.textContent = `Discount Applied: ${code} (-₱${discountAmount.toFixed(2)})`;
+                discountDisplay.classList.remove("hidden");
 
-            const discountDisplay = document.getElementById("discount-display");
-            discountDisplay.textContent = `Discount Applied: pollenowner (-₱${discountAmount.toFixed(2)})`;
-            discountDisplay.classList.remove("hidden");
+                totalEl.innerHTML = `<span class="line-through text-gray-400 text-sm mr-2">₱${totalOriginal.toFixed(2)}</span> ₱${newTotal.toFixed(2)}`;
 
-            const totalEl = document.getElementById("checkout-total");
-            totalEl.innerHTML = `<span class="line-through text-gray-400 text-sm mr-2">₱${totalOriginal.toFixed(2)}</span> ₱${newTotal.toFixed(2)}`;
+                modal.dataset.discount = discountAmount;
+                modal.dataset.discountCode = code;
 
-            modal.dataset.discount = discountAmount;
-            modal.dataset.discountCode = "pollenowner";
-
-            showToast("Discount Applied: 100% Off");
-        } else {
-            showToast("Invalid Discount Code", true);
-            modal.dataset.discount = "0";
-            modal.dataset.discountCode = "";
-            document.getElementById("discount-display").classList.add("hidden");
-            document.getElementById("checkout-total").textContent = `₱${totalOriginal.toFixed(2)}`;
+                showToast(`Discount Applied: ${discount.type === 'percentage' ? discount.value + '% Off' : '₱' + discount.value + ' Off'}`);
+            } else {
+                showToast("Invalid or Inactive Discount Code", true);
+                modal.dataset.discount = "0";
+                modal.dataset.discountCode = "";
+                discountDisplay.classList.add("hidden");
+                totalEl.textContent = `₱${totalOriginal.toFixed(2)}`;
+            }
+        } catch (e) {
+            console.error("Discount Error:", e);
+            showToast("Error checking discount code", true);
         }
     });
 
