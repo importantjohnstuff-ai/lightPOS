@@ -1315,6 +1315,21 @@ async function renderPosInterface(content) {
             modal.dataset.discountCode = "pollenstaff";
 
             showToast("Discount Applied: 7% Off");
+        } else if (code === "pollenowner") {
+            const discountAmount = totalOriginal;
+            const newTotal = 0;
+
+            const discountDisplay = document.getElementById("discount-display");
+            discountDisplay.textContent = `Discount Applied: pollenowner (-₱${discountAmount.toFixed(2)})`;
+            discountDisplay.classList.remove("hidden");
+
+            const totalEl = document.getElementById("checkout-total");
+            totalEl.innerHTML = `<span class="line-through text-gray-400 text-sm mr-2">₱${totalOriginal.toFixed(2)}</span> ₱${newTotal.toFixed(2)}`;
+
+            modal.dataset.discount = discountAmount;
+            modal.dataset.discountCode = "pollenowner";
+
+            showToast("Discount Applied: 100% Off");
         } else {
             showToast("Invalid Discount Code", true);
             modal.dataset.discount = "0";
