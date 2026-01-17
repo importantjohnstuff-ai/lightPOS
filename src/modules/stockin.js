@@ -325,7 +325,8 @@ function addToCart(item, quantity) {
             name: item.name,
             quantity: quantity,
             cost_price: item.cost_price || 0,
-            selling_price: item.selling_price || 0
+            selling_price: item.selling_price || 0,
+            is_price_active: false // Initially grayed out
         });
     }
     renderStockInCart();
@@ -439,7 +440,7 @@ function renderStockInCart() {
             <td class="p-2 text-right">
                 <div class="flex items-center justify-end">
                     <span class="mr-1 text-gray-400">₱</span>
-                    <input type="number" step="0.01" min="0" class="w-24 border rounded text-right py-1 cart-price-input" data-index="${index}" value="${(item.selling_price || 0).toFixed(2)}">
+                    <input type="number" step="0.01" min="0" class="w-24 border rounded text-right py-1 cart-price-input ${item.is_price_active ? 'text-gray-900 font-bold' : 'text-gray-400'}" data-index="${index}" value="${(item.selling_price || 0).toFixed(2)}">
                 </div>
             </td>
             <td class="p-2 text-right">
@@ -503,6 +504,7 @@ function updateCartCost(index, newCost) {
         return;
     }
     stockInCart[index].cost_price = newCost;
+    stockInCart[index].is_price_active = true; // Activate selling price visual
     renderStockInCart();
 }
 
@@ -512,6 +514,7 @@ function updateCartPrice(index, newPrice) {
         return;
     }
     stockInCart[index].selling_price = newPrice;
+    stockInCart[index].is_price_active = true; // Also activate if manually edited
     renderStockInCart();
 }
 
