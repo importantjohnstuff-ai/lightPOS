@@ -305,6 +305,14 @@ export async function loadItemsView() {
         }
     });
 
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+            document.getElementById("modal-add-item")?.classList.add("hidden");
+            document.getElementById("modal-bulk-edit")?.classList.add("hidden");
+            document.getElementById("modal-compare-items")?.classList.add("hidden");
+        }
+    });
+
     // Resizable Split View Logic
     const handle = document.getElementById("items-resize-handle");
     const leftPanel = document.getElementById("items-list-panel");
