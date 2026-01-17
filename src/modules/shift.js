@@ -464,21 +464,25 @@ async function selectShift(shift) {
 
         <div class="overflow-x-auto mb-6">
             <table class="w-full text-sm border-collapse border border-gray-200">
-                <thead class="bg-gray-100 uppercase text-xs text-gray-600">
-                    <tr>
-                        <th class="border p-2 text-right">Opening Cash</th>
-                        <th class="border p-2 text-right">Cash Count</th>
-                        <th class="border p-2 text-right">Precounted Money</th>
-                        <th class="border p-2 text-right">Cashout</th>
-                        <th class="border p-2 text-right">Expenses</th>
-                    </tr>
-                </thead>
                 <tbody>
-                    <tr class="bg-white">
+                    <tr class="bg-gray-50 border-b">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2">Opening Cash</td>
                         <td class="border p-2 text-right font-bold text-gray-800">₱${(shift.opening_cash || 0).toFixed(2)}</td>
+                    </tr>
+                    <tr class="bg-white border-b">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2">Cash Count</td>
                         <td class="border p-2 text-right font-bold text-blue-600">₱${(shift.closing_cash || 0).toFixed(2)}</td>
+                    </tr>
+                    <tr class="bg-gray-50 border-b">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2">Precounted Money</td>
                         <td class="border p-2 text-right font-bold text-gray-800">₱${((shift.precounted_bills || 0) + (shift.precounted_coins || 0)).toFixed(2)}</td>
+                    </tr>
+                    <tr class="bg-white border-b">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2">Cashout</td>
                         <td class="border p-2 text-right font-bold text-purple-600">₱${financials.remittances.toFixed(2)}</td>
+                    </tr>
+                    <tr class="bg-gray-50 border-b">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2">Expenses</td>
                         <td class="border p-2 text-right font-bold text-red-600">₱${financials.expenses.toFixed(2)}</td>
                     </tr>
                 </tbody>
