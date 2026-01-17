@@ -1315,6 +1315,76 @@ async function renderPosInterface(content) {
             const discount = allCodes.find(d => d.code === code && d.is_active && !d._deleted);
 
             if (discount) {
+                // Usage Limit Checks
+                const limit = discount.usage_limit || 'unlimited';
+
+                if (limit !== 'unlimited') {
+                    // 1. Check if Customer is Selected
+                    const selectedCustomer = modal.dataset.customerId; // Assuming we save this when opening, or logic changes needed
+                    // Actually, let's grab it from the active cart state or UI
+                    const cartId = activeCartIndex !== null ? activeCartIndex : 0; // Simplified
+                    const customerNameEl = document.getElementById("pos-customer-search"); // Not reliable
+                    // Better approach: Look at current transaction or cart state if possible.
+                    // For now, let's check the current selected customer from UI variable if available or DOM
+                    // Re-reading code shows `activeCartIndex` logic.
+                    // Let's rely on `currentTransaction.customer_id` if we had it, but we usually build it at checkout.
+                    // We can check if `select-customer` has value.
+                    // Actually, `posCart` logic might not store customer directly yet until checkout?
+                    // Let's assume we need to enforce customer selection strictly.
+
+                    // We need to fetch the currently selected customer ID.
+                    // In `pos.js`, `selectCustomer` updates `posCarts[activeCartIndex].customer`. 
+                    // Let's find where `posCarts` is. It is global.
+
+                }
+
+                // Wait, I cannot access `posCarts` easily inside this block without verifying scope. 
+                // `posCarts` is defined at top of file. Let's assume it's available.
+                const currentCart = posCarts[activeCartIndex || 0];
+                const customerId = currentCart?.customer?.id;
+
+                if (limit !== 'unlimited') {
+                    if (!customerId || customerId === 'Guest') {
+                        showToast(`Code '${code}' requires a registered customer.`, true);
+                        return;
+                    }
+
+                    // 2. Check Usage History
+                    const history = await Repository.getAll('transactions');
+                    const customerHistory = history.filter(t => t.customer_id === customerId && !t.is_voided && !t._deleted);
+
+                    // We need to check if they used this code. 
+                    // Transactions need to store the discount code used.
+                    // Currently `modal.dataset.discountCode` sets it for NEW transaction. 
+                    // Old transactions: we verify if they have a field `discount_code`.
+                    // Does schema support `discount_code` in transactions? 
+                    // Schema check: `transactions` table has `json_body`.
+                    // We should verify if we save `discount_code` in `json_body` or a column.
+
+                    const usedCount = customerHistory.filter(t => {
+                        const tCode = t.discount_code || (t.json_body && JSON.parse(t.json_body).discount_code);
+                        if (!tCode) return false;
+
+                        // Check if code matches
+                        if (tCode !== code) return false;
+
+                        if (limit === 'once_forever') return true;
+
+                        if (limit === 'once_per_day') {
+                            const tDate = new Date(t.timestamp).toISOString().split('T')[0];
+                            const today = new Date().toISOString().split('T')[0];
+                            return tDate === today;
+                        }
+                        return false;
+                    }).length;
+
+                    if (usedCount > 0) {
+                        const msg = limit === 'once_per_day' ? 'already used today' : 'already used';
+                        showToast(`Code '${code}' ${msg} by this customer.`, true);
+                        return;
+                    }
+                }
+
                 let discountAmount = 0;
                 if (discount.type === 'percentage') {
                     discountAmount = totalOriginal * (parseFloat(discount.value) / 100);

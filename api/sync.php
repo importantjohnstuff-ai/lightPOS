@@ -144,12 +144,15 @@ function ensureDiscountCodesSchema($pdo)
 {
     $stmt = $pdo->prepare("PRAGMA table_info(discount_codes)");
     $stmt->execute();
-    if (empty($stmt->fetchAll())) {
+    $columns = $stmt->fetchAll(PDO::FETCH_COLUMN, 1);
+
+    if (empty($columns)) {
         $sql = "CREATE TABLE discount_codes (
             id TEXT PRIMARY KEY,
             code TEXT,
             type TEXT,
             value REAL,
+            usage_limit TEXT,
             is_active INTEGER,
             _version INTEGER,
             _updatedAt INTEGER,
@@ -159,6 +162,12 @@ function ensureDiscountCodesSchema($pdo)
 
         $pdo->exec($sql);
         error_log("Discount Codes schema initialized via sync.php");
+    } else {
+        // Migration: Add usage_limit if missing
+        if (!in_array('usage_limit', $columns)) {
+            $pdo->exec("ALTER TABLE discount_codes ADD COLUMN usage_limit TEXT");
+            error_log("DB Migration: Added usage_limit column to discount_codes table.");
+        }
     }
 }
 ensureDiscountCodesSchema($store->pdo);

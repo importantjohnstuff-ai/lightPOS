@@ -151,6 +151,14 @@ export async function loadSettingsView() {
                                 </select>
                             </div>
                             <div>
+                                <label class="block text-xs font-bold text-gray-700 mb-1">Frequency</label>
+                                <select id="discount-usage-input" class="border rounded p-2 text-sm">
+                                    <option value="unlimited">Unlimited</option>
+                                    <option value="once_per_day">Once per Day</option>
+                                    <option value="once_forever">Once Forever</option>
+                                </select>
+                            </div>
+                            <div>
                                 <label class="block text-xs font-bold text-gray-700 mb-1">Value</label>
                                 <input type="number" id="discount-value-input" class="border rounded p-2 text-sm w-24" placeholder="10">
                             </div>
@@ -170,6 +178,7 @@ export async function loadSettingsView() {
                                         <th class="p-2 text-left border-b font-bold text-gray-600">Code</th>
                                         <th class="p-2 text-left border-b font-bold text-gray-600">Type</th>
                                         <th class="p-2 text-right border-b font-bold text-gray-600">Value</th>
+                                        <th class="p-2 text-left border-b font-bold text-gray-600">Frequency</th>
                                         <th class="p-2 text-center border-b font-bold text-gray-600">Status</th>
                                         <th class="p-2 text-center border-b font-bold text-gray-600">Action</th>
                                     </tr>
@@ -2223,7 +2232,7 @@ async function loadDiscountCodes() {
         const activeCodes = codes.filter(c => !c._deleted);
 
         if (activeCodes.length === 0) {
-            listBody.innerHTML = '<tr><td colspan="5" class="p-4 text-center text-gray-400 italic">No discount codes found.</td></tr>';
+            listBody.innerHTML = '<tr><td colspan="6" class="p-4 text-center text-gray-400 italic">No discount codes found.</td></tr>';
             return;
         }
 
@@ -2232,6 +2241,7 @@ async function loadDiscountCodes() {
             <td class="p-2 border-b font-mono font-bold text-blue-600">${code.code}</td>
             <td class="p-2 border-b capitalize">${code.type}</td>
             <td class="p-2 border-b text-right font-mono">${code.type === 'percentage' ? code.value + '%' : '₱' + parseFloat(code.value).toFixed(2)}</td>
+            <td class="p-2 border-b capitalize text-sm">${(code.usage_limit || 'unlimited').replace(/_/g, ' ')}</td>
             <td class="p-2 border-b text-center">
                 <span class="px-2 py-1 rounded-full text-xs font-bold ${code.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
                     ${code.is_active ? 'Active' : 'Inactive'}
@@ -2247,7 +2257,7 @@ async function loadDiscountCodes() {
 
     } catch (e) {
         console.error("Error loading discount codes", e);
-        listBody.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-red-500">Error loading data</td></tr>`;
+        listBody.innerHTML = `<tr><td colspan="6" class="p-4 text-center text-red-500">Error loading data</td></tr>`;
     }
 }
 
@@ -2255,11 +2265,13 @@ async function handleAddDiscountCode() {
     const codeInput = document.getElementById('discount-code-input');
     const typeInput = document.getElementById('discount-type-input');
     const valueInput = document.getElementById('discount-value-input');
+    const usageInput = document.getElementById('discount-usage-input');
     const activeInput = document.getElementById('discount-active-input');
 
     const code = codeInput.value.trim().toUpperCase();
     const type = typeInput.value;
     const value = parseFloat(valueInput.value);
+    const usage = usageInput.value;
     const isActive = activeInput.checked;
 
     if (!code) {
@@ -2275,6 +2287,7 @@ async function handleAddDiscountCode() {
         code,
         type,
         value,
+        usage_limit: usage,
         is_active: isActive,
         id: generateUUID(),
         sync_status: 'pending',

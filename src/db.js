@@ -60,8 +60,8 @@ if (use_sqlite) {
     dexieDb.version(38).stores({
         items: '++id, name, barcode, category, supplier_id, updatedAt, sync_status, _version, _updatedAt, _deleted'
     });
-    dexieDb.version(39).stores({
-        discount_codes: '++id, code, type, value, is_active, sync_status, _version, _updatedAt, _deleted'
+    dexieDb.version(40).stores({
+        discount_codes: '++id, code, type, value, usage_limit, is_active, sync_status, _version, _updatedAt, _deleted'
     });
     repository = DexieRepository;
     dbPromise = Promise.resolve(dexieDb); // Resolve with the Dexie instance
