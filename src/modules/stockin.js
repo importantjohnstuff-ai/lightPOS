@@ -220,6 +220,8 @@ function attachEventListeners() {
             updateCartQty(index, parseInt(e.target.value));
         } else if (e.target.classList.contains('cart-cost-input')) {
             updateCartCost(index, parseFloat(e.target.value));
+        } else if (e.target.classList.contains('cart-price-input')) {
+            updateCartPrice(index, parseFloat(e.target.value));
         }
     });
 
@@ -235,7 +237,8 @@ function attachEventListeners() {
             if (target.tagName !== 'INPUT') return;
 
             const isQty = target.classList.contains('cart-qty-input');
-            const selector = isQty ? '.cart-qty-input' : '.cart-cost-input';
+            const isCost = target.classList.contains('cart-cost-input');
+            const selector = isQty ? '.cart-qty-input' : (isCost ? '.cart-cost-input' : '.cart-price-input');
             const inputs = Array.from(cartContainer.querySelectorAll(selector));
             const index = inputs.indexOf(target);
 
@@ -434,7 +437,10 @@ function renderStockInCart() {
                 </div>
             </td>
             <td class="p-2 text-right">
-                <span class="text-gray-600">₱${(item.selling_price || 0).toFixed(2)}</span>
+                <div class="flex items-center justify-end">
+                    <span class="mr-1 text-gray-400">₱</span>
+                    <input type="number" step="0.01" min="0" class="w-24 border rounded text-right py-1 cart-price-input" data-index="${index}" value="${(item.selling_price || 0).toFixed(2)}">
+                </div>
             </td>
             <td class="p-2 text-right">
                 <div class="flex items-center justify-end">
@@ -500,6 +506,15 @@ function updateCartCost(index, newCost) {
     renderStockInCart();
 }
 
+function updateCartPrice(index, newPrice) {
+    if (isNaN(newPrice) || newPrice < 0) {
+        renderStockInCart();
+        return;
+    }
+    stockInCart[index].selling_price = newPrice;
+    renderStockInCart();
+}
+
 function clearCart() {
     if (confirm('Are you sure you want to clear the cart?')) {
         stockInCart = [];
@@ -529,6 +544,7 @@ async function saveStockIn() {
                 const change = isOut ? -cartItem.quantity : cartItem.quantity;
                 item.stock_level = (item.stock_level || 0) + change;
                 item.cost_price = cartItem.cost_price;
+                item.selling_price = cartItem.selling_price; // Update selling price
                 if (supplierId && !item.supplier_id) {
                     item.supplier_id = supplierId;
                 }
