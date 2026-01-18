@@ -1318,30 +1318,7 @@ async function renderPosInterface(content) {
                 // Usage Limit Checks
                 const limit = discount.usage_limit || 'unlimited';
 
-                if (limit !== 'unlimited') {
-                    // 1. Check if Customer is Selected
-                    const selectedCustomer = modal.dataset.customerId; // Assuming we save this when opening, or logic changes needed
-                    // Actually, let's grab it from the active cart state or UI
-                    const cartId = activeCartIndex !== null ? activeCartIndex : 0; // Simplified
-                    const customerNameEl = document.getElementById("pos-customer-search"); // Not reliable
-                    // Better approach: Look at current transaction or cart state if possible.
-                    // For now, let's check the current selected customer from UI variable if available or DOM
-                    // Re-reading code shows `activeCartIndex` logic.
-                    // Let's rely on `currentTransaction.customer_id` if we had it, but we usually build it at checkout.
-                    // We can check if `select-customer` has value.
-                    // Actually, `posCart` logic might not store customer directly yet until checkout?
-                    // Let's assume we need to enforce customer selection strictly.
-
-                    // We need to fetch the currently selected customer ID.
-                    // In `pos.js`, `selectCustomer` updates `posCarts[activeCartIndex].customer`. 
-                    // Let's find where `posCarts` is. It is global.
-
-                }
-
-                // Wait, I cannot access `posCarts` easily inside this block without verifying scope. 
-                // `posCarts` is defined at top of file. Let's assume it's available.
-                const currentCart = posCarts[activeCartIndex || 0];
-                const customerId = currentCart?.customer?.id;
+                const customerId = selectedCustomer ? selectedCustomer.id : 'Guest';
 
                 if (limit !== 'unlimited') {
                     if (!customerId || customerId === 'Guest') {
