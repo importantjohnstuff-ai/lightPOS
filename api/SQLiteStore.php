@@ -14,10 +14,11 @@ class SQLiteStore
         // Disable WAL mode to prevent locking issues on some filesystems
         $this->pdo->exec("PRAGMA journal_mode=DELETE;");
         $this->pdo->exec("PRAGMA busy_timeout = 5000;");
-        // Disable emulated prepares to use native SQLite binding (prevents Error 21 in some envs)
+        // Enable emulated prepares for better compatibility with mixed parameter types
+        // (Native prepares can cause Error 21 on some PHP/SQLite configurations)
         try {
-            $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
-            error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=false");
+            $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, true);
+            error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=true");
         } catch (Exception $e) {
             error_log("SQLiteStore warning: Could not set ATTR_EMULATE_PREPARES: " . $e->getMessage());
         }
