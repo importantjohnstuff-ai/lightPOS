@@ -549,6 +549,16 @@ async function renderShiftDetail(shiftId) {
     const endTime = fullShift.end_time ? new Date(fullShift.end_time) : new Date();
     const userEmailNormalized = (fullShift.user_id || "").trim().toLowerCase();
 
+    // Fetch transactions for this shift period
+    const txs = await db.transactions
+        .where('timestamp').between(startTime.toISOString(), endTime.toISOString(), true, true)
+        .toArray();
+
+    // Initialize calculation variables
+    let calcSales = 0;
+    let calcExchange = 0;
+    const adjustments = fullShift.adjustments || [];
+
     txs.forEach(tx => {
         const txUserNormalized = (tx.user_email || "").trim().toLowerCase();
         // Sales: Cash payments by this user
