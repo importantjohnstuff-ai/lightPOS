@@ -310,6 +310,11 @@ if ($method === 'POST') {
                 $emailForLog = $payload['email'] ?? '[no-email]';
                 $pwinfo = isset($payload['password_hash']) ? (strlen($payload['password_hash']) . ' chars; hex=' . (ctype_xdigit($payload['password_hash']) ? 'yes' : 'no')) : 'none';
                 error_log("SYNC: Processed user payload for $emailForLog. password_hash info: $pwinfo");
+
+                // Fix: Convert null role to empty string to avoid SQLite PARAM_NULL binding issues
+                if (array_key_exists('role', $payload) && $payload['role'] === null) {
+                    $payload['role'] = '';
+                }
             }
 
             // The logic inside upsert now handles conflict resolution

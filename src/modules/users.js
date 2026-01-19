@@ -186,11 +186,11 @@ async function fetchAndRenderUsers(filter = "all") {
         if (navigator.onLine) {
             await SyncEngine.sync();
         }
-        
+
         const users = await Repository.getAll('users');
-        
+
         tbody.innerHTML = "";
-        
+
         let filteredUsers = users;
         if (filter === "pending") {
             filteredUsers = users.filter(u => {
@@ -206,14 +206,14 @@ async function fetchAndRenderUsers(filter = "all") {
 
         filteredUsers.forEach((user) => {
             const tr = document.createElement("tr");
-            
+
             let permCount = 0;
             if (user.permissions) {
                 Object.values(user.permissions).forEach(p => {
                     if (p.read) permCount++;
                 });
             }
-            
+
             // Normalize is_active to handle 1/0, "1"/"0", true/false
             const isActive = user.is_active === undefined ? true : (user.is_active === true || user.is_active === 1 || user.is_active === '1');
 
@@ -232,7 +232,7 @@ async function fetchAndRenderUsers(filter = "all") {
                     <button class="text-indigo-600 hover:text-indigo-900 btn-edit ${canWrite ? '' : 'hidden'}">Edit</button>
                 </td>
             `;
-            
+
             tr.querySelector(".btn-edit").addEventListener("click", () => openUserModal(user));
             tbody.appendChild(tr);
         });
@@ -254,7 +254,7 @@ function openUserModal(user = null) {
     const roleSelect = document.getElementById("user-role");
 
     modal.classList.remove("hidden");
-    
+
     // Generate Permissions Matrix
     permBody.innerHTML = MODULES.map(mod => {
         const p = user?.permissions?.[mod] || { read: false, write: false };
@@ -278,7 +278,7 @@ function openUserModal(user = null) {
         nameInput.value = user.name;
         phoneInput.value = user.phone || "";
         activeInput.checked = user.is_active === true || user.is_active === 1 || user.is_active === '1';
-        
+
         passwordContainer.classList.remove("hidden");
         document.getElementById("user-password").placeholder = "Leave blank to keep current";
 
@@ -302,19 +302,19 @@ function openUserModal(user = null) {
         passwordContainer.classList.remove("hidden");
         roleSelect.value = "cashier"; // Default for new users
         document.getElementById("user-password").value = "";
-        
+
         // Apply default role permissions
         setTimeout(() => applyRolePermissions("cashier"), 0);
     }
 
     // Event Listeners for Role and Select All
     roleSelect.onchange = (e) => applyRolePermissions(e.target.value);
-    
+
     document.getElementById("select-all-read").onchange = (e) => {
         document.querySelectorAll('.perm-check[data-type="read"]').forEach(cb => cb.checked = e.target.checked);
         roleSelect.value = "custom";
     };
-    
+
     document.getElementById("select-all-write").onchange = (e) => {
         document.querySelectorAll('.perm-check[data-type="write"]').forEach(cb => cb.checked = e.target.checked);
         roleSelect.value = "custom";
@@ -330,16 +330,16 @@ function openUserModal(user = null) {
 
 function applyRolePermissions(roleKey) {
     if (roleKey === 'custom') return;
-    
+
     const perms = ROLES[roleKey].permissions;
     MODULES.forEach(mod => {
         const readCb = document.querySelector(`.perm-check[data-module="${mod}"][data-type="read"]`);
         const writeCb = document.querySelector(`.perm-check[data-module="${mod}"][data-type="write"]`);
-        
+
         if (readCb) readCb.checked = perms[mod]?.read || false;
         if (writeCb) writeCb.checked = perms[mod]?.write || false;
     });
-    
+
     document.getElementById("select-all-read").checked = false;
     document.getElementById("select-all-write").checked = false;
 }
@@ -350,7 +350,7 @@ function closeUserModal() {
 
 async function handleUserSubmit(e) {
     e.preventDefault();
-    
+
     const btnSave = e.target.querySelector('button[type="submit"]');
     const originalBtnText = btnSave.textContent;
     btnSave.disabled = true;
@@ -367,7 +367,7 @@ async function handleUserSubmit(e) {
         if ((!isEdit || password) && (!password || password.length < 6)) {
             throw new Error("Password is required and must be at least 6 characters.");
         }
-        
+
         // Harvest permissions
         const permissions = {};
         document.querySelectorAll(".perm-check").forEach(chk => {
@@ -392,7 +392,12 @@ async function handleUserSubmit(e) {
             is_active: isActive ? 1 : 0, // Store as 1/0 for SQLite compatibility
             permissions
         };
-        
+
+        // Clean up legacy role field to avoid SQLite null binding issues
+        if (userData.role === null || userData.role === undefined) {
+            userData.role = '';
+        }
+
         // Only update password if provided
         if (password) {
             if (typeof md5 === 'function') {
@@ -407,11 +412,11 @@ async function handleUserSubmit(e) {
         const debugUserData = { ...userData };
         // If password_hash present, partially mask it for logs
         if (debugUserData.password_hash) {
-            debugUserData.password_hash = debugUserData.password_hash.slice(0,6) + '...';
+            debugUserData.password_hash = debugUserData.password_hash.slice(0, 6) + '...';
         }
         if (debugUserData.password) {
             // Password on client is md5(password); mask it as well
-            debugUserData.password = debugUserData.password.slice(0,6) + '...';
+            debugUserData.password = debugUserData.password.slice(0, 6) + '...';
         }
         console.log("User submit data (masked):", debugUserData);
 
