@@ -592,3 +592,28 @@ Even after the above fixes, `INSERT` operations (specifically creating new users
 **Final Resolution:** We modified `SQLiteStore.php` to bind **ALL** scalar values (Integers, Floats, Booleans, Strings) as `PDO::PARAM_STR` (except `NULL` which remains `PDO::PARAM_NULL`). SQLite's affinity system handles the conversion from string to the correct type (INTEGER/REAL) reliably, bypassing the strict type checking bugs in the PHP PDO driver for this environment.
 > ✅ Status: Verified with `api/repro_insert_user.php`.
 
+## User Password Update Error 21 (2026-01-19)
+
+### Problem Description
+Updating a user's password via the User Management module resulted in `SQLSTATE[HY000]: General error: 21 bad parameter or other API misuse` during the sync push operation.
+
+### Diagnosis
+The error persisted despite previous fixes being documented. Investigation revealed:
+1. Changes to `SQLiteStore.php` were not being deployed correctly
+2. The deployment script wasn't always copying the latest files
+3. PHP OPcache may have been serving stale versions
+
+### Correct Fix
+1. **Added Version Constant:** Added `const VERSION = 'date-version'` to `SQLiteStore.php` to verify which version is deployed.
+2. **Created `api/version_check.php`:** Diagnostic endpoint to verify deployed version in browser.
+3. **Ensured PARAM_STR Binding:** Confirmed that ALL values are bound as `PDO::PARAM_STR` (except NULL as `PDO::PARAM_NULL`).
+4. **Client-side fixes in `users.js`:**
+   - Changed password field from `password` to `password_hash` for server compatibility
+   - Added explicit `role: ''` to prevent null values
+   - Added proper `_version` increment for sync
+
+### Verification
+After deploying version `2026-01-19-v4-DEBUG_LOGGING` with debug logging, the password update succeeded. Check `api/version_check.php` to verify deployment.
+
+> ✅ Status: Verified working 2026-01-19.
+
