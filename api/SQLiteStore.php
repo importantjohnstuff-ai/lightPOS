@@ -14,11 +14,11 @@ class SQLiteStore
         // Disable WAL mode to prevent locking issues on some filesystems
         $this->pdo->exec("PRAGMA journal_mode=DELETE;");
         $this->pdo->exec("PRAGMA busy_timeout = 5000;");
-        // Enable emulated prepares for better compatibility with mixed parameter types
-        // (Native prepares can cause Error 21 on some PHP/SQLite configurations)
+        // Disable emulated prepares to use native SQLite binding
+        // Combined with binding ALL values as PARAM_STR, this resolves Error 21
         try {
-            $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, true);
-            error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=true");
+            $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
+            error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=false");
         } catch (Exception $e) {
             error_log("SQLiteStore warning: Could not set ATTR_EMULATE_PREPARES: " . $e->getMessage());
         }
@@ -161,23 +161,6 @@ class SQLiteStore
         $exists = $stmtCheck->fetchColumn();
         $stmtCheck->closeCursor();
 
-        // Helper function to normalize params for SQLite compatibility
-        $normalizeParams = function ($params) {
-            $normalized = [];
-            foreach ($params as $val) {
-                if (is_null($val)) {
-                    $normalized[] = ''; // Convert NULL to empty string for TEXT columns
-                } elseif (is_bool($val)) {
-                    $normalized[] = $val ? 1 : 0;
-                } elseif (is_array($val) || is_object($val)) {
-                    $normalized[] = json_encode($val);
-                } else {
-                    $normalized[] = $val;
-                }
-            }
-            return $normalized;
-        };
-
         if ($exists) {
             // UPDATE
             $updateColumns = array_filter($columns, fn($c) => $c !== $idColumn);
@@ -193,9 +176,22 @@ class SQLiteStore
                 }
                 $updateParams[] = $dbRecord[$idColumn];
 
-                // Normalize and execute directly
-                $normalizedParams = $normalizeParams($updateParams);
-                $this->executeWithRetry($stmtUpdate, $normalizedParams);
+                // Bind ALL values as PDO::PARAM_STR (except NULL as PARAM_NULL)
+                // SQLite's type affinity handles conversion reliably
+                // This bypasses strict type checking bugs in PHP PDO driver
+                foreach ($updateParams as $i => $val) {
+                    if (is_null($val)) {
+                        $stmtUpdate->bindValue($i + 1, null, PDO::PARAM_NULL);
+                    } elseif (is_bool($val)) {
+                        $stmtUpdate->bindValue($i + 1, $val ? '1' : '0', PDO::PARAM_STR);
+                    } elseif (is_array($val) || is_object($val)) {
+                        $stmtUpdate->bindValue($i + 1, json_encode($val), PDO::PARAM_STR);
+                    } else {
+                        $stmtUpdate->bindValue($i + 1, (string) $val, PDO::PARAM_STR);
+                    }
+                }
+
+                $this->executeWithRetry($stmtUpdate, null, $updateParams);
             }
         } else {
             // INSERT
@@ -207,9 +203,20 @@ class SQLiteStore
 
             $stmt = $this->pdo->prepare($sql);
 
-            // Normalize and execute directly
-            $normalizedParams = $normalizeParams($bindParams);
-            $this->executeWithRetry($stmt, $normalizedParams);
+            // Bind ALL values as PDO::PARAM_STR (except NULL as PARAM_NULL)
+            foreach ($bindParams as $i => $val) {
+                if (is_null($val)) {
+                    $stmt->bindValue($i + 1, null, PDO::PARAM_NULL);
+                } elseif (is_bool($val)) {
+                    $stmt->bindValue($i + 1, $val ? '1' : '0', PDO::PARAM_STR);
+                } elseif (is_array($val) || is_object($val)) {
+                    $stmt->bindValue($i + 1, json_encode($val), PDO::PARAM_STR);
+                } else {
+                    $stmt->bindValue($i + 1, (string) $val, PDO::PARAM_STR);
+                }
+            }
+
+            $this->executeWithRetry($stmt, null, $bindParams);
         }
     }
 
