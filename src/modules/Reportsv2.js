@@ -30,7 +30,7 @@ let currentModalReportId = null;
 
 const REPORTS_CONFIG = {
     products: [
-        { id: 'prod-perf', title: 'Product Performance', desc: 'In-depth sales metrics, margins, and Retailer\'s Matrix categorization.', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', implemented: false },
+        { id: 'prod-perf', title: 'Product Performance', desc: 'In-depth sales metrics, margins, and Retailer\'s Matrix categorization.', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', implemented: true },
         { id: 'prod-risk', title: 'Risk & Quality', desc: 'Analyze return rates and shrinkage per product to identify quality issues.', icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z', implemented: false },
         { id: 'prod-affinity', title: 'Product Affinity', desc: 'Identify which items are frequently bought together to optimize bundles.', icon: 'M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01', implemented: false },
         { id: 'prod-lowstock', title: 'Low Stock Report', desc: 'Real-time list of products nearing or below their minimum stock threshold.', icon: 'M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z', implemented: false },
@@ -73,7 +73,7 @@ export async function loadReportsView() {
                 <h2 class="text-2xl font-bold text-gray-800">Reports Dashboard (v2)</h2>
             </div>
             
-            <div class="border-b border-gray-200 mb-6 bg-white sticky top-0 z-10 shadow-sm flex justify-between items-center pr-4">
+            <div class="border-b border-gray-200 mb-6 bg-white sticky top-0 z-1 shadow-sm flex justify-between items-center pr-4">
                 <nav class="flex space-x-8 px-4 overflow-x-auto" aria-label="Tabs">
                     <button data-tab="products" class="tab-btn border-blue-500 text-blue-600 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">Products</button>
                     <button data-tab="inventory" class="tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">Inventory</button>
@@ -334,6 +334,427 @@ async function generateReport(reportId) {
 
         renderSalesSummary(result);
     }
+    else if (reportId === 'prod-perf') {
+        const transactions = await db.transactions.where('timestamp').between(startStr, endStr, true, true).toArray();
+        const items = await db.items.toArray();
+        const returns = await db.returns.where('timestamp').between(startStr, endStr, true, true).toArray();
+
+        // Reuse reportWorker for aggregation
+        reportWorker.postMessage({
+            type: 'GENERATE',
+            payload: {
+                transactions,
+                allItems: items,
+                returns,
+                filteredAdjustments: [],
+                filteredMovements: [],
+                filteredStockIn: [],
+                filteredExpenses: [],
+                startDate: startStr,
+                endDate: endStr,
+                suppliers: [],
+                taxRate: 0
+            }
+        });
+
+        const result = await new Promise((resolve, reject) => {
+            reportResolve = resolve;
+            reportReject = reject;
+        });
+
+        renderProductPerformance(result);
+    }
+}
+
+let perfCurrentItems = [];
+let perfCurrentFilter = 'all';
+let perfSort = { key: 'qty', dir: 'desc' }; // Default sort by Volume (High to Low)
+
+function renderProductPerformance(data) {
+    const { products } = data;
+    const content = document.getElementById("report-modal-content");
+    const metrics = document.getElementById("report-metrics-container");
+
+    // 1. Calculate Centroid (Volume = Qty, Efficiency = MarginPct)
+    // Filter out items with 0 volume if we want to focus on active performance,
+    // but the user said "dynamic from sales data", implying we check sold items.
+    // products array from worker only includes items with sales or stock?
+    // Worker: iterates validTxs items. So products only contains items that were sold in the period.
+
+    // Calculate Averages (Centroid)
+    const totalQty = products.reduce((sum, p) => sum + p.qty, 0);
+    // const totalMarginPct = products.reduce((sum, p) => sum + p.marginPct, 0);
+    // Weighted Average Margin? Or simple average of margin percentages?
+    // "Centroid of cartesian plane" usually implies arithmetic mean of the points.
+    const count = products.length || 1;
+    const avgVolume = totalQty / count;
+    const avgEfficiency = products.reduce((sum, p) => sum + p.marginPct, 0) / count;
+
+    // 2. Tag Items
+    const taggedProducts = products.map(p => {
+        let tag = '';
+        const isHighVol = p.qty >= avgVolume;
+        const isHighEff = p.marginPct >= avgEfficiency;
+
+        // Q1: High Vol, High Eff (Winners/Stars)
+        if (isHighVol && isHighEff) tag = 'Winner';
+        // Q2: Low Vol, High Eff (Sleepers/Opportunities)
+        else if (!isHighVol && isHighEff) tag = 'Sleeper';
+        // Q3: Low Vol, Low Eff (Bleeders/Dogs)
+        else if (!isHighVol && !isHighEff) tag = 'Bleeder';
+        // Q4: High Vol, Low Eff (Traffic/Cash Cows)
+        else tag = 'Traffic Builder';
+
+        return { ...p, tag };
+    });
+
+    perfCurrentItems = taggedProducts; // Store for table
+
+    // 3. Render Quadrant Cards
+    const counts = { Winner: 0, Sleeper: 0, Bleeder: 0, 'Traffic Builder': 0 };
+    taggedProducts.forEach(p => counts[p.tag]++);
+
+    metrics.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 p-4">
+            <!-- Winner -->
+            <div class="cursor-pointer bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg p-4 transition-colors perf-card" data-filter="Winner">
+                <div class="flex justify-between items-start">
+                    <div class="p-2 bg-green-200 rounded text-green-700">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path></svg>
+                    </div>
+                    <span class="text-xs font-bold bg-white px-2 py-1 rounded border border-green-100 text-green-600">High Vol / High Eff</span>
+                </div>
+                <div class="mt-3">
+                    <h3 class="text-xl font-bold text-gray-800">${counts.Winner} Items</h3>
+                    <p class="text-sm text-gray-500">Winners</p>
+                </div>
+            </div>
+
+            <!-- Traffic Builder -->
+            <div class="cursor-pointer bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg p-4 transition-colors perf-card" data-filter="Traffic Builder">
+                <div class="flex justify-between items-start">
+                     <div class="p-2 bg-blue-200 rounded text-blue-700">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path></svg>
+                    </div>
+                    <span class="text-xs font-bold bg-white px-2 py-1 rounded border border-blue-100 text-blue-600">High Vol / Low Eff</span>
+                </div>
+                <div class="mt-3">
+                    <h3 class="text-xl font-bold text-gray-800">${counts['Traffic Builder']} Items</h3>
+                    <p class="text-sm text-gray-500">Traffic Builders</p>
+                </div>
+            </div>
+
+             <!-- Sleeper -->
+            <div class="cursor-pointer bg-yellow-50 hover:bg-yellow-100 border border-yellow-200 rounded-lg p-4 transition-colors perf-card" data-filter="Sleeper">
+                <div class="flex justify-between items-start">
+                     <div class="p-2 bg-yellow-200 rounded text-yellow-700">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                    <span class="text-xs font-bold bg-white px-2 py-1 rounded border border-yellow-100 text-yellow-600">Low Vol / High Eff</span>
+                </div>
+                <div class="mt-3">
+                    <h3 class="text-xl font-bold text-gray-800">${counts.Sleeper} Items</h3>
+                    <p class="text-sm text-gray-500">Sleepers</p>
+                </div>
+            </div>
+
+            <!-- Bleeder -->
+             <div class="cursor-pointer bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg p-4 transition-colors perf-card" data-filter="Bleeder">
+                <div class="flex justify-between items-start">
+                     <div class="p-2 bg-red-200 rounded text-red-700">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l9-5-9-5-9 5 9 5z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z"></path></svg>
+                    </div>
+                     <span class="text-xs font-bold bg-white px-2 py-1 rounded border border-red-100 text-red-600">Low Vol / Low Eff</span>
+                </div>
+                <div class="mt-3">
+                    <h3 class="text-xl font-bold text-gray-800">${counts.Bleeder} Items</h3>
+                    <p class="text-sm text-gray-500">Bleeders</p>
+                </div>
+            </div>
+        </div>
+        <div class="px-6 pb-2 text-xs text-center text-gray-500">
+            Analysis Centroid: <b>${avgVolume.toFixed(1)} Units</b> (Avg Vol) / <b>${avgEfficiency.toFixed(1)}%</b> (Avg Efficiency)
+        </div>
+    `;
+
+    // 4. Render Table Container
+    content.innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+             <div class="relative">
+                <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                </span>
+                <input type="text" id="perf-search" class="pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 w-64" placeholder="Search items...">
+            </div>
+            <div id="perf-filter-label" class="text-sm font-bold text-gray-700 bg-gray-100 px-3 py-1 rounded">All Categories</div>
+        </div>
+        
+        <div class="bg-white border rounded-lg overflow-hidden shadow-sm">
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Item</th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none group" id="sort-vol" data-key="qty">
+                                 Volume (Qty)
+                                 <span class="ml-1 inline-block ${perfSort.key === 'qty' ? '' : 'text-gray-300'}">
+                                    ${perfSort.key === 'qty' ? (perfSort.dir === 'desc' ? '↓' : '↑') : '↓'}
+                                 </span>
+                            </th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 transition-colors select-none group" id="sort-eff" data-key="marginPct">
+                                 Efficiency (Margin%)
+                                 <span class="ml-1 inline-block ${perfSort.key === 'marginPct' ? '' : 'text-gray-300'}">
+                                    ${perfSort.key === 'marginPct' ? (perfSort.dir === 'desc' ? '↓' : '↑') : '↓'}
+                                 </span>
+                            </th>
+                            <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Tag</th>
+                            <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200" id="perf-table-body">
+                        <!-- Rows -->
+                    </tbody>
+                </table>
+            </div>
+            <div class="bg-gray-50 px-4 py-3 border-t border-gray-200 flex items-center justify-between sm:px-6">
+                 <button id="perf-prev" class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">Previous</button>
+                 <span id="perf-page-info" class="text-sm text-gray-700">Page 1</span>
+                 <button id="perf-next" class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">Next</button>
+            </div>
+        </div>
+
+        <!-- Quick Edit Modal (Hidden) -->
+        <div id="quick-edit-modal" class="hidden fixed inset-0 z-[60] overflow-hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+             <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true"></div>
+              <div class="flex items-center justify-center min-h-screen px-4">
+                 <div class="bg-white rounded-lg shadow-xl transform transition-all max-w-sm w-full p-6">
+                    <h3 class="text-lg font-medium text-gray-900 mb-4">Quick Edit Item</h3>
+                    <input type="hidden" id="qe-id">
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700">Item Name</label>
+                        <input type="text" id="qe-name" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 text-sm bg-gray-100" readonly>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                         <div>
+                            <label class="block text-sm font-medium text-gray-700">Cost Price</label>
+                            <input type="number" step="0.01" id="qe-cost" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">Selling Price</label>
+                            <input type="number" step="0.01" id="qe-price" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                        </div>
+                    </div>
+                     <div class="flex justify-end gap-2">
+                        <button type="button" id="qe-cancel" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">Cancel</button>
+                        <button type="button" id="qe-save" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Save</button>
+                    </div>
+                 </div>
+              </div>
+        </div>
+    `;
+
+    // Initialize Table
+    setupPerfTable();
+
+    // Event Listeners for Cards
+    metrics.querySelectorAll('.perf-card').forEach(card => {
+        card.addEventListener('click', () => {
+            const filter = card.dataset.filter;
+            // Toggle
+            if (perfCurrentFilter === filter) perfCurrentFilter = 'all';
+            else perfCurrentFilter = filter;
+
+            // Update Card Styles
+            metrics.querySelectorAll('.perf-card').forEach(c => {
+                if (perfCurrentFilter !== 'all' && c.dataset.filter !== perfCurrentFilter) {
+                    c.classList.add('opacity-50', 'grayscale');
+                } else {
+                    c.classList.remove('opacity-50', 'grayscale');
+                }
+            });
+
+            document.getElementById("perf-filter-label").textContent = perfCurrentFilter === 'all' ? 'All Categories' : perfCurrentFilter + 's';
+            renderPerfRows(1);
+        });
+    });
+
+}
+
+let perfPage = 1;
+const perfLimit = 50;
+
+function setupPerfTable() {
+    renderPerfRows(1);
+
+    document.getElementById("perf-search").addEventListener("input", () => {
+        perfPage = 1;
+        renderPerfRows(1);
+    });
+
+    document.getElementById("perf-prev").addEventListener("click", () => {
+        if (perfPage > 1) {
+            perfPage--;
+            renderPerfRows(perfPage);
+        }
+    });
+
+    document.getElementById("perf-next").addEventListener("click", () => {
+        // Check max page
+        const filtered = getFilteredPerfItems();
+        const maxPage = Math.ceil(filtered.length / perfLimit);
+        if (perfPage < maxPage) {
+            perfPage++;
+            renderPerfRows(perfPage);
+        }
+    });
+
+    // Sorting Headers
+    ['sort-vol', 'sort-eff'].forEach(id => {
+        const header = document.getElementById(id);
+        header.addEventListener("click", () => {
+            const key = header.dataset.key;
+            if (perfSort.key === key) {
+                perfSort.dir = perfSort.dir === 'desc' ? 'asc' : 'desc';
+            } else {
+                perfSort.key = key;
+                perfSort.dir = 'desc'; // Default to desc for metrics
+            }
+            // Re-render whole table structure to update indicators?
+            // Or just update arrows and rows. It's cleaner to re-render rows and just text content of arrows.
+            // Let's just re-render rows and update the arrow indicators manually here.
+
+            // Update Arrows
+            ['sort-vol', 'sort-eff'].forEach(hId => {
+                const h = document.getElementById(hId);
+                const span = h.querySelector('span');
+                const isCurrent = h.dataset.key === perfSort.key;
+                span.className = `ml-1 inline-block ${isCurrent ? '' : 'text-gray-300'}`;
+                span.textContent = isCurrent ? (perfSort.dir === 'desc' ? '↓' : '↑') : '↓';
+            });
+
+            perfPage = 1;
+            renderPerfRows(1);
+        });
+    });
+
+    // Quick Edit Logic
+    const qeModal = document.getElementById("quick-edit-modal");
+    document.getElementById("qe-cancel").addEventListener("click", () => qeModal.classList.add("hidden"));
+
+    document.getElementById("qe-save").addEventListener("click", async () => {
+        const id = document.getElementById("qe-id").value;
+        const cost = parseFloat(document.getElementById("qe-cost").value);
+        const price = parseFloat(document.getElementById("qe-price").value);
+
+        if (id) {
+            const db = await dbPromise;
+            // Update in DB
+            await db.items.update(id, { cost_price: cost, selling_price: price });
+
+            // Update Local Cache (perfCurrentItems) so table updates without refresh
+            const item = perfCurrentItems.find(i => i.id === id);
+            if (item) {
+                // item.cost = cost; // Do not update total cost with unit cost
+                // Updating price/cost changes margin, efficiency, and potentially the tag.
+                // Ideally we re-run the whole report, but that's heavy.
+                // Let's just update the display values and notify user.
+                alert("Item updated. Refresh report to see new performance stats.");
+                qeModal.classList.add("hidden");
+                // We could reload report: generateReport('prod-perf');
+                // But simply closing is fine for "Quick Edit".
+            }
+        }
+    });
+}
+
+function getFilteredPerfItems() {
+    const search = document.getElementById("perf-search").value.toLowerCase();
+
+    // Filter
+    let items = perfCurrentItems.filter(item => {
+        const matchesFilter = perfCurrentFilter === 'all' || item.tag === perfCurrentFilter;
+        const matchesSearch = (item.name || "").toLowerCase().includes(search) || (item.id || "").toLowerCase().includes(search);
+        return matchesFilter && matchesSearch;
+    });
+
+    // Sort
+    items.sort((a, b) => {
+        const valA = a[perfSort.key];
+        const valB = b[perfSort.key];
+        if (valA < valB) return perfSort.dir === 'asc' ? -1 : 1;
+        if (valA > valB) return perfSort.dir === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    return items;
+}
+
+function renderPerfRows(page) {
+    perfPage = page;
+    const body = document.getElementById("perf-table-body");
+    const items = getFilteredPerfItems();
+    const start = (page - 1) * perfLimit;
+    const end = start + perfLimit;
+    const pageItems = items.slice(start, end);
+
+    body.innerHTML = "";
+
+    if (pageItems.length === 0) {
+        body.innerHTML = `<tr><td colspan="5" class="px-6 py-4 text-center text-gray-500">No items found.</td></tr>`;
+        return;
+    }
+
+    pageItems.forEach(item => {
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-gray-50";
+
+        let tagColor = "gray";
+        if (item.tag === 'Winner') tagColor = "green";
+        if (item.tag === 'Sleeper') tagColor = "yellow";
+        if (item.tag === 'Bleeder') tagColor = "red";
+        if (item.tag === 'Traffic Builder') tagColor = "blue";
+
+        tr.innerHTML = `
+            <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm font-medium text-gray-900">${item.name}</div>
+                <div class="text-xs text-gray-500">ID: ${item.id.slice(0, 8)}...</div>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-500 font-mono">
+                ${item.qty}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-500 font-mono">
+                ${item.marginPct.toFixed(1)}% <span class="text-xs text-gray-400">(${(item.revenue - item.cost).toFixed(2)})</span>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-center">
+                <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-${tagColor}-100 text-${tagColor}-800">
+                    ${item.tag}
+                </span>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-center text-sm font-medium">
+                <button class="text-indigo-600 hover:text-indigo-900 bg-indigo-50 px-3 py-1 rounded btn-quick-edit" data-id="${item.id}">Edit</button>
+            </td>
+        `;
+        body.appendChild(tr);
+    });
+
+    // Attach Edit Listeners
+    document.querySelectorAll(".btn-quick-edit").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+            const id = e.target.getAttribute("data-id");
+            const db = await dbPromise;
+            const item = await db.items.get(id);
+            if (item) {
+                document.getElementById("qe-id").value = id;
+                document.getElementById("qe-name").value = item.name;
+                document.getElementById("qe-cost").value = item.cost_price;
+                document.getElementById("qe-price").value = item.selling_price;
+                document.getElementById("quick-edit-modal").classList.remove("hidden");
+            }
+        });
+    });
+
+    // Update Pagination Info
+    document.getElementById("perf-page-info").textContent = `Page ${perfPage} of ${Math.ceil(items.length / perfLimit) || 1}`;
 }
 
 function renderSalesSummary(data) {

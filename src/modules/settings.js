@@ -67,6 +67,7 @@ export async function loadSettingsView() {
                     <button data-tab="rewards" class="settings-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">Rewards & Loyalty</button>
                     <button data-tab="advanced" class="settings-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">Advanced</button>
                     <button data-tab="ai" class="settings-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">AI Settings</button>
+                    <button data-tab="price-tools" class="settings-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">Price Tools</button>
                     <button data-tab="sync" class="settings-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">Sync History</button>
                     ${canMigrate ? '<button data-tab="migration" class="settings-tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">Data Migration</button>' : ''}
                 </nav>
@@ -433,6 +434,94 @@ export async function loadSettingsView() {
                             <div id="ai-connection-status" class="hidden p-3 rounded text-sm font-bold"></div>
                         </div>
                     </div>
+
+                <!-- Price Tools Tab -->
+                <div id="settings-tab-price-tools" class="settings-panel hidden space-y-6">
+                     <div class="bg-white p-6 rounded-lg shadow-sm border">
+                        <h3 class="text-lg font-bold mb-4">Quick Price Check</h3>
+                        <div class="bg-blue-50 border border-blue-100 p-4 rounded-lg mb-6">
+                            <p class="text-sm text-blue-800">
+                                This tool scans for items with a markup <strong>below the target percentage</strong> set below and automatically updates their selling price.
+                            </p>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            <div>
+                                <label class="block text-sm font-bold text-gray-700 mb-2">Markup Percentage</label>
+                                <div class="flex items-center gap-2">
+                                    <input type="number" id="pt-markup-pct" step="0.1" min="0" value="20" class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none">
+                                    <span class="text-gray-500 font-bold">%</span>
+                                </div>
+                                <p class="text-[10px] text-gray-500 mt-1">Target markup to apply to cost.</p>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-bold text-gray-700 mb-2">Max Markup Cap (Amount)</label>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-gray-500 font-bold">₱</span>
+                                    <input type="number" id="pt-markup-cap" step="0.01" min="0" class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="No Limit">
+                                </div>
+                                <p class="text-[10px] text-gray-500 mt-1">Max allowed increase in price (Leave empty for no limit).</p>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-bold text-gray-700 mb-2">Rounding Rule</label>
+                                <select id="pt-rounding" class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none">
+                                    <option value="none">No Rounding (Exact)</option>
+                                    <option value="nearest_0.25">Nearest 0.25</option>
+                                    <option value="nearest_0.50">Nearest 0.50</option>
+                                    <option value="nearest_1.00">Nearest 1.00</option>
+                                    <option value="ceil_1.00">Ceiling to next 1.00</option>
+                                    <option value="psych_99">Psychological (.99)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="mt-6">
+                            <label class="block text-sm font-bold text-gray-700 mb-2">Exempted Categories</label>
+                            <div id="pt-categories-list" class="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-40 overflow-y-auto border rounded p-2 bg-gray-50">
+                                <div class="text-gray-400 text-xs text-center col-span-full py-2">Loading categories...</div>
+                            </div>
+                            <p class="text-[10px] text-gray-500 mt-1">Selected categories will be ignored during the check.</p>
+                        </div>
+
+                        <div class="mt-8 border-t pt-6">
+                            <button type="button" id="btn-run-price-check" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-lg shadow-lg transition w-full md:w-auto">
+                                Run Price Check
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Result Modal (Hidden by default, used for confirmation) -->
+                    <div id="price-check-modal" class="hidden fixed inset-0 z-50 overflow-hidden">
+                        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity"></div>
+                        <div class="flex items-center justify-center min-h-screen p-4">
+                            <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] flex flex-col">
+                                <div class="px-6 py-4 border-b">
+                                    <h3 class="text-lg font-bold text-gray-900">Price Check Results</h3>
+                                </div>
+                                <div class="px-6 py-4 flex-1 overflow-y-auto">
+                                    <p class="mb-4 text-sm text-gray-600">The following <span id="pt-match-count" class="font-bold">0</span> items have low margins and will be updated:</p>
+                                    <table class="min-w-full text-xs">
+                                        <thead class="bg-gray-50 sticky top-0">
+                                            <tr>
+                                                <th class="p-2 text-left">Item</th>
+                                                <th class="p-2 text-right">Cost</th>
+                                                <th class="p-2 text-right">Old Price (Margin)</th>
+                                                <th class="p-2 text-right">New Price (Margin)</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="pt-result-body" class="divide-y divide-gray-100"></tbody>
+                                    </table>
+                                </div>
+                                <div class="px-6 py-4 border-t bg-gray-50 flex justify-end gap-3">
+                                    <button type="button" id="btn-cancel-update" class="px-4 py-2 border rounded text-gray-700 hover:bg-gray-100">Cancel</button>
+                                    <button type="button" id="btn-confirm-update" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 font-bold">Confirm Update</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 </div>
 
                 <!-- Migration Tab -->
@@ -670,6 +759,7 @@ function setupEventListeners() {
 
             if (target === 'sync') renderSyncHistory();
             if (target === 'rewards') loadDiscountCodes();
+            if (target === 'price-tools') loadPriceToolsCategories();
         });
     });
 
@@ -710,6 +800,7 @@ function setupEventListeners() {
         setupMigrationEventListeners();
     }
 
+    // AI Settings Listeners
     // AI Settings Listeners
     document.getElementById('btn-refresh-models')?.addEventListener('click', async () => {
         const btn = document.getElementById('btn-refresh-models');
@@ -804,7 +895,15 @@ function setupEventListeners() {
             btn.disabled = false;
         }
     });
+
+    // Price Tools Listeners
+    document.getElementById('btn-run-price-check')?.addEventListener('click', runPriceCheck);
+    document.getElementById('btn-cancel-update')?.addEventListener('click', () => {
+        document.getElementById('price-check-modal').classList.add('hidden');
+    });
+    document.getElementById('btn-confirm-update')?.addEventListener('click', applyPriceUpdates);
 }
+
 
 function displayTestRunnerModal(tests) {
     let modal = document.getElementById('modal-test-runner');
@@ -2340,5 +2439,187 @@ async function handleDeleteDiscountCode(e) {
             console.error("Failed to delete", err);
             alert("Error deleting code");
         }
+    }
+}
+
+// --- Price Tools Logic ---
+
+async function loadPriceToolsCategories() {
+    const list = document.getElementById('pt-categories-list');
+    list.innerHTML = '<div class="text-gray-400 text-xs text-center col-span-full py-2">Loading categories...</div>';
+
+    try {
+        const db = await dbPromise;
+        const items = await db.items.toArray();
+        const categories = new Set();
+        items.forEach(i => {
+            if (i.category) categories.add(i.category);
+        });
+
+        if (categories.size === 0) {
+            list.innerHTML = '<div class="text-gray-400 text-xs text-center col-span-full py-2">No categories found.</div>';
+            return;
+        }
+
+        const sorted = Array.from(categories).sort();
+        list.innerHTML = sorted.map(c => `
+            <label class="inline-flex items-center p-1 hover:bg-white rounded cursor-pointer">
+                <input type="checkbox" class="form-checkbox h-3 w-3 text-red-500 pt-cat-exclude" value="${c}">
+                <span class="ml-2 text-xs text-gray-700 truncate" title="${c}">${c}</span>
+            </label>
+        `).join('');
+
+    } catch (e) {
+        console.error("Error loading categories", e);
+        list.innerHTML = '<div class="text-red-500 text-xs text-center col-span-full py-2">Error loading categories.</div>';
+    }
+}
+
+let pendingPriceUpdates = [];
+
+async function runPriceCheck() {
+    const markupPct = parseFloat(document.getElementById('pt-markup-pct').value);
+    const markupCap = document.getElementById('pt-markup-cap').value ? parseFloat(document.getElementById('pt-markup-cap').value) : null;
+    const rounding = document.getElementById('pt-rounding').value;
+
+    // Get exempted categories
+    const exemptedCats = Array.from(document.querySelectorAll('.pt-cat-exclude:checked')).map(cb => cb.value);
+
+    if (isNaN(markupPct) || markupPct < 0) {
+        alert("Please enter a valid markup percentage.");
+        return;
+    }
+
+    const btn = document.getElementById('btn-run-price-check');
+    const originalText = btn.textContent;
+    btn.textContent = "Scanning...";
+    btn.disabled = true;
+
+    try {
+        const db = await dbPromise;
+        const allItems = await db.items.toArray();
+
+        pendingPriceUpdates = [];
+        const targetMarkupRatio = markupPct / 100; // e.g. 0.20 for 20%
+
+        allItems.forEach(item => {
+            // Skip exempted categories
+            if (item.category && exemptedCats.includes(item.category)) return;
+
+            // Skip invalid data
+            if (!item.cost_price || item.cost_price <= 0) return;
+            // Skip items with no selling price (maybe raw materials?)
+            if (item.selling_price === undefined || item.selling_price === null) return;
+
+            const cost = parseFloat(item.cost_price);
+            const price = parseFloat(item.selling_price);
+
+            // Calculate current markup
+            // Markup = (Price - Cost) / Cost
+            const currentMarkup = (price - cost) / cost;
+
+            // If current markup is BELOW target
+            if (currentMarkup < targetMarkupRatio) {
+                // Calculate new price: Cost * (1 + TargetMarkup)
+                let newPrice = cost * (1 + targetMarkupRatio);
+
+                // Apply Cap if set (Max Price Increase)
+                if (markupCap !== null && (newPrice - price) > markupCap) {
+                    newPrice = price + markupCap;
+                }
+
+                // Apply Rounding
+                if (rounding === 'nearest_0.25') newPrice = Math.round(newPrice * 4) / 4;
+                else if (rounding === 'nearest_0.50') newPrice = Math.round(newPrice * 2) / 2;
+                else if (rounding === 'nearest_1.00') newPrice = Math.round(newPrice);
+                else if (rounding === 'ceil_1.00') newPrice = Math.ceil(newPrice);
+                else if (rounding === 'psych_99') newPrice = Math.floor(newPrice) + 0.99;
+
+                // Ensure new price is at least cost (sanity check)
+                if (newPrice < cost) newPrice = cost;
+
+                // Only add if price actually changes
+                if (Math.abs(newPrice - price) > 0.01) {
+                    pendingPriceUpdates.push({
+                        item: item,
+                        oldPrice: price,
+                        newPrice: newPrice,
+                        cost: cost,
+                        oldMargin: ((price - cost) / price * 100).toFixed(1),
+                        newMargin: ((newPrice - cost) / newPrice * 100).toFixed(1)
+                    });
+                }
+            }
+        });
+
+        // Show Results
+        const modal = document.getElementById('price-check-modal');
+        const countSpan = document.getElementById('pt-match-count');
+        const tbody = document.getElementById('pt-result-body');
+
+        countSpan.textContent = pendingPriceUpdates.length;
+
+        if (pendingPriceUpdates.length === 0) {
+            alert("No items found matching the criteria (Markup < " + markupPct + "%).");
+            modal.classList.add('hidden');
+        } else {
+            tbody.innerHTML = pendingPriceUpdates.map(u => `
+                <tr class="hover:bg-gray-50 border-b">
+                    <td class="p-2">
+                        <div class="font-bold text-gray-800 truncate max-w-[200px]" title="${u.item.name}">${u.item.name}</div>
+                        <div class="text-[10px] text-gray-500">${u.item.barcode || '-'}</div>
+                    </td>
+                    <td class="p-2 text-right font-mono text-gray-600">₱${u.cost.toFixed(2)}</td>
+                    <td class="p-2 text-right">
+                        <div class="test-xs">₱${u.oldPrice.toFixed(2)}</div>
+                        <div class="text-[10px] text-red-500">(${u.oldMargin}%)</div>
+                    </td>
+                    <td class="p-2 text-right bg-blue-50">
+                        <div class="font-bold text-blue-700">₱${u.newPrice.toFixed(2)}</div>
+                        <div class="text-[10px] text-green-600">(${u.newMargin}%)</div>
+                    </td>
+                </tr>
+            `).join('');
+
+            modal.classList.remove('hidden');
+        }
+
+    } catch (e) {
+        console.error("Price check error", e);
+        alert("Error running price check.");
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
+    }
+}
+
+async function applyPriceUpdates() {
+    if (pendingPriceUpdates.length === 0) return;
+
+    const btn = document.getElementById('btn-confirm-update');
+    const originalText = btn.textContent;
+    btn.textContent = "Updating...";
+    btn.disabled = true;
+
+    try {
+        let updatedCount = 0;
+        for (const update of pendingPriceUpdates) {
+            await Repository.upsert('items', {
+                ...update.item,
+                selling_price: update.newPrice,
+            });
+            updatedCount++;
+        }
+
+        alert(`Successfully updated ${updatedCount} items.`);
+        document.getElementById('price-check-modal').classList.add('hidden');
+        pendingPriceUpdates = [];
+
+    } catch (e) {
+        console.error("Bulk update error", e);
+        alert("Error updating items. Check console.");
+    } finally {
+        btn.textContent = originalText;
+        btn.disabled = false;
     }
 }
