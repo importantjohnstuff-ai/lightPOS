@@ -2,12 +2,14 @@
 
 require_once __DIR__ . '/db/Database.php';
 
-class SQLiteStore {
+class SQLiteStore
+{
     public $pdo;
     private $collections;
     private $schemaCache = [];
 
-    public function __construct() {
+    public function __construct()
+    {
         $this->pdo = Database::getInstance()->getConnection();
         // Disable WAL mode to prevent locking issues on some filesystems
         $this->pdo->exec("PRAGMA journal_mode=DELETE;");
@@ -20,15 +22,31 @@ class SQLiteStore {
             error_log("SQLiteStore warning: Could not set ATTR_EMULATE_PREPARES: " . $e->getMessage());
         }
         $this->collections = [
-            'items', 'transactions', 'users', 'customers', 'suppliers',
-            'shifts', 'expenses', 'returns', 'stock_movements',
-            'adjustments', 'stockins', 'suspended_transactions', 'sync_metadata',
-            'stock_logs', 'settings', 'notifications',
-            'purchase_orders', 'supplier_config', 'inventory_metrics', 'discount_codes'
+            'items',
+            'transactions',
+            'users',
+            'customers',
+            'suppliers',
+            'shifts',
+            'expenses',
+            'returns',
+            'stock_movements',
+            'adjustments',
+            'stockins',
+            'suspended_transactions',
+            'sync_metadata',
+            'stock_logs',
+            'settings',
+            'notifications',
+            'purchase_orders',
+            'supplier_config',
+            'inventory_metrics',
+            'discount_codes'
         ];
     }
 
-    private function getTableColumns($collection) {
+    private function getTableColumns($collection)
+    {
         if (isset($this->schemaCache[$collection])) {
             return $this->schemaCache[$collection];
         }
@@ -40,7 +58,8 @@ class SQLiteStore {
         return $columns;
     }
 
-    public function getAll($collection) {
+    public function getAll($collection)
+    {
         if (!in_array($collection, $this->collections)) {
             throw new Exception("Unknown collection: $collection");
         }
@@ -50,7 +69,8 @@ class SQLiteStore {
         return array_map([$this, 'hydrate'], $results);
     }
 
-    public function getChanges($collection, $since) {
+    public function getChanges($collection, $since)
+    {
         if (!in_array($collection, $this->collections)) {
             throw new Exception("Unknown collection: $collection");
         }
@@ -60,7 +80,8 @@ class SQLiteStore {
         return array_map([$this, 'hydrate'], $results);
     }
 
-    public function upsert($collection, $record) {
+    public function upsert($collection, $record)
+    {
         if (!in_array($collection, $this->collections)) {
             throw new Exception("Unknown collection: $collection");
         }
@@ -137,76 +158,62 @@ class SQLiteStore {
         $stmtCheck = $this->pdo->prepare($sqlCheck);
         $stmtCheck->execute([$dbRecord[$idColumn]]);
         $exists = $stmtCheck->fetchColumn();
-        $stmtCheck->closeCursor(); 
-        
+        $stmtCheck->closeCursor();
+
+        // Helper function to normalize params for SQLite compatibility
+        $normalizeParams = function ($params) {
+            $normalized = [];
+            foreach ($params as $val) {
+                if (is_null($val)) {
+                    $normalized[] = ''; // Convert NULL to empty string for TEXT columns
+                } elseif (is_bool($val)) {
+                    $normalized[] = $val ? 1 : 0;
+                } elseif (is_array($val) || is_object($val)) {
+                    $normalized[] = json_encode($val);
+                } else {
+                    $normalized[] = $val;
+                }
+            }
+            return $normalized;
+        };
+
         if ($exists) {
             // UPDATE
             $updateColumns = array_filter($columns, fn($c) => $c !== $idColumn);
             $updateSet = array_map(fn($c) => "$c = ?", $updateColumns);
-            
+
             if (!empty($updateSet)) {
                 $sqlUtils = "UPDATE $collection SET " . implode(', ', $updateSet) . " WHERE $idColumn = ?";
                 $stmtUpdate = $this->pdo->prepare($sqlUtils);
-                
+
                 $updateParams = [];
                 foreach ($updateColumns as $col) {
                     $updateParams[] = $dbRecord[$col];
                 }
                 $updateParams[] = $dbRecord[$idColumn];
 
-                // Explicitly bind update params
-                foreach ($updateParams as $i => $val) {
-                    $type = PDO::PARAM_STR;
-                    if (is_null($val)) { 
-                        $type = PDO::PARAM_NULL; 
-                    } elseif (is_bool($val)) { 
-                        // Convert bool to 0/1
-                        $val = $val ? 1 : 0;
-                    }
-                    
-                    // Force cast to string for all non-null values to properly leverage PARAM_STR
-                    if ($type === PDO::PARAM_STR && !is_null($val)) {
-                        $val = (string)$val;
-                    }
-                    
-                    $stmtUpdate->bindValue($i + 1, $val, $type);
-                }
-
-                $this->executeWithRetry($stmtUpdate, null, $updateParams);
+                // Normalize and execute directly
+                $normalizedParams = $normalizeParams($updateParams);
+                $this->executeWithRetry($stmtUpdate, $normalizedParams);
             }
         } else {
             // INSERT
-            // Use positional placeholders
             $placeholders = array_fill(0, count($columns), '?');
             $bindParams = array_values($dbRecord);
 
             $sql = "INSERT INTO $collection (" . implode(', ', $columns) . ") 
                     VALUES (" . implode(', ', $placeholders) . ")";
-            
-            $stmt = $this->pdo->prepare($sql);
-            
-            // Explicitly bind insert params
-            foreach ($bindParams as $i => $val) {
-                $type = PDO::PARAM_STR;
-                if (is_null($val)) {
-                    $type = PDO::PARAM_NULL;
-                } elseif (is_bool($val)) {
-                     $val = $val ? 1 : 0;
-                }
-                
-                // Force cast to string
-                if ($type === PDO::PARAM_STR && !is_null($val)) {
-                    $val = (string)$val;
-                }
 
-                $stmt->bindValue($i + 1, $val, $type);
-            }
-            
-            $this->executeWithRetry($stmt, null, $bindParams);
+            $stmt = $this->pdo->prepare($sql);
+
+            // Normalize and execute directly
+            $normalizedParams = $normalizeParams($bindParams);
+            $this->executeWithRetry($stmt, $normalizedParams);
         }
     }
 
-    public function getIdColumn($collection) {
+    public function getIdColumn($collection)
+    {
         $idColumn = 'id';
         if ($collection === 'users') {
             $idColumn = 'email';
@@ -220,19 +227,21 @@ class SQLiteStore {
         return $idColumn;
     }
 
-    public function delete($collection, $id) {
+    public function delete($collection, $id)
+    {
         if (!in_array($collection, $this->collections)) {
             throw new Exception("Unknown collection: $collection");
         }
-        
+
         $idColumn = $this->getIdColumn($collection);
-        
+
         $stmt = $this->pdo->prepare("UPDATE $collection SET _deleted = 1, _updatedAt = ?, _version = COALESCE(_version, 0) + 1 WHERE $idColumn = ?");
         $this->executeWithRetry($stmt, [round(microtime(true) * 1000), $id]);
         $stmt->closeCursor();
     }
 
-    public function wipe($collection) {
+    public function wipe($collection)
+    {
         if (!in_array($collection, $this->collections)) {
             throw new Exception("Unknown collection: $collection");
         }
@@ -241,7 +250,8 @@ class SQLiteStore {
         $stmt->closeCursor();
     }
 
-    private function executeWithRetry($stmt, $params = null, $debugParams = null) {
+    private function executeWithRetry($stmt, $params = null, $debugParams = null)
+    {
         $retries = 0;
         while (true) {
             try {
@@ -261,12 +271,13 @@ class SQLiteStore {
                 // Enhance error message with SQL and Params for debugging
                 $logParams = $params ?? $debugParams ?? 'null';
                 $debugMsg = $e->getMessage() . " | SQL: " . $stmt->queryString . " | Params: " . json_encode($logParams);
-                throw new Exception($debugMsg, (int)$e->getCode(), $e);
+                throw new Exception($debugMsg, (int) $e->getCode(), $e);
             }
         }
     }
 
-    public function beginTransaction() {
+    public function beginTransaction()
+    {
         $retries = 0;
         while (true) {
             try {
@@ -282,19 +293,23 @@ class SQLiteStore {
         }
     }
 
-    public function commit() {
+    public function commit()
+    {
         return $this->pdo->commit();
     }
 
-    public function rollBack() {
+    public function rollBack()
+    {
         return $this->pdo->rollBack();
     }
 
-    public function inTransaction() {
+    public function inTransaction()
+    {
         return $this->pdo->inTransaction();
     }
 
-    private function hydrate($row) {
+    private function hydrate($row)
+    {
         $jsonKeysToRemove = [];
         $dataToMerge = [];
 
