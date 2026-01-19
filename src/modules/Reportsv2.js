@@ -549,10 +549,12 @@ async function renderShiftDetail(shiftId) {
     const endTime = fullShift.end_time ? new Date(fullShift.end_time) : new Date();
     const userEmailNormalized = (fullShift.user_id || "").trim().toLowerCase();
 
-    // Fetch transactions for this shift period
-    const txs = await db.transactions
-        .where('timestamp').between(startTime.toISOString(), endTime.toISOString(), true, true)
-        .toArray();
+    // Fetch transactions for this shift period (using JS filter for reliable date matching)
+    const allTransactions = await db.transactions.toArray();
+    const txs = allTransactions.filter(tx => {
+        const txTime = new Date(tx.timestamp);
+        return txTime >= startTime && txTime <= endTime;
+    });
 
     // Initialize calculation variables
     let calcSales = 0;
@@ -749,15 +751,20 @@ async function showShiftTransactions(shift) {
     const db = await dbPromise;
     const startTime = new Date(shift.start_time);
     const endTime = shift.end_time ? new Date(shift.end_time) : new Date();
+    const userEmailNormalized = (shift.user_id || "").trim().toLowerCase();
 
-    // Fetch transactions for this shift
-    const txs = await db.transactions
-        .where('timestamp').between(startTime.toISOString(), endTime.toISOString(), true, true)
-        .reverse()
-        .toArray();
+    // Fetch transactions for this shift (using JS filter for reliable date matching)
+    const allTransactions = await db.transactions.toArray();
+    const txs = allTransactions.filter(tx => {
+        const txTime = new Date(tx.timestamp);
+        return txTime >= startTime && txTime <= endTime;
+    });
 
-    // Filter to user (optional, but good for accuracy)
-    const userTxs = txs.filter(t => t.user_email === shift.user_id && !t.is_voided);
+    // Filter to user with normalized comparison
+    const userTxs = txs.filter(t => {
+        const txUserNormalized = (t.user_email || "").trim().toLowerCase();
+        return txUserNormalized === userEmailNormalized && !t.is_voided;
+    });
 
     const contentContainer = document.getElementById("report-modal-content");
     const metricsContainer = document.getElementById("report-metrics-container");
