@@ -5,7 +5,7 @@ require_once __DIR__ . '/db/Database.php';
 class SQLiteStore
 {
     // Version identifier - update this when making changes to verify deployment
-    const VERSION = '2026-01-19-v3-PARAM_STR_FIX';
+    const VERSION = '2026-01-19-v4-DEBUG_LOGGING';
 
     public $pdo;
     private $collections;
@@ -182,22 +182,38 @@ class SQLiteStore
                 }
                 $updateParams[] = $dbRecord[$idColumn];
 
+                // DEBUG: Log what we're about to bind
+                error_log("SQLiteStore UPDATE Debug - SQL: $sqlUtils");
+                error_log("SQLiteStore UPDATE Debug - Param count: " . count($updateParams));
+
                 // Bind ALL values as PDO::PARAM_STR (except NULL as PARAM_NULL)
                 // SQLite's type affinity handles conversion reliably
                 // This bypasses strict type checking bugs in PHP PDO driver
                 foreach ($updateParams as $i => $val) {
+                    $paramType = gettype($val);
+                    $paramPos = $i + 1;
+
                     if (is_null($val)) {
-                        $stmtUpdate->bindValue($i + 1, null, PDO::PARAM_NULL);
+                        error_log("SQLiteStore Bind [$paramPos]: NULL");
+                        $stmtUpdate->bindValue($paramPos, null, PDO::PARAM_NULL);
                     } elseif (is_bool($val)) {
-                        $stmtUpdate->bindValue($i + 1, $val ? '1' : '0', PDO::PARAM_STR);
+                        $strVal = $val ? '1' : '0';
+                        error_log("SQLiteStore Bind [$paramPos]: BOOL->STR '$strVal'");
+                        $stmtUpdate->bindValue($paramPos, $strVal, PDO::PARAM_STR);
                     } elseif (is_array($val) || is_object($val)) {
-                        $stmtUpdate->bindValue($i + 1, json_encode($val), PDO::PARAM_STR);
+                        $jsonVal = json_encode($val);
+                        error_log("SQLiteStore Bind [$paramPos]: ARRAY/OBJ->JSON (len:" . strlen($jsonVal) . ")");
+                        $stmtUpdate->bindValue($paramPos, $jsonVal, PDO::PARAM_STR);
                     } else {
-                        $stmtUpdate->bindValue($i + 1, (string) $val, PDO::PARAM_STR);
+                        $strVal = (string) $val;
+                        error_log("SQLiteStore Bind [$paramPos]: $paramType->STR '" . substr($strVal, 0, 50) . "'");
+                        $stmtUpdate->bindValue($paramPos, $strVal, PDO::PARAM_STR);
                     }
                 }
 
+                error_log("SQLiteStore UPDATE Debug - All binds complete, calling execute");
                 $this->executeWithRetry($stmtUpdate, null, $updateParams);
+                error_log("SQLiteStore UPDATE Debug - Execute successful");
             }
         } else {
             // INSERT
