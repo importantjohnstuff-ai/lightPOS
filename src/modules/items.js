@@ -968,7 +968,7 @@ async function refreshItemInsights() {
     }
 
     document.getElementById("item-stats-body").innerHTML = `
-            < tr ><td class="py-2 text-gray-500">Total Sold (All Time)</td><td class="py-2 text-right font-bold">${totalSoldAllTime} units</td></tr >
+            <tr><td class="py-2 text-gray-500">Total Sold (All Time)</td><td class="py-2 text-right font-bold">${totalSoldAllTime} units</td></tr>
         <tr><td class="py-2 text-gray-500">Avg. Daily Sales</td><td class="py-2 text-right font-bold">${avgDaily.toFixed(2)} units</td></tr>
         <tr><td class="py-2 text-gray-500">Stock Duration</td><td class="py-2 text-right font-bold ${duration < 7 ? 'text-red-600' : ''}">${duration === Infinity ? 'N/A' : duration + ' days'}</td></tr>
         <tr><td class="py-2 text-gray-500">Forecasted Monthly Sales</td><td class="py-2 text-right font-bold text-blue-600">${forecastedMonthly} units</td></tr>
@@ -984,7 +984,7 @@ async function refreshItemInsights() {
     });
     const topAffinity = Object.entries(itemMap).sort((a, b) => b[1] - a[1]).slice(0, 5);
     document.getElementById("item-affinity-body").innerHTML = topAffinity.map(([name, count]) => `
-            < tr class="border-b" ><td class="py-2 px-4">${name}</td><td class="py-2 px-4 text-right font-bold text-blue-600">${((count / itemSales.length) * 100).toFixed(1)}%</td></tr >
+            <tr class="border-b"><td class="py-2 px-4">${name}</td><td class="py-2 px-4 text-right font-bold text-blue-600">${((count / itemSales.length) * 100).toFixed(1)}%</td></tr>
                 `).join('') || '<tr><td colspan="2" class="py-4 text-center text-gray-400 italic">No data</td></tr>';
 }
 
@@ -1041,7 +1041,7 @@ function renderItemSalesChart(transactions, itemId, days) {
 async function openComparisonModal() {
     const modal = document.getElementById("modal-compare-items");
     const container = document.getElementById("comparison-container");
-    container.innerHTML = `< div class="col-span-2 text-center py-20 text-gray-500 italic" > Analyzing data...</div > `;
+    container.innerHTML = `<div class="col-span-2 text-center py-20 text-gray-500 italic">Analyzing data...</div>`;
     modal.classList.remove("hidden");
 
     const startDate = new Date();
@@ -1095,15 +1095,15 @@ async function openComparisonModal() {
         const duration = avgDaily > 0 ? Math.floor(item.stock_level / avgDaily) : Infinity;
 
         const col = document.createElement("div");
-        col.className = `bg - white shadow - xl rounded - xl p - 6 border - t - 8 ${borderClass} space - y - 6`;
+        col.className = `bg-white shadow-xl rounded-xl p-6 border-t-8 ${borderClass} space-y-6`;
         col.innerHTML = `
-    < div class= "flex justify-between items-start" >
+    <div class="flex justify-between items-start">
                 <div>
                     <h4 class="text-xl font-bold text-gray-800">${item.name}</h4>
                     <p class="text-xs font-mono text-gray-400">${item.barcode}</p>
                 </div>
                 <span class="px-3 py-1 rounded-full text-[10px] font-bold uppercase ${badgeClass}">${quadrant}</span>
-            </div >
+            </div>
             <div class="h-40"><canvas id="compare-chart-${i}"></canvas></div>
             <div class="bg-gray-50 rounded-lg p-4">
                 <table class="w-full text-sm">
@@ -1117,7 +1117,7 @@ async function openComparisonModal() {
         container.appendChild(col);
 
         // Render Chart
-        const ctx = document.getElementById(`compare - chart - ${i}`).getContext('2d');
+        const ctx = document.getElementById(`compare-chart-${i}`).getContext('2d');
         const dailyData = {};
         for (let j = 0; j < chartDays; j++) {
             const d = new Date(); d.setDate(d.getDate() - j);
