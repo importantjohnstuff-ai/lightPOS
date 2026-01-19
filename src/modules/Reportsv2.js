@@ -410,6 +410,51 @@ function renderProductPerformance(data) {
 
     perfCurrentItems = taggedProducts; // Store for table
 
+    // UPDATE DB with new tags (Persist for Items Module)
+    (async () => {
+        try {
+            const db = await dbPromise;
+            const updates = [];
+            // We need to fetch current items to preserve other fields if we use bulkPut, 
+            // OR we can use modify() if we knew the keys, but bulkPut is safer if we read first.
+            // Actually, we can just use keys to update specific field if we iterate.
+            // But for bulk, let's try to update efficiently.
+
+            // Optimization: Create a Map for O(1) lookup
+            const tagMap = new Map(taggedProducts.map(p => [p.id, p.tag]));
+
+            await db.transaction('rw', db.items, async () => {
+                // Apply tags to items in DB who have a tag calculated
+                // We use Modify which is good for updating specific props without reading whole object if supported,
+                // otherwise we iterate.
+                // Dexie Collection.modify is supported.
+                // BUT we have different values for different items.
+                // So we have to loop.
+
+                const allItems = await db.items.toArray();
+                const itemsToUpdate = [];
+
+                allItems.forEach(item => {
+                    const newTag = tagMap.get(item.id);
+                    // If we have a tag for this item and it's different, update it.
+                    // If the item was not in the report (filtered out?), we leave it or set to default?
+                    // Let's only update explicitly tagged items to be safe.
+                    if (newTag && item.performance_tag !== newTag) {
+                        item.performance_tag = newTag;
+                        itemsToUpdate.push(item);
+                    }
+                });
+
+                if (itemsToUpdate.length > 0) {
+                    await db.items.bulkPut(itemsToUpdate);
+                    console.log(`Updated performance tags for ${itemsToUpdate.length} items`);
+                }
+            });
+        } catch (err) {
+            console.error("Failed to persist performance tags:", err);
+        }
+    })();
+
     // 3. Render Quadrant Cards
     const counts = { Winner: 0, Sleeper: 0, Bleeder: 0, 'Traffic Builder': 0 };
     taggedProducts.forEach(p => counts[p.tag]++);

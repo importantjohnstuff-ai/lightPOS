@@ -1031,22 +1031,25 @@ async function refreshItemInsights() {
     // Last Stock Count
     const lastAudit = await db.adjustments.where('item_id').equals(item.id).last();
 
-    // Quadrant Classification (Simplified logic from reports.js)
-    const revenue = itemSales.reduce((sum, t) => {
-        const entry = t.items.find(i => i.id === item.id);
-        return sum + (entry ? (entry.selling_price * entry.qty) : 0);
-    }, 0);
-    const marginPct = ((item.selling_price - item.cost_price) / item.selling_price) * 100;
-
+    // Quadrant Classification (From Reports V2)
     const badge = document.getElementById("item-quadrant-badge");
-    if (revenue > 1000 && marginPct > 30) {
-        badge.textContent = "Winner"; badge.className = "px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-green-100 text-green-700";
-    } else if (revenue > 1000) {
-        badge.textContent = "Cash Cow"; badge.className = "px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-blue-100 text-blue-700";
-    } else if (marginPct > 30) {
-        badge.textContent = "Sleeper"; badge.className = "px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-orange-100 text-orange-700";
+    const tag = item.performance_tag || 'Uncategorized';
+
+    badge.textContent = tag;
+
+    // Reset classes
+    badge.className = "px-3 py-1 rounded-full text-[10px] font-bold uppercase border";
+
+    if (tag === 'Winner') {
+        badge.classList.add("bg-green-100", "text-green-700", "border-green-200");
+    } else if (tag === 'Traffic Builder') { // equivalent to old Cash Cow
+        badge.classList.add("bg-blue-100", "text-blue-700", "border-blue-200");
+    } else if (tag === 'Sleeper') {
+        badge.classList.add("bg-yellow-100", "text-yellow-700", "border-yellow-200");
+    } else if (tag === 'Bleeder') { // equivalent to old Dog
+        badge.classList.add("bg-red-100", "text-red-700", "border-red-200");
     } else {
-        badge.textContent = "Dog"; badge.className = "px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-gray-100 text-gray-700";
+        badge.classList.add("bg-gray-100", "text-gray-500", "border-gray-200");
     }
 
     document.getElementById("item-stats-body").innerHTML = `
@@ -1137,20 +1140,8 @@ async function openComparisonModal() {
         db.adjustments.toArray()
     ]);
 
-    // Calculate global averages for quadrant logic
-    const allItemStats = {};
-    txs.forEach(t => {
-        t.items.forEach(i => {
-            if (!allItemStats[i.id]) allItemStats[i.id] = { revenue: 0, marginPct: 0, count: 0 };
-            allItemStats[i.id].revenue += (i.selling_price * i.qty);
-            const margin = i.selling_price - (i.cost_price || 0);
-            allItemStats[i.id].marginPct += i.selling_price > 0 ? (margin / i.selling_price * 100) : 0;
-            allItemStats[i.id].count++;
-        });
-    });
-    const statsArray = Object.values(allItemStats);
-    const avgRev = statsArray.reduce((sum, s) => sum + s.revenue, 0) / (statsArray.length || 1);
-    const avgMargin = statsArray.reduce((sum, s) => sum + (s.marginPct / s.count), 0) / (statsArray.length || 1);
+    // Use stored performance tags (from Reports V2)
+    const allItemStats = {}; // Kept only if needed for other stats, but derived below logic removed.
 
     container.innerHTML = "";
     comparisonCharts.forEach(c => c.destroy());
@@ -1159,17 +1150,21 @@ async function openComparisonModal() {
     for (let i = 0; i < 2; i++) {
         const item = selectedForCompare[i];
         const itemSales = txs.filter(t => t.items.some(it => it.id === item.id));
-        const myStats = allItemStats[item.id] || { revenue: 0, marginPct: 0, count: 1 };
-        const itemRevenue = myStats.revenue;
-        const itemMarginPct = myStats.marginPct / myStats.count;
 
-        let quadrant = "Dog", badgeClass = "bg-gray-100 text-gray-700", borderClass = "border-gray-500";
-        if (itemRevenue >= avgRev && itemMarginPct >= avgMargin) {
-            quadrant = "Winner"; badgeClass = "bg-green-100 text-green-700"; borderClass = "border-green-500";
-        } else if (itemRevenue >= avgRev) {
-            quadrant = "Cash Cow"; badgeClass = "bg-blue-100 text-blue-700"; borderClass = "border-blue-500";
-        } else if (itemMarginPct >= avgMargin) {
-            quadrant = "Sleeper"; badgeClass = "bg-orange-100 text-orange-700"; borderClass = "border-orange-500";
+        // Use stored tag or fallback
+        const quadrant = item.performance_tag || 'Uncategorized';
+
+        let badgeClass = "bg-gray-100 text-gray-700";
+        let borderClass = "border-gray-500";
+
+        if (quadrant === 'Winner') {
+            badgeClass = "bg-green-100 text-green-700"; borderClass = "border-green-500";
+        } else if (quadrant === 'Traffic Builder') {
+            badgeClass = "bg-blue-100 text-blue-700"; borderClass = "border-blue-500";
+        } else if (quadrant === 'Sleeper') {
+            badgeClass = "bg-yellow-100 text-yellow-700"; borderClass = "border-yellow-500";
+        } else if (quadrant === 'Bleeder') {
+            badgeClass = "bg-red-100 text-red-700"; borderClass = "border-red-500";
         }
 
         const totalQty = itemSales.reduce((sum, t) => sum + t.items.find(it => it.id === item.id).qty, 0);
