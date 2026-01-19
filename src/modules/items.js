@@ -5,7 +5,7 @@ import { dbPromise } from "../db.js";
 
 let itemsData = [];
 let suppliersList = [];
-let sortState = { key: 'name', dir: 'asc' };
+let sortState = { key: 'pareto_rank', dir: 'asc' };
 let filterState = { search: '', lowStock: false, category: '', supplierId: '' };
 let selectedItemId = null;
 let itemSalesChart = null;
@@ -59,6 +59,7 @@ export async function loadItemsView() {
                                 <thead class="sticky top-0 z-10 bg-gray-100">
                                     <tr class="bg-gray-100 text-gray-600 uppercase text-[10px] leading-normal">
                                         <th class="py-3 px-4 text-left w-10"><input type="checkbox" id="check-all-items"></th>
+                                        <th class="py-3 px-4 text-center cursor-pointer" data-sort="pareto_rank">Rank</th>
                                         <th class="py-3 px-4 text-left cursor-pointer" data-sort="name">Name</th>
                                         <th class="py-3 px-4 text-right cursor-pointer" data-sort="cost_price">Cost</th>
                                         <th class="py-3 px-4 text-right cursor-pointer" data-sort="selling_price">Price</th>
@@ -659,6 +660,8 @@ function applyFiltersAndSort() {
         if (typeof valA === 'string') valA = valA.toLowerCase();
         if (typeof valB === 'string') valB = valB.toLowerCase();
 
+        // Handle pareto_rank specific logic (always maintain some order for equal ranks if needed)
+
         if (valA < valB) return sortState.dir === 'asc' ? -1 : 1;
         if (valA > valB) return sortState.dir === 'asc' ? 1 : -1;
         return 0;
@@ -735,11 +738,85 @@ async function fetchItems() {
         itemsData = Array.isArray(data) ? data : [];
         populateFilterDropdowns();
         applyFiltersAndSort();
+        // Trigger background analysis
+        calculateItemPriorities();
     } catch (error) {
         console.error("Error fetching items:", error);
         tbody.innerHTML = `<tr><td colspan="3" class="py-3 px-6 text-center text-red-500">Error loading items.</td></tr>`;
     }
 }
+
+async function calculateItemPriorities() {
+    const db = await dbPromise;
+    try {
+        // Fetch all non-deleted, non-voided transactions with items
+        const allTxs = await db.transactions
+            .filter(t => !t._deleted && !t.is_voided && t.items && t.items.length > 0)
+            .toArray();
+
+        const itemProfits = {};
+
+        allTxs.forEach(t => {
+            t.items.forEach(i => {
+                // Determine cost: use transaction snapshot or fallback to current item cost (from itemsData) if 0/undefined
+                let cost = i.cost_price;
+                if (!cost) {
+                    const currentItem = itemsData.find(d => d.id === i.id);
+                    cost = currentItem ? currentItem.cost_price : 0;
+                }
+                const price = i.selling_price || 0;
+                const qty = i.qty || 0;
+                const profit = (price - (cost || 0)) * qty;
+
+                if (!itemProfits[i.id]) itemProfits[i.id] = 0;
+                itemProfits[i.id] += profit;
+            });
+        });
+
+        // Convert to array and sort by profit descending
+        const rankedItems = Object.entries(itemProfits)
+            .map(([id, profit]) => ({ id, profit }))
+            .sort((a, b) => b.profit - a.profit);
+
+        const totalProfit = rankedItems.reduce((sum, i) => sum + i.profit, 0);
+        let runningProfit = 0;
+        const priorities = {};
+
+        rankedItems.forEach((item, index) => {
+            runningProfit += item.profit;
+            const pct = totalProfit > 0 ? (runningProfit / totalProfit) * 100 : 100;
+
+            let category = 'Low';
+            if (pct <= 80) category = 'High';
+            else if (pct <= 95) category = 'Medium';
+
+            priorities[item.id] = { category, rank: index + 1 };
+        });
+
+        // Merge into itemsData
+        let updatedCount = 0;
+        itemsData.forEach(item => {
+            const p = priorities[item.id];
+            if (p) {
+                item.pareto_category = p.category;
+                item.pareto_rank = p.rank;
+            } else {
+                item.pareto_category = 'Low';
+                item.pareto_rank = 999999; // End of list
+            }
+            updatedCount++;
+        });
+
+        console.log(`Pareto analysis complete. Ranked ${rankedItems.length} items.`);
+
+        // Refresh view to show tags and apply new sort
+        applyFiltersAndSort();
+
+    } catch (err) {
+        console.error("Error calculating Pareto priorities:", err);
+    }
+}
+
 
 function renderItems(items, totalCount) {
     const tbody = document.getElementById("items-table-body");
@@ -762,7 +839,12 @@ function renderItems(items, totalCount) {
 
         row.innerHTML = `
             <td class="py-3 px-4 text-left"><input type="checkbox" class="item-check" data-id="${item.id}" ${isSelected ? 'checked' : ''}></td>
-            <td class="py-3 px-4 text-left font-medium">${item.name}</td>
+            <td class="py-3 px-4 text-center font-mono text-xs text-gray-400">${item.pareto_rank < 999999 ? '#' + item.pareto_rank : '-'}</td>
+            <td class="py-3 px-4 text-left font-medium">
+                ${item.name}
+                ${item.pareto_category === 'High' ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-800 border border-green-200">High Priority</span>' : ''}
+                ${item.pareto_category === 'Medium' ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200">Med Priority</span>' : ''}
+            </td>
             <td class="py-3 px-4 text-right">₱${(item.cost_price || 0).toFixed(2)}</td>
             <td class="py-3 px-4 text-right">₱${(item.selling_price || 0).toFixed(2)}</td>
             <td class="py-3 px-4 text-left text-xs">${parent}</td>
