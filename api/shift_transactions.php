@@ -26,6 +26,17 @@ if (!$shiftId) {
     exit;
 }
 
+// Helper to parse timestamp to milliseconds
+function parseTimestampMs($ts)
+{
+    if ($ts === null)
+        return null;
+    if (is_numeric($ts))
+        return (int) $ts;
+    $parsed = strtotime($ts);
+    return $parsed !== false ? $parsed * 1000 : null;
+}
+
 try {
     // Get the shift details first
     $shifts = $store->getAll('shifts');
@@ -47,57 +58,41 @@ try {
         exit;
     }
 
-    // Parse shift times - handle both date objects and ISO strings
-    $startTime = null;
-    $endTime = null;
+    // Parse shift times to milliseconds
+    $startTimeMs = parseTimestampMs($targetShift['start_time']);
+    $endTimeMs = parseTimestampMs($targetShift['end_time']);
 
-    if (isset($targetShift['start_time'])) {
-        $startTime = is_numeric($targetShift['start_time'])
-            ? $targetShift['start_time']
-            : strtotime($targetShift['start_time']) * 1000;
-    }
-
-    if (isset($targetShift['end_time']) && $targetShift['end_time']) {
-        $endTime = is_numeric($targetShift['end_time'])
-            ? $targetShift['end_time']
-            : strtotime($targetShift['end_time']) * 1000;
-    } else {
-        // If shift is still open, use current time
-        $endTime = round(microtime(true) * 1000);
+    // If shift is still open, use current time
+    if ($endTimeMs === null) {
+        $endTimeMs = round(microtime(true) * 1000);
     }
 
     // Get user email for filtering
-    $userEmail = $targetShift['user_id'] ?? $targetShift['user_email'] ?? null;
+    $userEmail = strtolower(trim($targetShift['user_id'] ?? $targetShift['user_email'] ?? ''));
 
     // Fetch all transactions
     $allTransactions = $store->getAll('transactions');
 
     // Filter transactions by time range and user
     $shiftTransactions = [];
+    $debugMatchInfo = ['checked' => 0, 'in_range' => 0, 'user_match' => 0];
+
     foreach ($allTransactions as $tx) {
-        $txTime = null;
+        $txTimeMs = parseTimestampMs($tx['timestamp']);
+        $debugMatchInfo['checked']++;
 
-        if (isset($tx['timestamp'])) {
-            $txTime = is_numeric($tx['timestamp'])
-                ? $tx['timestamp']
-                : strtotime($tx['timestamp']) * 1000;
-        }
-
-        if ($txTime === null)
+        if ($txTimeMs === null)
             continue;
 
         // Check if transaction is within shift time range
-        if ($txTime >= $startTime && $txTime <= $endTime) {
-            // Optional: also filter by user
-            $txUser = $tx['user_email'] ?? $tx['user_id'] ?? null;
+        if ($txTimeMs >= $startTimeMs && $txTimeMs <= $endTimeMs) {
+            $debugMatchInfo['in_range']++;
 
-            // Normalize for comparison
-            $userMatch = true;
-            if ($userEmail && $txUser) {
-                $userMatch = strtolower(trim($userEmail)) === strtolower(trim($txUser));
-            }
+            // Filter by user
+            $txUser = strtolower(trim($tx['user_email'] ?? $tx['user_id'] ?? ''));
 
-            if ($userMatch) {
+            if ($userEmail === '' || $txUser === $userEmail) {
+                $debugMatchInfo['user_match']++;
                 $shiftTransactions[] = $tx;
             }
         }
@@ -131,10 +126,13 @@ try {
         'shift' => [
             'id' => $targetShift['id'],
             'user' => $userEmail,
-            'start_time' => $targetShift['start_time'],
-            'end_time' => $targetShift['end_time'] ?? 'OPEN',
+            'start_time_raw' => $targetShift['start_time'],
+            'end_time_raw' => $targetShift['end_time'] ?? 'OPEN',
+            'start_time_ms' => $startTimeMs,
+            'end_time_ms' => $endTimeMs,
             'status' => $targetShift['status'] ?? 'unknown'
         ],
+        'debug' => $debugMatchInfo,
         'summary' => [
             'transaction_count' => count($shiftTransactions),
             'total_sales' => round($totalSales, 2),
