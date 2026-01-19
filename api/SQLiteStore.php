@@ -4,12 +4,18 @@ require_once __DIR__ . '/db/Database.php';
 
 class SQLiteStore
 {
+    // Version identifier - update this when making changes to verify deployment
+    const VERSION = '2026-01-19-v3-PARAM_STR_FIX';
+
     public $pdo;
     private $collections;
     private $schemaCache = [];
 
     public function __construct()
     {
+        // Log version to verify correct file is deployed
+        error_log("SQLiteStore VERSION: " . self::VERSION);
+
         $this->pdo = Database::getInstance()->getConnection();
         // Disable WAL mode to prevent locking issues on some filesystems
         $this->pdo->exec("PRAGMA journal_mode=DELETE;");
