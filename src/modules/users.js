@@ -364,11 +364,15 @@ async function handleUserSubmit(e) {
     const isEdit = document.getElementById("user-email").disabled;
 
     try {
-        if ((!isEdit || password) && (!password || password.length < 6)) {
-            throw new Error("Password is required and must be at least 6 characters.");
+        // Validate password: required for new users, optional for edits
+        if (!isEdit && (!password || password.length < 6)) {
+            throw new Error("Password is required and must be at least 6 characters for new users.");
+        }
+        if (isEdit && password && password.length < 6) {
+            throw new Error("Password must be at least 6 characters.");
         }
 
-        // Harvest permissions
+        // Harvest permissions from checkboxes
         const permissions = {};
         document.querySelectorAll(".perm-check").forEach(chk => {
             const mod = chk.dataset.module;
@@ -377,31 +381,35 @@ async function handleUserSubmit(e) {
             permissions[mod][type] = chk.checked;
         });
 
-        // To preserve existing password if not changed during edit, we need the full user list
+        // Get existing user for edit mode
         const existingUser = await Repository.get('users', email);
 
         if (!isEdit && existingUser) {
             throw new Error("User already exists.");
         }
 
+        // Build user data - only include fields we want to update
         const userData = {
-            ...existingUser,
             email,
             name,
-            phone,
-            is_active: isActive ? 1 : 0, // Store as 1/0 for SQLite compatibility
-            permissions
+            phone: phone || '',
+            is_active: isActive ? 1 : 0,
+            permissions,
+            role: '', // Legacy field - always set to empty string
+            _version: (existingUser?._version || 0) + 1,
+            _updatedAt: Date.now(),
+            _deleted: 0
         };
 
-        // Clean up legacy role field to avoid SQLite null binding issues
-        if (userData.role === null || userData.role === undefined) {
-            userData.role = '';
+        // Preserve existing password_hash if not changing password
+        if (existingUser?.password_hash && !password) {
+            userData.password_hash = existingUser.password_hash;
         }
 
-        // Only update password if provided
+        // Set new password if provided (use password_hash for server compatibility)
         if (password) {
             if (typeof md5 === 'function') {
-                userData.password = md5(password);
+                userData.password_hash = md5(password);
             } else {
                 console.error("MD5 function not found. Password not updated.");
                 throw new Error("Security library missing. Password could not be set.");
@@ -410,13 +418,8 @@ async function handleUserSubmit(e) {
 
         // Log user data before saving (mask sensitive hash)
         const debugUserData = { ...userData };
-        // If password_hash present, partially mask it for logs
         if (debugUserData.password_hash) {
             debugUserData.password_hash = debugUserData.password_hash.slice(0, 6) + '...';
-        }
-        if (debugUserData.password) {
-            // Password on client is md5(password); mask it as well
-            debugUserData.password = debugUserData.password.slice(0, 6) + '...';
         }
         console.log("User submit data (masked):", debugUserData);
 
@@ -429,7 +432,7 @@ async function handleUserSubmit(e) {
             SyncEngine.sync().then(() => console.log("Background sync triggered after user save")).catch(e => console.warn("Background sync failed after user save:", e));
         }
 
-        alert("User saved. Will sync with server.");
+        alert("User saved successfully.");
         closeUserModal();
         fetchAndRenderUsers();
 
