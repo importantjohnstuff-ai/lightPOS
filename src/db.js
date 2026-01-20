@@ -63,6 +63,10 @@ if (use_sqlite) {
     dexieDb.version(40).stores({
         discount_codes: '++id, code, type, value, usage_limit, is_active, sync_status, _version, _updatedAt, _deleted'
     });
+    dexieDb.version(41).stores({
+        spatial_shelves: '++id, label, type, x, y, width, height, rotation, structure, sync_status, _version, _updatedAt, _deleted',
+        spatial_placements: '++id, shelf_id, level, division, item_id, quantity, sync_status, _version, _updatedAt, _deleted'
+    });
     repository = DexieRepository;
     dbPromise = Promise.resolve(dexieDb); // Resolve with the Dexie instance
 }

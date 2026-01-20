@@ -172,6 +172,51 @@ function ensureDiscountCodesSchema($pdo)
 }
 ensureDiscountCodesSchema($store->pdo);
 
+// Ensure Spatial Inventory Schema exists
+function ensureSpatialSchema($pdo)
+{
+    $stmt = $pdo->prepare("PRAGMA table_info(spatial_shelves)");
+    $stmt->execute();
+    if (empty($stmt->fetchAll())) {
+        $sql = "
+            CREATE TABLE spatial_shelves (
+                id INTEGER PRIMARY KEY,
+                label TEXT,
+                type TEXT,
+                x INTEGER,
+                y INTEGER,
+                width INTEGER,
+                height INTEGER,
+                rotation INTEGER,
+                structure TEXT,
+                sync_status TEXT,
+                _version INTEGER,
+                _updatedAt INTEGER,
+                _deleted INTEGER DEFAULT 0
+            );
+            CREATE INDEX idx_spatial_shelves_updatedAt ON spatial_shelves(_updatedAt);
+            
+            CREATE TABLE spatial_placements (
+                id INTEGER PRIMARY KEY,
+                shelf_id INTEGER,
+                item_id TEXT,
+                level INTEGER,
+                division INTEGER,
+                quantity INTEGER,
+                sync_status TEXT,
+                _version INTEGER,
+                _updatedAt INTEGER,
+                _deleted INTEGER DEFAULT 0
+            );
+            CREATE INDEX idx_spatial_placements_updatedAt ON spatial_placements(_updatedAt);
+            CREATE INDEX idx_spatial_placements_shelf_id ON spatial_placements(shelf_id);
+        ";
+        $pdo->exec($sql);
+        error_log("Spatial Inventory schema initialized via sync.php");
+    }
+}
+ensureSpatialSchema($store->pdo);
+
 $method = $_SERVER['REQUEST_METHOD'];
 
 // 1. Handle Nuclear Reset (Bypass Lock)
@@ -381,7 +426,9 @@ if ($method === 'GET') {
         'settings',
         'purchase_orders',
         'supplier_config',
-        'inventory_metrics'
+        'inventory_metrics',
+        'spatial_shelves',
+        'spatial_placements'
     ];
     $response = [];
     $debug_info = [

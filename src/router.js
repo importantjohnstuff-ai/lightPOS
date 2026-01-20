@@ -17,6 +17,7 @@ import { checkPermission } from "./auth.js";
 import { renderSidebar } from "./layout.js";
 import { loadManualView } from "./modules/manual.js";
 import { loadAIToolsView } from "./modules/ai-tools.js";
+import { loadInventorySpatialView } from "./modules/inventory_spatial.js";
 
 // Router v2.1 - Reports V2 Enabled
 export function initRouter() {
@@ -102,7 +103,9 @@ async function handleRoute() {
         case "#shifts": await loadShiftsView(); break;
         case "#returns": await loadReturnsView(); break;
         case "#settings": await loadSettingsView(); break;
+        case "#settings": await loadSettingsView(); break;
         case "#ai-tools": await loadAIToolsView(); break;
+        case "#inventory-spatial": await loadInventorySpatialView(); break;
         case "#purchase-orders": await loadPurchaseOrdersView(); break;
         default:
             content.innerHTML = `<div class="p-6"><h2>404 - Page Not Found</h2></div>`;

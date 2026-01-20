@@ -48,7 +48,9 @@ class SQLiteStore
             'purchase_orders',
             'supplier_config',
             'inventory_metrics',
-            'discount_codes'
+            'discount_codes',
+            'spatial_shelves',
+            'spatial_placements'
         ];
     }
 
