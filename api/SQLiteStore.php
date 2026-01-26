@@ -18,7 +18,8 @@ class SQLiteStore
 
         $this->pdo = Database::getInstance()->getConnection();
         // Disable WAL mode to prevent locking issues on some filesystems
-        $this->pdo->exec("PRAGMA journal_mode=DELETE;");
+        // Enable WAL mode for better concurrency
+        $this->pdo->exec("PRAGMA journal_mode=WAL;");
         $this->pdo->exec("PRAGMA busy_timeout = 5000;");
         // Disable emulated prepares to use native SQLite binding
         // Combined with binding ALL values as PARAM_STR, this resolves Error 21

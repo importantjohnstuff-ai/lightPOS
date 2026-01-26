@@ -1,31 +1,36 @@
 <?php
 
-class Database {
+class Database
+{
     private static $instance = null;
     private $pdo;
 
-    private function __construct() {
+    private function __construct()
+    {
         $dbPath = __DIR__ . '/../../data/database.sqlite';
-        
+
         try {
             $this->pdo = new PDO('sqlite:' . $dbPath);
             $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
             $this->pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-            $this->pdo->exec("PRAGMA journal_mode=DELETE;");
+            $this->pdo->exec("PRAGMA journal_mode=WAL;");
+            $this->pdo->exec("PRAGMA busy_timeout = 5000;");
         } catch (PDOException $e) {
             // Handle connection error
             die("Database connection failed: " . $e->getMessage());
         }
     }
 
-    public static function getInstance() {
+    public static function getInstance()
+    {
         if (self::$instance == null) {
             self::$instance = new Database();
         }
         return self::$instance;
     }
 
-    public function getConnection() {
+    public function getConnection()
+    {
         return $this->pdo;
     }
 }

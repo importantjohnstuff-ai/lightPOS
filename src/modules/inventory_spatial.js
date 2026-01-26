@@ -41,6 +41,37 @@ async function addNewShelf() {
     renderFloorplan();
 }
 
+async function addNewWall() {
+    const db = await dbPromise;
+    const newWall = {
+        label: "Wall",
+        type: "wall",
+        x: 100,
+        y: 100,
+        width: 10,
+        height: 100,
+        rotation: 0,
+        structure: {}, // Walls don't have slots
+        sync_status: 'created',
+        _version: 1,
+        _updatedAt: new Date().toISOString(),
+        _deleted: 0
+    };
+
+    const id = await db.spatial_shelves.add(newWall);
+    newWall.id = id;
+
+    await db.outbox.add({
+        collection: 'spatial_shelves',
+        docId: id,
+        type: 'upsert',
+        payload: { ...newWall, id }
+    });
+
+    shelves.push(newWall);
+    renderFloorplan();
+}
+
 
 export async function loadInventorySpatialView() {
     const content = document.getElementById("main-content");
@@ -61,6 +92,9 @@ export async function loadInventorySpatialView() {
                     <button id="btn-toggle-heatmap" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded shadow">
                         Toggle Heatmap
                     </button>
+                    <button id="btn-add-wall" class="bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-4 rounded shadow">
+                        Add Wall
+                    </button>
                     <button id="btn-add-shelf" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded shadow">
                         Add Shelf
                     </button>
@@ -71,8 +105,17 @@ export async function loadInventorySpatialView() {
             <div class="flex flex-1 gap-4 overflow-hidden">
                 <!-- Floorplan Canvas Area -->
                 <div class="flex-1 bg-white rounded-lg shadow border border-gray-200 relative overflow-hidden" id="floorplan-container">
-                    <div class="absolute inset-0 grid-background" id="floorplan-grid">
-                        <!-- Shelves will be rendered here -->
+                    <!-- Zoom Controls -->
+                    <div class="absolute bottom-4 right-4 flex flex-col gap-2 z-20">
+                        <button id="btn-zoom-in" class="bg-white border border-gray-300 p-2 rounded shadow hover:bg-gray-50 font-bold text-gray-700 w-10 h-10 flex items-center justify-center" title="Zoom In">+</button>
+                        <button id="btn-zoom-reset" class="bg-white border border-gray-300 p-2 rounded shadow hover:bg-gray-50 text-xs font-bold text-gray-700 w-10 h-10 flex items-center justify-center" title="Reset View">100%</button>
+                        <button id="btn-zoom-out" class="bg-white border border-gray-300 p-2 rounded shadow hover:bg-gray-50 font-bold text-gray-700 w-10 h-10 flex items-center justify-center" title="Zoom Out">-</button>
+                    </div>
+
+                    <div class="w-full h-full origin-top-left" id="floorplan-viewport">
+                        <div class="absolute inset-0 grid-background" id="floorplan-grid" style="transform-origin: 0 0;">
+                            <!-- Shelves will be rendered here -->
+                        </div>
                     </div>
                 </div>
 
@@ -132,6 +175,10 @@ export async function loadInventorySpatialView() {
 function setupEventListeners() {
     document.getElementById('btn-add-shelf')?.addEventListener('click', () => {
         addNewShelf();
+    });
+
+    document.getElementById('btn-add-wall')?.addEventListener('click', () => {
+        addNewWall();
     });
 
     // Manual Sync Handler
@@ -205,10 +252,43 @@ function setupEventListeners() {
 
     document.getElementById('btn-toggle-heatmap')?.addEventListener('click', toggleHeatmap);
 
-    document.getElementById('spatial-search')?.addEventListener('input', (e) => {
-        searchText = e.target.value.toLowerCase();
-        renderFloorplan();
-    });
+    document.getElementById('btn-zoom-in')?.addEventListener('click', () => adjustZoom(0.1));
+    document.getElementById('btn-zoom-out')?.addEventListener('click', () => adjustZoom(-0.1));
+    document.getElementById('btn-zoom-reset')?.addEventListener('click', () => { scale = 1; pan = { x: 0, y: 0 }; applyTransform(); });
+
+    const viewport = document.getElementById('floorplan-viewport');
+    if (viewport) {
+        viewport.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const delta = -Math.sign(e.deltaY) * 0.1;
+            adjustZoom(delta);
+        });
+
+        // Panning Logic (Middle mouse or Space + Drag)
+        viewport.addEventListener('mousedown', (e) => {
+            if (e.button === 1 || (e.button === 0 && e.getModifierState && e.getModifierState('Space'))) {
+                isPanning = true;
+                panStart = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+                viewport.style.cursor = 'grabbing';
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (isPanning) {
+                pan.x = e.clientX - panStart.x;
+                pan.y = e.clientY - panStart.y;
+                applyTransform();
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isPanning) {
+                isPanning = false;
+                viewport.style.cursor = ''; // Reset cursor
+                // Revert cursor to default (or whatever tool is active)
+            }
+        });
+    }
 
     window.addEventListener('sync-updated', async () => {
         if (!document.getElementById('floorplan-grid')) return;
@@ -229,6 +309,28 @@ let shelfMetrics = new Map(); // Map<shelfId, { value: number, velocity: number 
 // Search State
 let searchText = '';
 let shelfContentIndex = new Map(); // Map<shelfId, Set<string (normalized item names)>>
+// Canvas State
+let scale = 1;
+let pan = { x: 0, y: 0 };
+let isPanning = false;
+let panStart = { x: 0, y: 0 };
+
+function adjustZoom(delta) {
+    scale += delta;
+    if (scale < 0.2) scale = 0.2;
+    if (scale > 3) scale = 3;
+    applyTransform();
+    // Update reset button text
+    const btn = document.getElementById('btn-zoom-reset');
+    if (btn) btn.textContent = Math.round(scale * 100) + '%';
+}
+
+function applyTransform() {
+    const grid = document.getElementById('floorplan-grid');
+    if (grid) {
+        grid.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${scale})`;
+    }
+}
 
 async function loadFloorplan() {
     const db = await dbPromise;
@@ -238,6 +340,7 @@ async function loadFloorplan() {
     await buildSearchIndex();
 
     renderFloorplan();
+    applyTransform(); // Apply initial/current transform
 }
 
 async function buildSearchIndex() {
@@ -276,6 +379,17 @@ function renderFloorplan() {
     shelves.forEach(shelf => {
         const el = document.createElement('div');
         el.className = 'shelf-item select-none flex flex-col items-center justify-center text-center leading-tight overflow-hidden p-1';
+
+        // Wall Specific Styling
+        if (shelf.type === 'wall') {
+            el.classList.add('wall-item');
+            el.style.backgroundColor = '#334155'; // Dark Slate 700
+            el.style.borderColor = '#0f172a'; // Slate 900
+            el.style.color = '#94a3b8'; // Slate 400
+            el.style.borderRadius = '2px';
+            el.style.cursor = 'move';
+        }
+
         el.style.left = shelf.x + 'px';
         el.style.top = shelf.y + 'px';
         el.style.width = shelf.width + 'px';
@@ -310,7 +424,7 @@ function renderFloorplan() {
 
         // Dynamic background color based on type or Heatmap
         let bgColor = '';
-        if (heatmapMode !== 'none') {
+        if (shelf.type !== 'wall' && heatmapMode !== 'none') {
             const metrics = shelfMetrics.get(shelf.id);
             if (metrics) {
                 const color = getHeatmapColor(metrics[heatmapMode], maxMetric, heatmapMode);
@@ -322,22 +436,27 @@ function renderFloorplan() {
             }
         }
 
+        // Default colors if not heatmap or if heatmap yielded nothing
         if (!bgColor) {
-            if (shelf.type === 'refrigerator') bgColor = '#bae6fd';
+            if (shelf.type === 'wall') bgColor = '#334155';
+            else if (shelf.type === 'refrigerator') bgColor = '#bae6fd';
             else if (shelf.type === 'rack') bgColor = '#fed7aa';
             else bgColor = '#cbd5e1';
-            el.style.color = '#334155';
+
+            if (shelf.type !== 'wall') el.style.color = '#334155';
         }
         el.style.backgroundColor = bgColor;
 
         // Metric Label Overlay
-        let label = shelf.label;
-        if (heatmapMode === 'value') {
-            const val = shelfMetrics.get(shelf.id)?.value || 0;
-            label += `<br><span class="text-[9px] font-normal">₱${val.toLocaleString()}</span>`;
-        } else if (heatmapMode === 'velocity') {
-            const val = shelfMetrics.get(shelf.id)?.velocity || 0;
-            label += `<br><span class="text-[9px] font-normal">${val} units</span>`;
+        let label = shelf.type === 'wall' ? '' : shelf.label; // No label for walls usually
+        if (shelf.type !== 'wall') {
+            if (heatmapMode === 'value') {
+                const val = shelfMetrics.get(shelf.id)?.value || 0;
+                label += `<br><span class="text-[9px] font-normal">₱${val.toLocaleString()}</span>`;
+            } else if (heatmapMode === 'velocity') {
+                const val = shelfMetrics.get(shelf.id)?.velocity || 0;
+                label += `<br><span class="text-[9px] font-normal">${val} units</span>`;
+            }
         }
 
         el.innerHTML = `
