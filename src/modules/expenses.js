@@ -54,13 +54,14 @@ export async function loadExpensesView() {
                                 <th class="py-3 px-6 text-left">Description</th>
                                 <th class="py-3 px-6 text-left">Category</th>
                                 <th class="py-3 px-6 text-left">Supplier</th>
+                                <th class="py-3 px-6 text-left">Invoice No.</th>
                                 <th class="py-3 px-6 text-right">Amount</th>
                                 <th class="py-3 px-6 text-left">User</th>
                                 <th class="py-3 px-6 text-center">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="expenses-table-body" class="text-gray-600 text-sm font-light divide-y divide-gray-100">
-                            <tr><td colspan="7" class="py-10 text-center text-gray-400">Loading expenses...</td></tr>
+                            <tr><td colspan="8" class="py-10 text-center text-gray-400">Loading expenses...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -239,7 +240,8 @@ async function fetchExpenses() {
         expenses = expenses.filter(exp => {
             const matchesSearch = exp.description.toLowerCase().includes(searchTerm) ||
                 exp.category.toLowerCase().includes(searchTerm) ||
-                (exp.supplier_name && exp.supplier_name.toLowerCase().includes(searchTerm));
+                (exp.supplier_name && exp.supplier_name.toLowerCase().includes(searchTerm)) ||
+                (exp.invoice_number && exp.invoice_number.toLowerCase().includes(searchTerm));
 
             const expDate = exp.date; // YYYY-MM-DD
             const matchesStart = !startDate || expDate >= startDate;
@@ -258,7 +260,7 @@ async function fetchExpenses() {
         tbody.innerHTML = "";
 
         if (expenses.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="7" class="py-10 text-center text-gray-400 italic">No expenses match your filters.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="8" class="py-10 text-center text-gray-400 italic">No expenses match your filters.</td></tr>`;
             return;
         }
 
@@ -272,6 +274,7 @@ async function fetchExpenses() {
                 <td class="py-3 px-6 text-left font-medium text-gray-800">${data.description}</td>
                 <td class="py-3 px-6 text-left"><span class="bg-gray-100 text-gray-600 py-1 px-3 rounded-full text-[10px] font-bold uppercase tracking-wider">${data.category}</span></td>
                 <td class="py-3 px-6 text-left text-xs">${data.supplier_name || '-'}</td>
+                <td class="py-3 px-6 text-left text-xs font-mono text-gray-500">${data.invoice_number || '-'}</td>
                 <td class="py-3 px-6 text-right font-black text-red-600">₱${data.amount.toFixed(2)}</td>
                 <td class="py-3 px-6 text-left text-[10px] text-gray-500">${data.user_id}</td>
                 <td class="py-3 px-6 text-center">
@@ -310,6 +313,6 @@ async function fetchExpenses() {
         });
     } catch (error) {
         console.error("Error fetching expenses:", error);
-        tbody.innerHTML = `<tr><td colspan="7" class="py-10 text-center text-red-500 font-bold">Error loading expense data.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="py-10 text-center text-red-500 font-bold">Error loading expense data.</td></tr>`;
     }
 }
