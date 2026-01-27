@@ -1082,25 +1082,25 @@ async function renderPosInterface(content) {
                 console.error(err);
                 pickList.innerHTML = '<div class="text-center text-red-500 p-2">Error loading expenses.</div>';
             }
-        };
 
-        const closePickModal = () => pickModal.classList.add("hidden");
-        document.getElementById("btn-close-pick-expense").onclick = closePickModal;
-        document.getElementById("btn-cancel-pick-expense").onclick = closePickModal;
+            const closePickModal = () => pickModal.classList.add("hidden");
+            document.getElementById("btn-close-pick-expense").onclick = closePickModal;
+            document.getElementById("btn-cancel-pick-expense").onclick = closePickModal;
 
-        document.getElementById("btn-confirm-pick-expense").onclick = () => {
-            // Use selectedOrderedIds to maintain selection order
-            selectedOrderedIds.forEach(id => {
-                // Find the expense data (from filtered list isn't enough, need from todayExpenses)
-                const exp = todayExpenses.find(e => e.id === id);
-                if (exp) {
-                    const supplier = exp.supplier_name;
-                    const finalDesc = supplier ? `${exp.description} (${supplier})` : exp.description;
-                    addReceiptRow(finalDesc, exp.amount);
-                }
-            });
-            updateTotals();
-            closePickModal();
+            document.getElementById("btn-confirm-pick-expense").onclick = () => {
+                // Use selectedOrderedIds to maintain selection order
+                selectedOrderedIds.forEach(id => {
+                    // Find the expense data (from filtered list isn't enough, need from todayExpenses)
+                    const exp = todayExpenses.find(e => e.id === id);
+                    if (exp) {
+                        const supplier = exp.supplier_name;
+                        const finalDesc = supplier ? `${exp.description} (${supplier})` : exp.description;
+                        addReceiptRow(finalDesc, exp.amount);
+                    }
+                });
+                updateTotals();
+                closePickModal();
+            };
         };
 
         document.getElementById("precounted-bills").addEventListener("input", updateTotals);
