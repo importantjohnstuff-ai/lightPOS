@@ -14,7 +14,7 @@ let supplierCategoryFilter = '';
 
 export async function loadSuppliersView() {
     const content = document.getElementById("main-content");
-    const canWrite = checkPermission("suppliers", "write"); 
+    const canWrite = checkPermission("suppliers", "write");
 
     content.innerHTML = `
         <div class="max-w-6xl mx-auto lg:h-[calc(100vh-140px)] flex flex-col">
@@ -55,6 +55,27 @@ export async function loadSuppliersView() {
                     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4 flex-shrink-0">
                         <h2 class="text-2xl font-bold text-gray-800 truncate">Products: <span id="selected-supplier-name" class="text-blue-600"></span></h2>
                         <input type="text" id="search-supplier-products" placeholder="Search products..." class="shadow border rounded py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-48">
+                    </div>
+
+                    <div class="bg-blue-50 border border-blue-100 rounded p-3 mb-4 hidden" id="supplier-detail-box">
+                        <div class="grid grid-cols-2 gap-4 text-xs">
+                             <div>
+                                <span class="font-bold text-gray-500 uppercase">Contact:</span>
+                                <span class="text-gray-800 font-medium ml-1" id="detail-sup-contact">-</span>
+                             </div>
+                             <div>
+                                <span class="font-bold text-gray-500 uppercase">Email/Phone:</span>
+                                <span class="text-gray-800 font-medium ml-1" id="detail-sup-email">-</span>
+                             </div>
+                             <div>
+                                <span class="font-bold text-gray-500 uppercase">TIN:</span>
+                                <span class="text-gray-800 font-medium ml-1" id="detail-sup-tin">-</span>
+                             </div>
+                             <div>
+                                <span class="font-bold text-gray-500 uppercase">Receipt Name:</span>
+                                <span class="text-gray-800 font-medium ml-1" id="detail-sup-receipt-name">-</span>
+                             </div>
+                        </div>
                     </div>
 
                     <div class="bg-white shadow-md rounded flex flex-col flex-1 border min-h-0">
@@ -100,6 +121,16 @@ export async function loadSuppliersView() {
                         <div class="mb-4">
                             <label class="block text-gray-700 text-sm font-bold mb-2">Email or Phone</label>
                             <input type="text" id="sup-email" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label class="block text-gray-700 text-sm font-bold mb-2">TIN</label>
+                                <input type="text" id="sup-tin" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="000-000-000">
+                            </div>
+                            <div>
+                                <label class="block text-gray-700 text-sm font-bold mb-2">Receipt Name</label>
+                                <input type="text" id="sup-receipt-name" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Registered Name">
+                            </div>
                         </div>
 
                         <div class="border-t mt-6 pt-4">
@@ -228,8 +259,8 @@ async function fetchSuppliers() {
 
     try {
         const suppliers = await Repository.getAll('suppliers');
-        let filteredSuppliers = suppliers.filter(s => 
-            s.name.toLowerCase().includes(supplierFilterTerm) || 
+        let filteredSuppliers = suppliers.filter(s =>
+            s.name.toLowerCase().includes(supplierFilterTerm) ||
             (s.contact || "").toLowerCase().includes(supplierFilterTerm) ||
             (s.email || "").toLowerCase().includes(supplierFilterTerm)
         );
@@ -238,7 +269,7 @@ async function fetchSuppliers() {
             const allItems = await Repository.getAll('items');
             const supplierIdsWithCategory = new Set(
                 allItems.filter(i => i.category === supplierCategoryFilter && !i._deleted)
-                       .map(i => i.supplier_id)
+                    .map(i => i.supplier_id)
             );
             filteredSuppliers = filteredSuppliers.filter(s => supplierIdsWithCategory.has(s.id));
         }
@@ -267,7 +298,7 @@ async function fetchSuppliers() {
                     </button>
                 </td>
             `;
-            
+
             row.addEventListener("click", (e) => {
                 if (e.target.closest("button")) return;
                 selectSupplier(sup);
@@ -284,7 +315,9 @@ async function fetchSuppliers() {
                     document.getElementById("sup-name").value = sup.name;
                     document.getElementById("sup-contact").value = sup.contact || "";
                     document.getElementById("sup-email").value = sup.email || "";
-                    
+                    document.getElementById("sup-tin").value = sup.tin || "";
+                    document.getElementById("sup-receipt-name").value = sup.receipt_name || "";
+
                     document.getElementById("sup-config-cadence").value = config?.delivery_cadence || "weekly";
                     document.getElementById("sup-config-leadtime").value = config?.lead_time_days || "";
                     document.getElementById("sup-config-otb").value = config?.monthly_otb || "";
@@ -305,15 +338,25 @@ async function selectSupplier(sup) {
     selectedSupplierId = sup.id;
     document.getElementById("selected-supplier-name").textContent = sup.name;
     document.getElementById("supplier-products-panel").classList.remove("hidden");
-    
+
     // Highlight selected row
     document.querySelectorAll("#suppliers-table-body tr").forEach(row => {
         row.classList.remove("bg-blue-50");
     });
-    const targetRow = Array.from(document.querySelectorAll("#suppliers-table-body tr")).find(row => 
+    const targetRow = Array.from(document.querySelectorAll("#suppliers-table-body tr")).find(row =>
         row.querySelector(`.delete-btn[data-id="${sup.id}"]`)
     );
     if (targetRow) targetRow.classList.add("bg-blue-50");
+
+    // Populate Detail Box
+    const detailBox = document.getElementById("supplier-detail-box");
+    if (detailBox) {
+        detailBox.classList.remove("hidden");
+        document.getElementById("detail-sup-contact").textContent = sup.contact || '-';
+        document.getElementById("detail-sup-email").textContent = sup.email || '-';
+        document.getElementById("detail-sup-tin").textContent = sup.tin || '-';
+        document.getElementById("detail-sup-receipt-name").textContent = sup.receipt_name || sup.name || '-';
+    }
 
     await fetchSupplierProducts();
 }
@@ -375,7 +418,7 @@ function renderSupplierProducts() {
         const isLowStock = p.stock_level <= (p.min_stock || 0);
         const colorClass = isOutOfStock ? 'text-red-600 font-bold' : (isLowStock ? 'text-orange-500 font-bold' : 'text-green-600');
         const recQty = supplierProductStats[p.id] || 0;
-        
+
         return `
             <tr class="border-b border-gray-200 hover:bg-gray-50">
                 <td class="py-3 px-4 text-left font-medium">${p.name}</td>
@@ -410,7 +453,7 @@ function openAllProductsModal() {
         const isLowStock = p.stock_level <= (p.min_stock || 0);
         const colorClass = isOutOfStock ? 'text-red-600 font-bold' : (isLowStock ? 'text-orange-500 font-bold' : 'text-green-600');
         const recQty = supplierProductStats[p.id] || 0;
-        
+
         return `
             <tr class="border-b border-gray-200 hover:bg-gray-50">
                 <td class="py-3 px-4 text-left font-medium">${p.name}</td>
@@ -429,11 +472,11 @@ function openAllProductsModal() {
 async function populateCategoryDropdown() {
     const select = document.getElementById("filter-supplier-category");
     if (!select) return;
-    
+
     try {
         const items = await Repository.getAll('items');
         const categories = [...new Set(items.map(i => i.category).filter(c => c && c !== 'NULL'))].sort();
-        
+
         select.innerHTML = '<option value="">All Categories</option>';
         categories.forEach(cat => {
             const opt = document.createElement("option");
@@ -459,7 +502,9 @@ async function handleAddSupplier(e) {
         id: supplierId,
         name,
         contact,
-        email
+        email,
+        tin: document.getElementById("sup-tin").value,
+        receipt_name: document.getElementById("sup-receipt-name").value
     };
 
     const configData = {
