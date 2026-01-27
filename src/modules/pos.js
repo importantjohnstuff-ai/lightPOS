@@ -1009,8 +1009,12 @@ async function renderPosInterface(content) {
                 const allExpenses = await Repository.getAll('expenses');
                 const today = new Date().toISOString().split('T')[0];
 
-                // Filter today's expenses
                 const todayExpenses = allExpenses.filter(e => e.date === today);
+
+                // Sort by creation time (Entry Order)
+                todayExpenses.sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+
+                let selectedOrderedIds = [];
 
                 const renderExpenses = (filterText = "") => {
                     const term = filterText.toLowerCase();
@@ -1027,9 +1031,16 @@ async function renderPosInterface(content) {
 
                     filtered.forEach(exp => {
                         const div = document.createElement("div");
-                        div.className = "flex items-center gap-2 p-2 border-b last:border-0 hover:bg-purple-50 cursor-pointer";
+                        div.className = "flex items-center gap-2 p-2 border-b last:border-0 hover:bg-purple-50 cursor-pointer select-none";
+                        const isChecked = selectedOrderedIds.includes(exp.id);
+
                         div.innerHTML = `
-                            <input type="checkbox" class="form-checkbox h-4 w-4 text-purple-600 cursor-pointer exp-checkbox" data-desc="${exp.description}" data-amt="${exp.amount}" data-supplier="${exp.supplier_name || ''}">
+                            <input type="checkbox" class="form-checkbox h-4 w-4 text-purple-600 cursor-pointer exp-checkbox" 
+                                data-id="${exp.id}"
+                                data-desc="${exp.description}" 
+                                data-amt="${exp.amount}" 
+                                data-supplier="${exp.supplier_name || ''}"
+                                ${isChecked ? 'checked' : ''}>
                             <div class="flex-1 text-sm">
                                 <div class="font-bold text-gray-700">${exp.description}</div>
                                 <div class="text-[10px] text-gray-500">${exp.supplier_name || 'No Supplier'}</div>
@@ -1037,11 +1048,23 @@ async function renderPosInterface(content) {
                             <div class="font-bold text-gray-800">₱${exp.amount.toFixed(2)}</div>
                         `;
 
+                        const cb = div.querySelector("input[type='checkbox']");
+
                         // Toggle checkbox on row click
                         div.addEventListener("click", (e) => {
-                            if (e.target.type !== 'checkbox') {
-                                const cb = div.querySelector("input[type='checkbox']");
-                                cb.checked = !cb.checked;
+                            if (e.target !== cb) {
+                                cb.click(); // Trigger native click/change
+                            }
+                        });
+
+                        // Track selection order
+                        cb.addEventListener("change", (e) => {
+                            if (e.target.checked) {
+                                if (!selectedOrderedIds.includes(exp.id)) {
+                                    selectedOrderedIds.push(exp.id);
+                                }
+                            } else {
+                                selectedOrderedIds = selectedOrderedIds.filter(id => id !== exp.id);
                             }
                         });
 
@@ -1066,14 +1089,15 @@ async function renderPosInterface(content) {
         document.getElementById("btn-cancel-pick-expense").onclick = closePickModal;
 
         document.getElementById("btn-confirm-pick-expense").onclick = () => {
-            const checkboxes = pickList.querySelectorAll(".exp-checkbox:checked");
-            checkboxes.forEach(cb => {
-                const desc = cb.dataset.desc;
-                const amt = cb.dataset.amt;
-                const supplier = cb.dataset.supplier;
-
-                const finalDesc = supplier ? `${desc} (${supplier})` : desc;
-                addReceiptRow(finalDesc, amt);
+            // Use selectedOrderedIds to maintain selection order
+            selectedOrderedIds.forEach(id => {
+                // Find the expense data (from filtered list isn't enough, need from todayExpenses)
+                const exp = todayExpenses.find(e => e.id === id);
+                if (exp) {
+                    const supplier = exp.supplier_name;
+                    const finalDesc = supplier ? `${exp.description} (${supplier})` : exp.description;
+                    addReceiptRow(finalDesc, exp.amount);
+                }
             });
             updateTotals();
             closePickModal();
