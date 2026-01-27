@@ -23,6 +23,19 @@ export async function loadExpensesView() {
                     </button>
                 </div>
             </div>
+            
+            <!-- Quick Sum Floating Widget -->
+            <div id="quick-sum-widget" class="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-6 z-50 transition-all duration-300 translate-y-20 opacity-0 pointer-events-none">
+                <div class="flex flex-col">
+                    <span class="text-[10px] uppercase font-bold text-gray-400 tracking-wider" id="qs-count">0 ITEMS</span>
+                    <span class="text-xl font-bold text-white tracking-tight" id="qs-total">₱0.00</span>
+                </div>
+                <div class="h-8 w-px bg-gray-700"></div>
+                <button id="btn-clear-selection" class="text-gray-400 hover:text-white transition-colors text-sm font-bold flex items-center gap-1">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    Clear
+                </button>
+            </div>
 
             <!-- Filters Toolbar -->
             <div class="bg-white p-4 rounded-t-lg border border-b-0 shadow-sm flex flex-wrap gap-4 items-end shrink-0">
@@ -50,6 +63,9 @@ export async function loadExpensesView() {
                     <table class="min-w-full table-auto">
                         <thead class="sticky top-0 bg-gray-100 shadow-sm z-10">
                             <tr class="text-gray-600 uppercase text-xs font-bold leading-normal">
+                                <th class="py-3 px-6 text-center w-10">
+                                    <input type="checkbox" id="select-all-expenses" class="form-checkbox h-4 w-4 text-red-600 rounded border-gray-300 focus:ring-red-500 cursor-pointer">
+                                </th>
                                 <th class="py-3 px-6 text-left">Date</th>
                                 <th class="py-3 px-6 text-left">Description</th>
                                 <th class="py-3 px-6 text-left">Category</th>
@@ -61,7 +77,7 @@ export async function loadExpensesView() {
                             </tr>
                         </thead>
                         <tbody id="expenses-table-body" class="text-gray-600 text-sm font-light divide-y divide-gray-100">
-                            <tr><td colspan="8" class="py-10 text-center text-gray-400">Loading expenses...</td></tr>
+                            <tr><td colspan="9" class="py-10 text-center text-gray-400">Loading expenses...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -158,6 +174,20 @@ export async function loadExpensesView() {
         document.getElementById("exp-filter-start").value = today;
         document.getElementById("exp-filter-end").value = today;
         fetchExpenses();
+    });
+
+    // Quick Sum Listeners
+    document.getElementById("btn-clear-selection").addEventListener("click", () => {
+        document.querySelectorAll(".expense-checkbox").forEach(cb => cb.checked = false);
+        document.getElementById("select-all-expenses").checked = false;
+        updateQuickSum();
+    });
+
+    // Handle Select All
+    document.getElementById("select-all-expenses").addEventListener("change", (e) => {
+        const isChecked = e.target.checked;
+        document.querySelectorAll(".expense-checkbox").forEach(cb => cb.checked = isChecked);
+        updateQuickSum();
     });
 
     await Promise.all([fetchSuppliers(), fetchExpenses()]);
@@ -260,7 +290,7 @@ async function fetchExpenses() {
         tbody.innerHTML = "";
 
         if (expenses.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="8" class="py-10 text-center text-gray-400 italic">No expenses match your filters.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" class="py-10 text-center text-gray-400 italic">No expenses match your filters.</td></tr>`;
             return;
         }
 
@@ -268,8 +298,20 @@ async function fetchExpenses() {
             const dateStr = data.date;
 
             const row = document.createElement("tr");
-            row.className = "border-b border-gray-100 hover:bg-gray-50 transition-colors";
+            row.className = "border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"; // Added cursor-pointer
+
+            // Allow clicking row to toggle checkbox (except on buttons)
+            row.addEventListener('click', (e) => {
+                if (e.target.closest('button') || e.target.closest('input[type="checkbox"]')) return;
+                const cb = row.querySelector('.expense-checkbox');
+                cb.checked = !cb.checked;
+                updateQuickSum();
+            });
+
             row.innerHTML = `
+                <td class="py-3 px-6 text-center">
+                     <input type="checkbox" class="expense-checkbox form-checkbox h-4 w-4 text-red-600 rounded border-gray-300 focus:ring-red-500 cursor-pointer" data-amount="${data.amount}">
+                </td>
                 <td class="py-3 px-6 text-left whitespace-nowrap font-mono text-xs">${dateStr}</td>
                 <td class="py-3 px-6 text-left font-medium text-gray-800">${data.description}</td>
                 <td class="py-3 px-6 text-left"><span class="bg-gray-100 text-gray-600 py-1 px-3 rounded-full text-[10px] font-bold uppercase tracking-wider">${data.category}</span></td>
@@ -309,10 +351,56 @@ async function fetchExpenses() {
                 }
             });
 
+
+            // Individual checkbox listener
+            row.querySelector(".expense-checkbox").addEventListener("change", updateQuickSum);
+
             tbody.appendChild(row);
         });
+
+        // Reset select all
+        document.getElementById("select-all-expenses").checked = false;
+        updateQuickSum(); // Reset widget on reload
+
     } catch (error) {
         console.error("Error fetching expenses:", error);
-        tbody.innerHTML = `<tr><td colspan="8" class="py-10 text-center text-red-500 font-bold">Error loading expense data.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="py-10 text-center text-red-500 font-bold">Error loading expense data.</td></tr>`;
+    }
+}
+
+function updateQuickSum() {
+    const checkboxes = document.querySelectorAll('.expense-checkbox:checked');
+    const widget = document.getElementById("quick-sum-widget");
+    const countDisplay = document.getElementById("qs-count");
+    const totalDisplay = document.getElementById("qs-total");
+
+    if (checkboxes.length > 0) {
+        let total = 0;
+        checkboxes.forEach(cb => {
+            total += parseFloat(cb.dataset.amount || 0);
+        });
+
+        countDisplay.textContent = `${checkboxes.length} ITEM${checkboxes.length > 1 ? 'S' : ''}`;
+        totalDisplay.textContent = `₱${total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+        // Show widget
+        widget.classList.remove("translate-y-20", "opacity-0", "pointer-events-none");
+    } else {
+        // Hide widget
+        widget.classList.add("translate-y-20", "opacity-0", "pointer-events-none");
+    }
+
+    // Update Select All Checkbox state
+    const allCheckboxes = document.querySelectorAll('.expense-checkbox');
+    const selectAll = document.getElementById("select-all-expenses");
+    if (allCheckboxes.length > 0 && checkboxes.length === allCheckboxes.length) {
+        selectAll.checked = true;
+        selectAll.indeterminate = false;
+    } else if (checkboxes.length > 0) {
+        selectAll.checked = false;
+        selectAll.indeterminate = true;
+    } else {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
     }
 }
