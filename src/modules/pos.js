@@ -1005,16 +1005,17 @@ async function renderPosInterface(content) {
             pickModal.classList.remove("hidden");
             pickList.innerHTML = '<div class="text-center text-gray-500 p-4">Loading expenses...</div>';
 
+            let todayExpenses = [];
+            let selectedOrderedIds = [];
+
             try {
                 const allExpenses = await Repository.getAll('expenses');
                 const today = new Date().toISOString().split('T')[0];
 
-                const todayExpenses = allExpenses.filter(e => e.date === today);
+                todayExpenses = allExpenses.filter(e => e.date === today);
 
                 // Sort by creation time (Entry Order)
                 todayExpenses.sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
-
-                let selectedOrderedIds = [];
 
                 const renderExpenses = (filterText = "") => {
                     const term = filterText.toLowerCase();
