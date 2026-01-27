@@ -99,11 +99,17 @@ export async function loadExpensesView() {
                             <input type="date" id="exp-date" class="w-full border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-red-500 outline-none" required>
                         </div>
                     </div>
-                    <div class="mb-6">
-                        <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Supplier (Optional)</label>
-                        <select id="exp-supplier" class="w-full border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-red-500 outline-none">
-                            <option value="">None</option>
-                        </select>
+                    <div class="grid grid-cols-2 gap-4 mb-6">
+                        <div>
+                            <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Supplier (Optional)</label>
+                            <select id="exp-supplier" class="w-full border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-red-500 outline-none">
+                                <option value="">None</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Sales Invoice No.</label>
+                            <input type="text" id="exp-invoice-no" class="w-full border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="e.g. 00123">
+                        </div>
                     </div>
                     
                     <div class="flex items-center gap-2 pt-2">
@@ -180,6 +186,7 @@ async function saveExpense() {
     const amount = parseFloat(document.getElementById("exp-amount").value);
     const category = document.getElementById("exp-category").value;
     const supplierId = document.getElementById("exp-supplier").value;
+    const invoiceNo = document.getElementById("exp-invoice-no").value;
     const dateVal = document.getElementById("exp-date").value;
 
     const supplierName = supplierId ? suppliersList.find(s => s.id === supplierId)?.name : null;
@@ -192,6 +199,7 @@ async function saveExpense() {
         category: category,
         supplier_id: supplierId,
         supplier_name: supplierName,
+        invoice_number: invoiceNo,
         date: dateVal,
         user_id: user,
         _updatedAt: Date.now()
@@ -285,6 +293,7 @@ async function fetchExpenses() {
                 document.getElementById("exp-amount").value = data.amount;
                 document.getElementById("exp-category").value = data.category;
                 document.getElementById("exp-supplier").value = data.supplier_id || "";
+                document.getElementById("exp-invoice-no").value = data.invoice_number || "";
                 document.getElementById("exp-date").value = data.date;
                 document.getElementById("modal-add-expense").classList.remove("hidden");
             });
