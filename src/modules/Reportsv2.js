@@ -1,5 +1,6 @@
 import { dbPromise } from "../db.js";
 import { renderSidebar } from "../layout.js";
+import { SyncEngine } from "../services/SyncEngine.js";
 
 const reportWorker = new Worker('src/workers/reportWorker.js', { type: 'module' });
 let reportResolve = null;
@@ -81,11 +82,16 @@ export async function loadReportsView() {
                     <button data-tab="insights" class="tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">Insights</button>
                     <button data-tab="system" class="tab-btn border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">System</button>
                 </nav>
-                 <!-- Report Range Picker -->
-                <div id="report-range" class="flex items-center bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2 cursor-pointer hover:bg-gray-100">
-                    <svg class="w-4 h-4 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                    <span id="report-range-label">Select Date Range</span>
-                    <svg class="w-4 h-4 text-gray-500 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                 <!-- Report Range Picker & Refresh -->
+                <div class="flex items-center gap-2">
+                    <button id="btn-refresh-reports" class="bg-gray-100 hover:bg-gray-200 text-gray-600 p-2 rounded-lg border border-gray-300 transition" title="Sync & Refresh Data">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    </button>
+                    <div id="report-range" class="flex items-center bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2 cursor-pointer hover:bg-gray-100">
+                        <svg class="w-4 h-4 text-gray-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                        <span id="report-range-label">Select Date Range</span>
+                        <svg class="w-4 h-4 text-gray-500 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    </div>
                 </div>
             </div>
 
@@ -152,6 +158,19 @@ export async function loadReportsView() {
 
     // Close Modal Listener
     document.getElementById("close-report-modal").addEventListener("click", closeReportModal);
+
+    // Refresh Listener
+    document.getElementById("btn-refresh-reports").addEventListener("click", async () => {
+        const btn = document.getElementById("btn-refresh-reports");
+        btn.classList.add("animate-spin");
+        await SyncEngine.sync();
+        btn.classList.remove("animate-spin");
+        if (currentModalReportId) {
+            generateReport(currentModalReportId);
+        } else {
+            // Maybe refresh dashboard tiles in future?
+        }
+    });
 
     // Initialize Date Range Picker
     if (typeof $ !== 'undefined' && $('#report-range').length) {
@@ -294,6 +313,9 @@ async function generateReport(reportId) {
              `;
         }
     } else if (reportId === 'fin-shift-reports' || reportId === 'fin-shift-history') {
+        // Force Sync to ensure other computers' shifts are visible
+        await SyncEngine.sync();
+
         const shifts = await db.shifts.toArray();
         const transactions = await db.transactions.toArray(); // Needed for sales calc
 
