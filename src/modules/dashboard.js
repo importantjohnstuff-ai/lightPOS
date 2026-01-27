@@ -5,14 +5,21 @@ import { checkActiveShift, calculateExpectedCash } from "./shift.js";
 export async function loadDashboardView() {
     const user = getUserProfile();
     const content = document.getElementById("main-content");
-    
+
     if (user.role === 'cashier') {
         await renderCashierDashboard(content, user);
         return;
     }
 
     renderManagerDashboard(content);
-    
+
+    // Initialize Date Filter
+    const dateInput = document.getElementById("dashboard-date-filter");
+    if (dateInput) {
+        dateInput.value = new Date().toLocaleDateString('en-CA');
+        dateInput.addEventListener("change", refreshDashboard);
+    }
+
     const refreshBtn = document.getElementById("btn-refresh-dash");
     if (refreshBtn) {
         refreshBtn.addEventListener("click", refreshDashboard);
@@ -27,7 +34,7 @@ let tenderChartInstance = null;
 async function renderCashierDashboard(content, user) {
     const db = await dbPromise;
     const todayStr = new Date().toLocaleDateString('en-CA');
-    
+
     // Sync shifts first for accurate count
     await checkActiveShift();
 
@@ -37,9 +44,9 @@ async function renderCashierDashboard(content, user) {
             .toArray(),
         db.shifts.toArray()
     ]);
-    
+
     const openShiftsCount = allShifts.filter(s => s.status === 'open').length;
-    
+
     content.innerHTML = `
         <div class="flex flex-col items-center justify-center h-[calc(100vh-200px)] p-6">
             <div class="bg-white p-10 rounded-3xl shadow-xl text-center max-w-md border border-blue-50 w-full">
@@ -85,6 +92,11 @@ function renderManagerDashboard(content) {
                         </select>
                     </div>
                     <div class="h-8 w-px bg-gray-200 mx-2"></div>
+                    <div class="flex flex-col items-end">
+                        <span class="text-[10px] font-bold text-gray-400 uppercase">Date</span>
+                        <input type="date" id="dashboard-date-filter" class="text-sm border-none font-bold text-blue-600 bg-transparent focus:ring-0 p-0 cursor-pointer h-5 font-sans">
+                    </div>
+                    <div class="h-8 w-px bg-gray-200 mx-2"></div>
                     <button id="btn-refresh-dash" class="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-4 py-2 rounded-lg text-sm font-bold shadow-sm transition flex items-center gap-2">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                         Refresh
@@ -96,7 +108,7 @@ function renderManagerDashboard(content) {
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                 <div class="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
                     <div class="flex justify-between items-start mb-2">
-                        <div class="text-gray-400 text-[10px] font-bold uppercase tracking-wider">Net Sales (Today)</div>
+                        <div class="text-gray-400 text-[10px] font-bold uppercase tracking-wider" id="dash-net-sales-label">Net Sales (Today)</div>
                         <span class="bg-blue-100 text-blue-600 p-1.5 rounded-lg">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                         </span>
@@ -291,14 +303,18 @@ function renderManagerDashboard(content) {
 async function refreshDashboard() {
     const db = await dbPromise;
     try {
-        const now = new Date();
-        const todayStr = now.toLocaleDateString('en-CA');
-        
-        const yesterday = new Date();
+        const dateInput = document.getElementById("dashboard-date-filter");
+        const todayStr = dateInput ? dateInput.value : new Date().toLocaleDateString('en-CA');
+
+        // Calculate relative dates based on selected date
+        const [y, m, d] = todayStr.split('-').map(Number);
+        const refDate = new Date(y, m - 1, d);
+
+        const yesterday = new Date(refDate);
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = yesterday.toLocaleDateString('en-CA');
 
-        const lastWeek = new Date();
+        const lastWeek = new Date(refDate);
         lastWeek.setDate(lastWeek.getDate() - 7);
         const lastWeekStr = lastWeek.toLocaleDateString('en-CA');
 
@@ -334,7 +350,7 @@ async function refreshDashboard() {
         todayTxs.forEach(tx => {
             netSalesToday += tx.total_amount;
             tenderSplit[tx.payment_method] = (tenderSplit[tx.payment_method] || 0) + tx.total_amount;
-            
+
             const hour = new Date(tx.timestamp).getHours();
             hourlySalesToday[hour] += tx.total_amount;
 
@@ -351,7 +367,7 @@ async function refreshDashboard() {
 
         const netSalesLastWeek = lastWeekTxs.reduce((sum, tx) => sum + tx.total_amount, 0);
         const salesDiff = netSalesLastWeek > 0 ? ((netSalesToday - netSalesLastWeek) / netSalesLastWeek * 100).toFixed(1) : 0;
-        
+
         const margin = netSalesToday > 0 ? ((netSalesToday - totalCogsToday) / netSalesToday * 100).toFixed(2) : 0;
         const atv = todayTxs.length > 0 ? (netSalesToday / todayTxs.length).toFixed(2) : 0;
         const openShiftsCount = allShifts.filter(s => s.status === 'open').length;
@@ -360,16 +376,23 @@ async function refreshDashboard() {
         const netSalesEl = document.getElementById("dash-net-sales");
         if (!netSalesEl) return;
 
-        netSalesEl.textContent = `₱${netSalesToday.toLocaleString(undefined, {minimumFractionDigits: 2})}`;
+        // Update Label
+        const labelEl = document.getElementById("dash-net-sales-label");
+        if (labelEl) {
+            const isToday = todayStr === new Date().toLocaleDateString('en-CA');
+            labelEl.textContent = `Net Sales (${isToday ? 'Today' : todayStr})`;
+        }
+
+        netSalesEl.textContent = `₱${netSalesToday.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
         const compareEl = document.getElementById("dash-sales-compare");
         const compareIcon = document.getElementById("dash-sales-compare-icon");
-        
+
         compareEl.textContent = `${salesDiff >= 0 ? '+' : ''}${salesDiff}% vs last week`;
         compareEl.className = `text-[10px] font-bold ${salesDiff >= 0 ? 'text-green-600' : 'text-red-600'}`;
-        compareIcon.innerHTML = salesDiff >= 0 
+        compareIcon.innerHTML = salesDiff >= 0
             ? `<svg class="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z" clip-rule="evenodd"></path></svg>`
             : `<svg class="w-3 h-3 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 112 0v7.586l2.293-2.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>`;
-        
+
         document.getElementById("dash-margin").textContent = `${margin}%`;
         document.getElementById("dash-tx-count").textContent = todayTxs.length;
         document.getElementById("dash-atv").textContent = `ATV: ₱${atv}`;
@@ -388,22 +411,22 @@ async function refreshDashboard() {
         // Pending POs
         const pendingPOs = allPOs.filter(po => po.status === 'draft' || po.status === 'approved');
         document.getElementById("alert-po-count").textContent = `${pendingPOs.length} POs Pending`;
-        
+
         // Security Alerts
         const securityCount = todayVoids.length + todayReturns.length;
         document.getElementById("alert-security-count").textContent = `${securityCount} Security Alerts`;
         document.getElementById("alert-security-detail").textContent = `${todayVoids.length} Voids, ${todayReturns.length} Returns today`;
-        
+
         document.getElementById("total-alerts-badge").textContent = lowStockItems.length + securityCount;
 
         // 6. Relationships
         const newCustToday = allCustomers.filter(c => c.id !== 'Guest' && c.timestamp && new Date(c.timestamp).toLocaleDateString('en-CA') === todayStr).length;
         document.getElementById("dash-new-customers").textContent = newCustToday;
-        
+
         // Calculate Expected Cash for Today (Per Open Shift)
         const openShifts = allShifts.filter(s => s.status === 'open');
         const expectedCashContainer = document.getElementById("dash-expected-cash");
-        
+
         if (openShifts.length === 0) {
             expectedCashContainer.innerHTML = `₱0.00`;
         } else {
@@ -415,7 +438,7 @@ async function refreshDashboard() {
                 html += `
                     <div class="flex justify-between items-center mb-1">
                         <span class="text-[10px] text-gray-400 font-bold truncate mr-2">${displayName}</span>
-                        <span class="text-sm font-black text-gray-800">₱${expected.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                        <span class="text-sm font-black text-gray-800">₱${expected.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                     </div>
                 `;
             }
@@ -452,7 +475,7 @@ function renderVelocityChart(today, yesterday) {
     velocityChartInstance = new Chart(ctx, {
         type: 'line',
         data: {
-            labels: Array.from({length: 24}, (_, i) => `${i}:00`),
+            labels: Array.from({ length: 24 }, (_, i) => `${i}:00`),
             datasets: [
                 {
                     label: 'Today',
@@ -484,13 +507,13 @@ function renderVelocityChart(today, yesterday) {
             maintainAspectRatio: false,
             interaction: { intersect: false, mode: 'index' },
             scales: {
-                y: { 
-                    beginAtZero: true, 
+                y: {
+                    beginAtZero: true,
                     grid: { color: '#f9fafb' },
-                    ticks: { 
+                    ticks: {
                         callback: value => '₱' + value,
                         font: { size: 10 }
-                    } 
+                    }
                 },
                 x: {
                     grid: { display: false },
@@ -498,10 +521,10 @@ function renderVelocityChart(today, yesterday) {
                 }
             },
             plugins: {
-                legend: { 
-                    position: 'top', 
+                legend: {
+                    position: 'top',
                     align: 'end',
-                    labels: { boxWidth: 10, font: { size: 11, weight: 'bold' } } 
+                    labels: { boxWidth: 10, font: { size: 11, weight: 'bold' } }
                 },
                 tooltip: {
                     backgroundColor: '#1f2937',
@@ -534,7 +557,7 @@ function renderRecentTransactions(allTxs) {
     list.innerHTML = recent.map(tx => `
         <div class="flex justify-between items-center text-xs">
             <div class="flex flex-col">
-                <span class="font-bold text-gray-700">₱${tx.total_amount.toLocaleString(undefined, {minimumFractionDigits: 2})}</span>
+                <span class="font-bold text-gray-700">₱${tx.total_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                 <span class="text-[9px] text-gray-400">${new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • ${tx.customer_name}</span>
             </div>
             <span class="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold">${tx.payment_method}</span>
@@ -567,14 +590,14 @@ function renderTenderChart(data) {
             maintainAspectRatio: false,
             cutout: '70%',
             plugins: {
-                legend: { 
-                    position: 'bottom', 
-                    labels: { 
-                        boxWidth: 8, 
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        boxWidth: 8,
                         usePointStyle: true,
                         font: { size: 10, weight: 'bold' },
                         padding: 15
-                    } 
+                    }
                 },
                 tooltip: {
                     enabled: hasData,
