@@ -593,70 +593,91 @@ async function renderPosInterface(content) {
                     <button id="btn-cancel-close-shift-x" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
                 </div>
 
-                <div class="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-12 gap-8">
-                    <!-- Left Column: Cash Counter (7 cols) -->
-                    <div class="lg:col-span-7 flex flex-col h-full overflow-hidden border-r pr-6">
+                <div class="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <!-- Column 1: Cash Counter (4 cols) -->
+                    <div class="lg:col-span-4 flex flex-col h-full overflow-hidden border-r pr-4">
                         <div class="flex justify-between items-center mb-2">
                             <h4 class="font-bold text-gray-700 uppercase text-xs tracking-wider">Cash Denominations</h4>
-                            <span class="text-xs text-gray-400">Enter count for each</span>
+                            <span class="text-xs text-gray-400">Enter count</span>
                         </div>
                         
                         <div class="flex-1 overflow-y-auto bg-gray-50 rounded-lg border p-4">
-                            <div class="grid grid-cols-3 gap-4 mb-3 font-bold text-xs text-gray-500 uppercase border-b pb-2">
-                                <div>Denomination</div>
+                            <div class="grid grid-cols-3 gap-2 mb-3 font-bold text-xs text-gray-500 uppercase border-b pb-2">
+                                <div>Denom</div>
                                 <div class="text-center">Count</div>
-                                <div class="text-right">Subtotal</div>
+                                <div class="text-right">Total</div>
                             </div>
                             <div class="space-y-2" id="cash-counter-grid">
                                 <!-- Denominations injected here -->
                             </div>
                         </div>
+                    </div>
 
-                        <div class="mt-4 bg-blue-50 p-4 rounded-lg border border-blue-100 flex justify-between items-center shadow-sm">
-                            <span class="font-bold text-blue-800 text-lg">Total Physical Cash</span>
-                            <span id="cash-counter-total" class="text-3xl font-bold text-blue-700">₱0.00</span>
+                    <!-- Column 2: Inputs (4 cols) -->
+                    <div class="lg:col-span-4 flex flex-col h-full overflow-y-auto border-r pr-4 space-y-4">
+                        <!-- Other Cash -->
+                        <div class="bg-gray-50 p-4 rounded-lg border">
+                            <h4 class="font-bold text-gray-700 mb-3 uppercase text-xs tracking-wider border-b pb-1">Other Cash</h4>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-500 mb-1">Precounted Bills</label>
+                                    <input type="number" id="precounted-bills" min="0" step="0.01" class="w-full border rounded p-2 text-right focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm" placeholder="0.00">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-500 mb-1">Precounted Coins</label>
+                                    <input type="number" id="precounted-coins" min="0" step="0.01" class="w-full border rounded p-2 text-right focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm" placeholder="0.00">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Cashout -->
+                        <div class="bg-gray-50 p-4 rounded-lg border">
+                            <h4 class="font-bold text-gray-700 mb-3 uppercase text-xs tracking-wider border-b pb-1">Remittance (Cashout)</h4>
+                            <div class="flex items-center gap-2">
+                                <label class="text-sm text-gray-600 flex-1">Total Remitted:</label>
+                                <input type="number" id="shift-cashout" min="0" step="0.01" class="w-32 border rounded p-2 text-right bg-gray-100 font-bold text-gray-700 cursor-not-allowed text-sm" readonly placeholder="0.00">
+                            </div>
+                        </div>
+
+                        <!-- Expenses -->
+                        <div class="flex-1 flex flex-col bg-gray-50 p-4 rounded-lg border min-h-[150px]">
+                            <div class="flex justify-between items-center mb-2 border-b pb-1">
+                                <h4 class="font-bold text-gray-700 uppercase text-xs tracking-wider">Expense Receipts</h4>
+                                <div class="flex gap-1">
+                                    <button id="btn-pick-shift-receipt" class="text-[10px] bg-purple-100 text-purple-600 px-2 py-1 rounded font-bold hover:bg-purple-200 transition uppercase tracking-wide">Pick Exp</button>
+                                    <button id="btn-add-shift-receipt" class="text-[10px] bg-blue-100 text-blue-600 px-2 py-1 rounded font-bold hover:bg-blue-200 transition uppercase tracking-wide">+ Add</button>
+                                </div>
+                            </div>
+                            <div class="flex-1 overflow-y-auto max-h-40 space-y-2 pr-2" id="shift-receipts-list">
+                                <!-- Receipts injected here -->
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Right Column: Summary (5 cols) -->
-                    <div class="lg:col-span-5 flex flex-col h-full overflow-y-auto">
-                        <div class="space-y-6">
-                            <!-- Other Cash -->
-                            <div class="bg-gray-50 p-4 rounded-lg border">
-                                <h4 class="font-bold text-gray-700 mb-3 uppercase text-xs tracking-wider border-b pb-1">Other Cash</h4>
-                                <div class="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label class="block text-xs font-bold text-gray-500 mb-1">Precounted Bills</label>
-                                        <input type="number" id="precounted-bills" min="0" step="0.01" class="w-full border rounded p-2 text-right focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm" placeholder="0.00">
-                                    </div>
-                                    <div>
-                                        <label class="block text-xs font-bold text-gray-500 mb-1">Precounted Coins</label>
-                                        <input type="number" id="precounted-coins" min="0" step="0.01" class="w-full border rounded p-2 text-right focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm" placeholder="0.00">
-                                    </div>
-                                </div>
+                    <!-- Column 3: Summary (4 cols) -->
+                    <div class="lg:col-span-4 flex flex-col h-full overflow-y-auto pl-2">
+                        <h4 class="font-bold text-gray-700 uppercase text-xs tracking-wider mb-4 border-b pb-2">Shift Summary</h4>
+                        
+                        <!-- Totals Breakdown -->
+                        <div class="space-y-3">
+                            <div class="flex justify-between items-center p-3 bg-blue-50 rounded border border-blue-100">
+                                <span class="text-xs font-bold text-blue-500 uppercase">Physical Cash</span>
+                                <span id="summary-physical-total" class="font-mono font-bold text-blue-700">₱0.00</span>
+                            </div>
+                            
+                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded border border-gray-200">
+                                <span class="text-xs font-bold text-gray-500 uppercase">Precounted</span>
+                                <span id="summary-precounted-total" class="font-mono font-bold text-gray-700">₱0.00</span>
                             </div>
 
-                            <!-- Cashout -->
-                            <div class="bg-gray-50 p-4 rounded-lg border">
-                                <h4 class="font-bold text-gray-700 mb-3 uppercase text-xs tracking-wider border-b pb-1">Remittance (Cashout)</h4>
-                                <div class="flex items-center gap-2">
-                                    <label class="text-sm text-gray-600 flex-1">Total Remitted:</label>
-                                    <input type="number" id="shift-cashout" min="0" step="0.01" class="w-32 border rounded p-2 text-right bg-gray-100 font-bold text-gray-700 cursor-not-allowed text-sm" readonly placeholder="0.00">
-                                </div>
+                            <div class="flex justify-between items-center p-3 bg-purple-50 rounded border border-purple-100">
+                                <span class="text-xs font-bold text-purple-500 uppercase">Remittance</span>
+                                <span id="summary-remittance-total" class="font-mono font-bold text-purple-700">₱0.00</span>
                             </div>
 
-                            <!-- Expenses -->
-                            <div class="flex-1 flex flex-col bg-gray-50 p-4 rounded-lg border min-h-[150px]">
-                                <div class="flex justify-between items-center mb-2 border-b pb-1">
-                                    <h4 class="font-bold text-gray-700 uppercase text-xs tracking-wider">Expense Receipts</h4>
-                                    <div class="flex gap-1">
-                                        <button id="btn-pick-shift-receipt" class="text-[10px] bg-purple-100 text-purple-600 px-2 py-1 rounded font-bold hover:bg-purple-200 transition uppercase tracking-wide">Pick Exp</button>
-                                        <button id="btn-add-shift-receipt" class="text-[10px] bg-blue-100 text-blue-600 px-2 py-1 rounded font-bold hover:bg-blue-200 transition uppercase tracking-wide">+ Add Receipt</button>
-                                    </div>
-                                </div>
-                                <div class="flex-1 overflow-y-auto max-h-40 space-y-2 pr-2" id="shift-receipts-list">
-                                    <!-- Receipts injected here -->
-                                </div>
+                            <div class="flex justify-between items-center p-3 bg-red-50 rounded border border-red-100">
+                                <span class="text-xs font-bold text-red-500 uppercase">Expenses</span>
+                                <span id="summary-expenses-total" class="font-mono font-bold text-red-700">₱0.00</span>
                             </div>
                         </div>
 
@@ -666,7 +687,7 @@ async function renderPosInterface(content) {
                                 <span class="text-gray-600 font-medium">Total Turnover</span>
                                 <span id="shift-total-turnover" class="text-4xl font-bold text-gray-800 leading-none">₱0.00</span>
                             </div>
-                            <p class="text-xs text-gray-400 text-right mb-6">Physical Cash + Receipts + Remittances</p>
+                            <p class="text-[10px] text-gray-400 text-right mb-6">Sum of Physical + Precounted + Remittance + Expenses</p>
                             
                             <div class="grid grid-cols-2 gap-4">
                                 <button id="btn-cancel-close-shift" class="w-full bg-white border border-gray-300 text-gray-700 font-bold py-3 rounded-lg hover:bg-gray-50 transition">Cancel</button>
@@ -951,23 +972,30 @@ async function renderPosInterface(content) {
                 input.nextElementSibling.textContent = `₱${subtotal.toFixed(2)}`;
             });
 
+            // Update Physical Cash (Denoms only) on UI
+            document.getElementById("summary-physical-total").textContent = `₱${cashTotal.toFixed(2)}`;
+
             const preBills = parseFloat(document.getElementById("precounted-bills").value) || 0;
             const preCoins = parseFloat(document.getElementById("precounted-coins").value) || 0;
-            cashTotal += preBills + preCoins;
-
-            document.getElementById("cash-counter-total").textContent = `₱${cashTotal.toFixed(2)}`;
+            const precountedTotal = preBills + preCoins;
+            document.getElementById("summary-precounted-total").textContent = `₱${precountedTotal.toFixed(2)}`;
 
             let receiptTotal = 0;
             receiptsList.querySelectorAll(".receipt-row").forEach(row => {
                 const amt = parseFloat(row.querySelector(".receipt-amount").value) || 0;
                 receiptTotal += amt;
             });
+            document.getElementById("summary-expenses-total").textContent = `₱${receiptTotal.toFixed(2)}`;
 
             const cashout = parseFloat(document.getElementById("shift-cashout").value) || 0;
-            const grandTotal = cashTotal + receiptTotal + cashout;
+            document.getElementById("summary-remittance-total").textContent = `₱${cashout.toFixed(2)}`;
+
+            const grandTotal = cashTotal + precountedTotal + receiptTotal + cashout;
 
             document.getElementById("shift-total-turnover").textContent = `₱${grandTotal.toFixed(2)}`;
-            modal.dataset.cashTotal = cashTotal;
+
+            // Store raw values for save
+            modal.dataset.cashTotal = (cashTotal + precountedTotal); // Legacy expectation might range, but usually physical incl precounted
             modal.dataset.cashout = cashout;
             modal.dataset.grandTotal = grandTotal;
         };
