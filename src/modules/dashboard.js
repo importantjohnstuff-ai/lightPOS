@@ -183,6 +183,17 @@ function renderManagerDashboard(content) {
                             <div class="text-[10px] text-gray-400 italic">Loading...</div>
                         </div>
                     </div>
+                    
+                    <!-- Today's Expenses -->
+                    <div class="mb-6">
+                        <div class="flex justify-between items-center mb-3">
+                            <div class="text-[10px] font-bold text-gray-400 uppercase">Expenses</div>
+                            <div class="text-[10px] font-black text-red-600" id="dash-total-expenses">₱0.00</div>
+                        </div>
+                        <div id="dash-expenses-list" class="space-y-3">
+                            <div class="text-[10px] text-gray-400 italic">Loading...</div>
+                        </div>
+                    </div>
                     <div class="h-px bg-gray-100 mb-6"></div>
 
                     <div class="space-y-4 flex-1 overflow-y-auto pr-2">
@@ -322,14 +333,15 @@ async function refreshDashboard() {
         await checkActiveShift();
 
         // 1. Fetch Data
-        const [allTxs, allItems, allReturns, allShifts, allCustomers, allUsers, allPOs] = await Promise.all([
+        const [allTxs, allItems, allReturns, allShifts, allCustomers, allUsers, allPOs, allExpenses] = await Promise.all([
             db.transactions.toArray(),
             db.items.toArray(),
             db.returns.toArray(),
             db.shifts.toArray(),
             db.customers.toArray(),
             fetch('api/router.php?file=users').then(r => r.json()).catch(() => []),
-            db.purchase_orders.toArray()
+            db.purchase_orders.toArray(),
+            db.expenses.toArray()
         ]);
 
         // 2. Filter Data
@@ -338,6 +350,7 @@ async function refreshDashboard() {
         const lastWeekTxs = allTxs.filter(tx => new Date(tx.timestamp).toLocaleDateString('en-CA') === lastWeekStr && !tx.is_voided);
         const todayReturns = allReturns.filter(r => new Date(r.timestamp).toLocaleDateString('en-CA') === todayStr);
         const todayVoids = allTxs.filter(tx => new Date(tx.timestamp).toLocaleDateString('en-CA') === todayStr && tx.is_voided);
+        const todayExpenses = allExpenses.filter(e => e.date === todayStr);
 
         // 3. Calculate KPIs
         let netSalesToday = 0;
@@ -402,7 +415,8 @@ async function refreshDashboard() {
         renderVelocityChart(hourlySalesToday, hourlySalesYesterday);
         renderTenderChart(tenderSplit);
         renderTopSellers(itemSales, allItems);
-        renderRecentTransactions(allTxs);
+        renderRecentTransactions(allTxs, todayStr);
+        renderDayExpenses(todayExpenses);
 
         // 5. Action Center
         const lowStockItems = allItems.filter(i => i.stock_level <= (i.min_stock || 10));
@@ -540,12 +554,12 @@ function renderVelocityChart(today, yesterday) {
     });
 }
 
-function renderRecentTransactions(allTxs) {
+function renderRecentTransactions(allTxs, filterDateStr) {
     const list = document.getElementById("recent-tx-list");
     if (!list) return;
 
     const recent = [...allTxs]
-        .filter(tx => !tx.is_voided)
+        .filter(tx => !tx.is_voided && new Date(tx.timestamp).toLocaleDateString('en-CA') === filterDateStr)
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
         .slice(0, 5);
 
@@ -561,6 +575,33 @@ function renderRecentTransactions(allTxs) {
                 <span class="text-[9px] text-gray-400">${new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • ${tx.customer_name}</span>
             </div>
             <span class="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-bold">${tx.payment_method}</span>
+        </div>
+    `).join('');
+}
+
+function renderDayExpenses(expenses) {
+    const list = document.getElementById("dash-expenses-list");
+    const totalEl = document.getElementById("dash-total-expenses");
+    if (!list) return;
+
+    // Calculate sum
+    const total = expenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0);
+    if (totalEl) totalEl.textContent = `₱${total.toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+
+    const sorted = [...expenses].sort((a, b) => (b.amount || 0) - (a.amount || 0)).slice(0, 5);
+
+    if (sorted.length === 0) {
+        list.innerHTML = '<div class="text-[10px] text-gray-400 italic">No expenses recorded</div>';
+        return;
+    }
+
+    list.innerHTML = sorted.map(exp => `
+        <div class="flex justify-between items-center text-xs group cursor-pointer hover:bg-red-50 p-1 -mx-1 rounded transition">
+            <div class="flex flex-col overflow-hidden">
+                <span class="font-bold text-gray-700 truncate" title="${exp.description}">${exp.description}</span>
+                <span class="text-[9px] text-gray-400 uppercase tracking-wider">${exp.category}</span>
+            </div>
+            <span class="font-bold text-red-600 whitespace-nowrap">₱${parseFloat(exp.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
         </div>
     `).join('');
 }
