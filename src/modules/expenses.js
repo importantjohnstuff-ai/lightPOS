@@ -196,6 +196,7 @@ export async function loadExpensesView() {
 async function fetchSuppliers() {
     try {
         suppliersList = await Repository.getAll('suppliers');
+        suppliersList.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
         const select = document.getElementById("exp-supplier");
         select.innerHTML = '<option value="">None</option>';
