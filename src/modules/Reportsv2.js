@@ -1457,6 +1457,7 @@ function closeReportModal() {
 }
 
 // --- Inventory Valuation Logic ---
+// Updated: Enabled and Implemented
 
 let invValAllItems = [];
 let invValState = {
