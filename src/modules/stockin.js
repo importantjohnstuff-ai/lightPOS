@@ -113,7 +113,7 @@ function render() {
                 <!-- Left side: Item selection and cart -->
                 <div class="lg:col-span-3">
                     <div class="bg-white p-6 rounded-lg shadow-md mb-6">
-                        <h3 id="card-title-add" class="text-lg font-semibold text-gray-700 mb-4">Add Item to Stock (In)</h3>
+                        <h3 id="card-title-add" class="text-lg font-semibold text-gray-700 mb-4">Add Item to Inventory (Stock In)</h3>
                         <form id="stockin-form" class="flex flex-col sm:flex-row items-start sm:items-end gap-4">
                             <input type="hidden" id="source-po-id">
                             <div class="flex-grow w-full relative">
@@ -331,7 +331,7 @@ function updateUIMode() {
         btnOut.className = "px-4 py-2 rounded-md text-sm font-bold transition-colors bg-white text-red-700 shadow-sm border border-gray-200";
         if (saveBtn) { saveBtn.className = "bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md shadow-sm"; saveBtn.textContent = "Save Stock Out"; }
         if (addBtn) { addBtn.className = "w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md shadow-sm"; addBtn.textContent = "Add to Cart (-)"; }
-        if (titleAdd) titleAdd.textContent = "Remove Item from Stock (Out)";
+        if (titleAdd) titleAdd.textContent = "Remove Item from inventory (Stock Out)";
         if (titleCart) titleCart.textContent = "Stock Out Cart";
     }
 }
