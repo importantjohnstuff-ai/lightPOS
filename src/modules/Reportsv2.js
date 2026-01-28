@@ -387,7 +387,8 @@ async function generateReport(reportId) {
         renderProductPerformance(result);
     } else if (reportId === 'inv-val') {
         const items = await db.items.toArray();
-        renderInventoryValuation(items);
+        const suppliers = await db.suppliers.toArray();
+        renderInventoryValuation(items, suppliers);
     }
 }
 
@@ -1457,32 +1458,69 @@ function closeReportModal() {
 }
 
 // --- Inventory Valuation Logic ---
-// Updated: Enabled and Implemented
+// Updated: Enabled and Implemented (with Charts)
 
 let invValAllItems = [];
+let invValSuppliers = []; // Store for mapping
 let invValState = {
     search: '',
     hideZeroNegative: false,
     sortKey: 'name',
-    sortDir: 'asc'
+    sortDir: 'asc',
+    chartGroupBy: 'category', // 'category' | 'supplier'
+    chartMetric: 'value'      // 'qty' | 'value'
 };
+let invValChartInstance = null;
 
-function renderInventoryValuation(items) {
+function renderInventoryValuation(items, suppliers = []) {
     invValAllItems = items.map(i => ({
         ...i,
         subtotal: (i.cost_price || 0) * (i.stock_level || 0)
     }));
+    invValSuppliers = suppliers;
 
     // Reset state for new report view
-    invValState = { search: '', hideZeroNegative: false, sortKey: 'name', sortDir: 'asc' };
+    invValState = {
+        search: '',
+        hideZeroNegative: false,
+        sortKey: 'name',
+        sortDir: 'asc',
+        chartGroupBy: 'category',
+        chartMetric: 'value'
+    };
 
     const content = document.getElementById("report-modal-content");
 
     // Render Metrics
     renderInvValMetrics();
 
-    // Render Controls & Table Container
+    // Render Layout
     content.innerHTML = `
+        <!-- Chart Section -->
+        <div class="bg-white border rounded-lg shadow-sm p-4 mb-6">
+            <div class="flex flex-col sm:flex-row justify-between items-center mb-4">
+                <h4 class="font-bold text-gray-800 flex items-center gap-2">
+                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"></path></svg>
+                    Inventory Distribution
+                </h4>
+                <div class="flex gap-2 text-xs">
+                    <div class="flex bg-gray-100 rounded-lg p-1">
+                        <button class="px-3 py-1 rounded-md font-medium transition-colors ${invValState.chartGroupBy === 'category' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}" id="iv-chart-grp-cat">By Category</button>
+                        <button class="px-3 py-1 rounded-md font-medium transition-colors ${invValState.chartGroupBy === 'supplier' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}" id="iv-chart-grp-sup">By Supplier</button>
+                    </div>
+                    <div class="w-px bg-gray-300 mx-1"></div>
+                     <div class="flex bg-gray-100 rounded-lg p-1">
+                        <button class="px-3 py-1 rounded-md font-medium transition-colors ${invValState.chartMetric === 'qty' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}" id="iv-chart-met-qty">By Qty</button>
+                        <button class="px-3 py-1 rounded-md font-medium transition-colors ${invValState.chartMetric === 'value' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}" id="iv-chart-met-val">By Value</button>
+                    </div>
+                </div>
+            </div>
+            <div class="h-64 relative w-full">
+                <canvas id="inv-val-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- Controls -->
         <div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
              <div class="relative w-full sm:w-auto">
                 <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -1534,8 +1572,9 @@ function renderInventoryValuation(items) {
         </div>
     `;
 
-    // Initial Render Rows
+    // Initial Render
     renderInvValRows();
+    renderInvValChart();
 
     // Listeners
     document.getElementById("inv-val-search").addEventListener("input", (e) => {
@@ -1546,7 +1585,37 @@ function renderInventoryValuation(items) {
     document.getElementById("inv-val-filter-zero").addEventListener("change", (e) => {
         invValState.hideZeroNegative = e.target.checked;
         renderInvValRows();
+        renderInvValChart(); // Update chart too to match visible data? Or keep chart global?
+        // Usually chart reflects filtered data, but "Hide Zero" specifically affects active inventory view. 
+        // Let's update chart to match the "Active" perspective if checked.
     });
+
+    // Chart Controls
+    const updateChartState = (key, val) => {
+        invValState[key] = val;
+        // Update Button Styles
+        const states = {
+            chartGroupBy: ['cat', 'sup'],
+            chartMetric: ['qty', 'val']
+        };
+
+        // This is a bit manual, but robust enough
+        if (key === 'chartGroupBy') {
+            document.getElementById('iv-chart-grp-cat').className = `px-3 py-1 rounded-md font-medium transition-colors ${val === 'category' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`;
+            document.getElementById('iv-chart-grp-sup').className = `px-3 py-1 rounded-md font-medium transition-colors ${val === 'supplier' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`;
+        }
+        if (key === 'chartMetric') {
+            document.getElementById('iv-chart-met-qty').className = `px-3 py-1 rounded-md font-medium transition-colors ${val === 'qty' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`;
+            document.getElementById('iv-chart-met-val').className = `px-3 py-1 rounded-md font-medium transition-colors ${val === 'value' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`;
+        }
+        renderInvValChart();
+    };
+
+    document.getElementById('iv-chart-grp-cat').addEventListener('click', () => updateChartState('chartGroupBy', 'category'));
+    document.getElementById('iv-chart-grp-sup').addEventListener('click', () => updateChartState('chartGroupBy', 'supplier'));
+    document.getElementById('iv-chart-met-qty').addEventListener('click', () => updateChartState('chartMetric', 'qty'));
+    document.getElementById('iv-chart-met-val').addEventListener('click', () => updateChartState('chartMetric', 'value'));
+
 
     document.querySelectorAll(".inv-val-sort").forEach(th => {
         th.addEventListener("click", () => {
@@ -1563,6 +1632,99 @@ function renderInventoryValuation(items) {
 
     document.getElementById("inv-val-export").addEventListener("click", exportInvValCSV);
 }
+
+function renderInvValChart() {
+    const canvas = document.getElementById("inv-val-chart");
+    if (!canvas) return;
+
+    if (invValChartInstance) invValChartInstance.destroy();
+
+    // Aggregate Data
+    const { chartGroupBy, chartMetric, hideZeroNegative } = invValState;
+    const items = invValAllItems.filter(i => !hideZeroNegative || i.stock_level > 0);
+
+    // Group
+    const groups = {};
+    const supplierMap = new Map(invValSuppliers.map(s => [s.id, s.name]));
+
+    items.forEach(item => {
+        let key = 'Uncategorized';
+        if (chartGroupBy === 'category') {
+            key = item.category || 'Uncategorized';
+        } else {
+            // Supplier
+            if (item.supplier_id) {
+                key = supplierMap.get(item.supplier_id) || 'Unknown Supplier';
+            } else {
+                key = 'No Supplier';
+            }
+        }
+
+        if (!groups[key]) groups[key] = 0;
+
+        if (chartMetric === 'value') {
+            groups[key] += (item.subtotal || 0);
+        } else {
+            groups[key] += (item.stock_level || 0);
+        }
+    });
+
+    // Sort and Top 10
+    const sorted = Object.entries(groups).sort((a, b) => b[1] - a[1]);
+    const labels = sorted.map(x => x[0]).slice(0, 15);
+    const data = sorted.map(x => x[1]).slice(0, 15);
+
+    // Render
+    const ctx = canvas.getContext('2d');
+    invValChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: chartMetric === 'value' ? 'Inventory Value' : 'Item Quantity',
+                data: data,
+                backgroundColor: chartMetric === 'value' ? '#10b981' : '#3b82f6',
+                borderRadius: 4,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: (context) => {
+                            let label = context.dataset.label || '';
+                            if (label) label += ': ';
+                            if (chartMetric === 'value') {
+                                label += new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(context.raw);
+                            } else {
+                                label += context.raw;
+                            }
+                            return label;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function (value) {
+                            if (chartMetric === 'value') return '₱' + value / 1000 + 'k';
+                            return value;
+                        }
+                    }
+                },
+                x: {
+                    grid: { display: false }
+                }
+            }
+        }
+    });
+}
+
 
 function renderInvValMetrics() {
     const metrics = document.getElementById("report-metrics-container");
