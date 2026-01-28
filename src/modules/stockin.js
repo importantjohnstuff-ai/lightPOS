@@ -783,9 +783,32 @@ async function loadStockInHistory() {
     }
 }
 
-function showStockInDetails(id) {
+async function showStockInDetails(id) {
     const entry = historyCache.find(e => e.id === id);
     if (!entry) return;
+
+    // Fallback for missing items (e.g. lost during sync)
+    if (!entry.items || !Array.isArray(entry.items) || entry.items.length === 0) {
+        try {
+            // Attempt to find movements with the same timestamp
+            // Note: This relies on timestamp uniqueness.
+            const movements = await Repository.query('stock_movements', {
+                where: { timestamp: entry.timestamp }
+            });
+
+            if (movements && movements.length > 0) {
+                entry.items = movements.map(m => ({
+                    id: m.item_id,
+                    name: m.item_name || 'Unknown Item',
+                    quantity: Math.abs(m.qty),
+                    cost_price: 0, // Cost is not preserved in movements
+                    qty: Math.abs(m.qty) // Backwards compatibility
+                }));
+            }
+        } catch (e) {
+            console.error("Failed to recover items from movements:", e);
+        }
+    }
 
     let modal = document.getElementById('stockin-details-modal');
     if (!modal) {
@@ -819,6 +842,11 @@ function showStockInDetails(id) {
                 <div><strong>User:</strong> ${entry.username || 'N/A'}</div>
                 <div><strong>Type:</strong> <span class="uppercase font-bold ${entry.type === 'out' ? 'text-red-600' : 'text-green-600'}">${entry.type === 'out' ? 'Stock Out' : 'Stock In'}</span></div>
             </div>
+            ${(!entry.items || entry.items.length === 0) ?
+            `<div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+                    <p class="text-sm text-yellow-700">Detailed item information is not available for this record.</p>
+                 </div>`
+            : ''}
             <div class="max-h-96 overflow-y-auto border rounded">
                 <table class="w-full text-sm">
                     <thead class="bg-gray-50">
