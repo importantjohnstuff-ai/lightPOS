@@ -38,7 +38,7 @@ const REPORTS_CONFIG = {
         { id: 'prod-velocity', title: 'Sales Velocity', desc: 'Track how fast items sell and predict days of stock remaining.', icon: 'M13 10V3L4 14h7v7l9-11h-7z', implemented: false }
     ],
     inventory: [
-        { id: 'inv-val', title: 'Inventory Valuation', desc: 'Current and historical asset value based on cost and retail prices.', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z', implemented: false },
+        { id: 'inv-val', title: 'Inventory Valuation', desc: 'Current items with quantity, unit cost, and valuation subtotal.', icon: 'M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z', implemented: true },
         { id: 'inv-ledger', title: 'Inventory Ledger', desc: 'Generate a snapshot of total inventory at any historical date.', icon: 'M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', implemented: false },
         { id: 'inv-history', title: 'Stock-In History', desc: 'Detailed log of all inventory receipts and replenishments.', icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z', implemented: false },
         { id: 'inv-audit', title: 'Adjustments (Audit)', desc: 'Track manual stock changes, user responsible, and reason codes.', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4', implemented: false },
@@ -385,6 +385,9 @@ async function generateReport(reportId) {
         });
 
         renderProductPerformance(result);
+    } else if (reportId === 'inv-val') {
+        const items = await db.items.toArray();
+        renderInventoryValuation(items);
     }
 }
 
@@ -1451,4 +1454,252 @@ function closeReportModal() {
     document.getElementById("report-metrics-container").innerHTML = "";
     document.getElementById("report-modal-content").innerHTML = "";
     currentModalReportId = null;
+}
+
+// --- Inventory Valuation Logic ---
+
+let invValAllItems = [];
+let invValState = {
+    search: '',
+    hideZeroNegative: false,
+    sortKey: 'name',
+    sortDir: 'asc'
+};
+
+function renderInventoryValuation(items) {
+    invValAllItems = items.map(i => ({
+        ...i,
+        subtotal: (i.cost_price || 0) * (i.stock_level || 0)
+    }));
+
+    // Reset state for new report view
+    invValState = { search: '', hideZeroNegative: false, sortKey: 'name', sortDir: 'asc' };
+
+    const content = document.getElementById("report-modal-content");
+
+    // Render Metrics
+    renderInvValMetrics();
+
+    // Render Controls & Table Container
+    content.innerHTML = `
+        <div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
+             <div class="relative w-full sm:w-auto">
+                <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg class="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                </span>
+                <input type="text" id="inv-val-search" class="pl-10 pr-4 py-2 border rounded-lg text-sm focus:ring-blue-500 focus:border-blue-500 w-full sm:w-64" placeholder="Search items...">
+            </div>
+            
+            <div class="flex items-center gap-4">
+                <label class="flex items-center space-x-2 text-sm text-gray-700 font-medium cursor-pointer select-none">
+                    <input type="checkbox" id="inv-val-filter-zero" class="rounded text-blue-600 focus:ring-blue-500 border-gray-300 h-4 w-4">
+                    <span>Hide Zero/Negative Qty</span>
+                </label>
+                
+                <button id="inv-val-export" class="flex items-center justify-center px-4 py-2 border border-green-600 text-green-600 rounded-lg hover:bg-green-50 transition text-sm font-bold">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    Export CSV
+                </button>
+            </div>
+        </div>
+        
+        <div class="bg-white border rounded-lg overflow-hidden shadow-sm">
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 group inv-val-sort" data-key="name">
+                                Item Name <span class="sort-icon ml-1 text-gray-300">↓</span>
+                            </th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 group inv-val-sort" data-key="stock_level">
+                                Quantity <span class="sort-icon ml-1 text-gray-300">↓</span>
+                            </th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 group inv-val-sort" data-key="cost_price">
+                                Unit Cost <span class="sort-icon ml-1 text-gray-300">↓</span>
+                            </th>
+                            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 group inv-val-sort" data-key="subtotal">
+                                Subtotal <span class="sort-icon ml-1 text-gray-300">↓</span>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200" id="inv-val-table-body">
+                        <!-- Rows -->
+                    </tbody>
+                </table>
+            </div>
+             <div class="bg-gray-50 px-4 py-3 border-t border-gray-200 text-sm text-gray-500 text-right" id="inv-val-count">
+                Showing 0 items
+            </div>
+        </div>
+    `;
+
+    // Initial Render Rows
+    renderInvValRows();
+
+    // Listeners
+    document.getElementById("inv-val-search").addEventListener("input", (e) => {
+        invValState.search = e.target.value;
+        renderInvValRows();
+    });
+
+    document.getElementById("inv-val-filter-zero").addEventListener("change", (e) => {
+        invValState.hideZeroNegative = e.target.checked;
+        renderInvValRows();
+    });
+
+    document.querySelectorAll(".inv-val-sort").forEach(th => {
+        th.addEventListener("click", () => {
+            const key = th.dataset.key;
+            if (invValState.sortKey === key) {
+                invValState.sortDir = invValState.sortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                invValState.sortKey = key;
+                invValState.sortDir = 'asc'; // Default
+            }
+            renderInvValRows();
+        });
+    });
+
+    document.getElementById("inv-val-export").addEventListener("click", exportInvValCSV);
+}
+
+function renderInvValMetrics() {
+    const metrics = document.getElementById("report-metrics-container");
+    const totalValuation = invValAllItems.reduce((sum, i) => sum + i.subtotal, 0);
+    const totalItems = invValAllItems.length;
+
+    // Low stock count (assuming threshold in item or default 10)
+    const lowStockItems = invValAllItems.filter(i => i.stock_level <= (i.min_stock || 10)).length;
+
+    metrics.innerHTML = `
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 p-6">
+            <div class="p-4 bg-green-50 rounded-lg border border-green-100 flex flex-col justify-center">
+                <div class="text-xs text-green-600 uppercase font-bold tracking-wider">Total Inventory Value</div>
+                <div class="text-3xl font-bold text-green-800 mt-1">₱${totalValuation.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            </div>
+            <div class="p-4 bg-blue-50 rounded-lg border border-blue-100 flex flex-col justify-center">
+                <div class="text-xs text-blue-500 uppercase font-bold tracking-wider">Total Items</div>
+                <div class="text-3xl font-bold text-blue-800 mt-1">${totalItems}</div>
+            </div>
+            <div class="p-4 bg-yellow-50 rounded-lg border border-yellow-100 flex flex-col justify-center">
+                <div class="text-xs text-yellow-600 uppercase font-bold tracking-wider">Low Stock Items</div>
+                <div class="text-3xl font-bold text-yellow-800 mt-1">${lowStockItems}</div>
+            </div>
+        </div>
+    `;
+}
+
+function getFilteredInvValItems() {
+    let items = invValAllItems.filter(item => {
+        const matchesSearch = (item.name || "").toLowerCase().includes(invValState.search.toLowerCase());
+        const passesZeroCheck = !invValState.hideZeroNegative || item.stock_level > 0;
+        return matchesSearch && passesZeroCheck;
+    });
+
+    // Sort
+    items.sort((a, b) => {
+        const valA = a[invValState.sortKey];
+        const valB = b[invValState.sortKey];
+
+        // Handle undefined values
+        if (valA === undefined) return 1;
+        if (valB === undefined) return -1;
+
+        let comparison = 0;
+        if (typeof valA === 'string') {
+            comparison = valA.localeCompare(valB);
+        } else {
+            comparison = valA - valB;
+        }
+
+        return invValState.sortDir === 'asc' ? comparison : -comparison;
+    });
+
+    return items;
+}
+
+function renderInvValRows() {
+    const tbody = document.getElementById("inv-val-table-body");
+    const filtered = getFilteredInvValItems();
+
+    // Update Arrow Indicators
+    document.querySelectorAll(".inv-val-sort").forEach(th => {
+        const key = th.dataset.key;
+        const icon = th.querySelector(".sort-icon");
+        if (key === invValState.sortKey) {
+            th.classList.add("text-gray-900");
+            th.classList.remove("text-gray-500");
+            icon.textContent = invValState.sortDir === 'asc' ? '↑' : '↓';
+            icon.classList.remove("text-gray-300");
+            icon.classList.add("text-gray-600");
+        } else {
+            th.classList.remove("text-gray-900");
+            th.classList.add("text-gray-500");
+            icon.textContent = '↓';
+            icon.classList.add("text-gray-300");
+            icon.classList.remove("text-gray-600");
+        }
+    });
+
+    // Update Count
+    document.getElementById("inv-val-count").textContent = `Showing ${filtered.length} items`;
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-4 text-center text-gray-500">No items found matching criteria.</td></tr>`;
+        return;
+    }
+
+    const limit = 500;
+    const displayItems = filtered.slice(0, limit);
+
+    tbody.innerHTML = displayItems.map(item => `
+        <tr class="hover:bg-gray-50">
+            <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm font-medium text-gray-900">${item.name}</div>
+                <div class="text-xs text-gray-500">${item.barcode || '-'}</div>
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-700 font-mono">
+                ${item.stock_level}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-500 font-mono">
+                ₱${(item.cost_price || 0).toFixed(2)}
+            </td>
+            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-gray-900 font-mono">
+                ₱${(item.subtotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </td>
+        </tr>
+    `).join('') + (filtered.length > limit ? `<tr><td colspan="4" class="text-center py-2 text-xs text-gray-500">...and ${filtered.length - limit} more items (export to see all)</td></tr>` : '');
+}
+
+function exportInvValCSV() {
+    const items = getFilteredInvValItems();
+    if (items.length === 0) {
+        alert("No data to export");
+        return;
+    }
+
+    const headers = ["Item Name", "Barcode", "Category", "Supplier ID", "Quantity", "Unit Cost", "Subtotal Value"];
+    const rows = items.map(i => [
+        `"${(i.name || '').replace(/"/g, '""')}"`, // Escape quotes
+        `"${(i.barcode || '')}"`,
+        `"${(i.category || '')}"`,
+        `"${(i.supplier_id || '')}"`,
+        i.stock_level,
+        (i.cost_price || 0).toFixed(2),
+        (i.subtotal || 0).toFixed(2)
+    ]);
+
+    const csvContent = [
+        headers.join(","),
+        ...rows.map(r => r.join(","))
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `inventory_valuation_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
 }
