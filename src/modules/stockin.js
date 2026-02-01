@@ -112,7 +112,7 @@ function render() {
             <div class="flex flex-col md:flex-row justify-between items-center mb-6">
                 <div class="flex items-center gap-4">
                     <h2 class="text-2xl font-bold text-gray-800">Stock Management</h2>
-                    <button id="btn-mobile-mode" class="md:hidden bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-lg transition transform hover:scale-105" title="Switch to Mobile View">
+                    <button id="btn-mobile-mode" class="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-lg transition transform hover:scale-105" title="Switch to Mobile View">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
                     </button>
                 </div>
