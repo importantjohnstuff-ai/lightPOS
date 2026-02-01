@@ -10,13 +10,6 @@ let suppliersList = [];
 let historyCache = [];
 let currentMode = 'in'; // 'in' or 'out'
 
-// Camera State
-let mobileStream = null;
-let isCameraRunning = false;
-let barcodeDetector = null;
-let scanDebounce = false;
-
-
 export async function loadStockInView() {
     if (!checkPermission('stockin', 'read')) {
         document.getElementById('main-content').innerHTML = '<div class="p-4">Access Denied</div>';
@@ -36,12 +29,6 @@ export async function loadStockInView() {
     populateSupplierDropdown();
     await loadStockInHistory();
     await loadPoToReceive();
-
-    // Check for mobile and show mobile button if applicable
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    if (isMobile) {
-        document.getElementById('mobile-scan-btn-container').classList.remove('hidden');
-    }
 }
 
 async function loadPoToReceive() {
@@ -219,47 +206,6 @@ function render() {
     `;
     updateUIMode();
     renderStockInCart();
-
-    // Inject Mobile Scanner UI
-    const mobileUI = document.createElement('div');
-    mobileUI.innerHTML = `
-        < !--Floating Mobile Scan Button-- >
-        <div id="mobile-scan-btn-container" class="fixed bottom-6 right-6 z-40 hidden">
-             <button id="btn-open-mobile-scan" class="bg-blue-600 hover:bg-blue-700 text-white rounded-full p-4 shadow-xl flex items-center justify-center transition transform active:scale-95">
-                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 16h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
-            </button>
-        </div>
-
-        <!--Mobile Scanner Overlay-- >
-        <div id="stock-mobile-scanner" class="fixed inset-0 bg-black z-[60] hidden flex flex-col">
-            <div class="relative flex-1 bg-black overflow-hidden flex items-center justify-center">
-                <video id="stock-mobile-video" class="absolute inset-0 w-full h-full object-cover" autoplay playsinline muted></video>
-
-                <!-- Scanner Overlay -->
-                <div class="absolute inset-0 border-2 border-red-500 opacity-50 pointer-events-none">
-                    <div class="absolute top-1/2 left-0 right-0 h-0.5 bg-red-600 shadow-[0_0_10px_rgba(255,0,0,0.8)]"></div>
-                </div>
-
-                <!-- Success Overlay -->
-                <div id="stock-scan-success" class="absolute inset-0 bg-green-500 opacity-0 z-30 pointer-events-none transition-opacity duration-300 flex items-center justify-center">
-                    <svg class="w-24 h-24 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                </div>
-
-                <!-- Controls -->
-                <button id="btn-close-stock-camera" class="absolute top-4 right-4 bg-gray-800 bg-opacity-50 text-white p-2 rounded-full z-20">
-                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-                <button id="btn-toggle-stock-flash" class="absolute top-4 left-4 bg-gray-800 bg-opacity-50 text-white p-2 rounded-full z-20 hidden">
-                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                </button>
-            </div>
-            <div class="p-4 bg-white text-center">
-                <p class="text-sm font-bold text-gray-700">Point camera at barcode to add to cart</p>
-                <div id="last-scanned-msg" class="text-xs text-green-600 mt-1 font-bold h-4"></div>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(mobileUI);
 }
 
 function attachEventListeners() {
@@ -289,9 +235,6 @@ function attachEventListeners() {
     document.getElementById('save-stock-in-btn')?.addEventListener('click', saveStockIn);
     document.getElementById('clear-cart-btn')?.addEventListener('click', clearCart);
     document.getElementById('btn-refresh-history')?.addEventListener('click', loadStockInHistory);
-
-    // Mobile Scanner Listeners
-    setupMobileScannerListeners();
 
     // Suggest Price Modal Listeners
     document.getElementById('start-suggest-price')?.addEventListener('click', () => {
@@ -360,7 +303,7 @@ function attachEventListeners() {
 function setMode(mode) {
     if (mode === currentMode) return;
     if (stockInCart.length > 0) {
-        if (!confirm(`Switching to Stock ${mode === 'in' ? 'In' : 'Out'} will clear the current cart.Continue ? `)) return;
+        if (!confirm(`Switching to Stock ${mode === 'in' ? 'In' : 'Out'} will clear the current cart. Continue?`)) return;
         stockInCart = [];
         renderStockInCart();
     }
@@ -556,7 +499,7 @@ function renderStockInCart() {
     if (!suggestBtn) {
         const btnContainer = document.createElement('div');
         btnContainer.className = "mt-2";
-        btnContainer.innerHTML = `< button id = "start-suggest-price" class="text-blue-600 text-xs hover:underline font-bold" >✨ Suggest Selling Price</button > `;
+        btnContainer.innerHTML = `<button id="start-suggest-price" class="text-blue-600 text-xs hover:underline font-bold">✨ Suggest Selling Price</button>`;
         supplierSection.appendChild(btnContainer);
         // Re-attach listener since we just added it dynamically
         setTimeout(() => {
@@ -573,7 +516,7 @@ function renderStockInCart() {
         const subtotal = item.quantity * item.cost_price;
         grandTotal += subtotal;
         return `
-        < tr class="border-b" >
+        <tr class="border-b">
             <td class="p-2">${item.name}</td>
             <td class="p-2 text-center">
                 <div class="flex items-center justify-center gap-1">
@@ -599,11 +542,11 @@ function renderStockInCart() {
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 pointer-events-none" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" /></svg>
                 </button>
             </td>
-        </tr >
-        `}).join('');
+        </tr>
+    `}).join('');
 
     cartContainer.innerHTML = `
-        < table class="w-full text-sm" >
+        <table class="w-full text-sm">
             <thead class="bg-gray-50">
                 <tr class="border-b">
                     <th class="text-left p-2 font-semibold">Item</th>
@@ -624,8 +567,8 @@ function renderStockInCart() {
                     <td></td>
                 </tr>
             </tfoot>
-        </table >
-        `;
+        </table>
+    `;
 }
 
 function removeFromCart(itemId) {
@@ -747,7 +690,7 @@ async function saveStockIn() {
             document.getElementById('source-po-id').value = '';
         }
 
-        alert(`Stock - ${isOut ? 'out' : 'in'} successful! Data is saved locally and will sync with the server.`);
+        alert(`Stock-${isOut ? 'out' : 'in'} successful! Data is saved locally and will sync with the server.`);
 
         stockInCart = [];
         renderStockInCart();
@@ -795,19 +738,19 @@ async function loadStockInHistory() {
         }
 
         historyContainer.innerHTML = `
-        < div class="overflow-x-auto" >
-            <table class="min-w-full text-sm">
-                <thead>
-                    <tr class="border-b bg-gray-50">
-                        <th class="text-left p-2 font-semibold">Date</th>
-                        <th class="text-center p-2 font-semibold">Type</th>
-                        <th class="text-left p-2 font-semibold">User</th>
-                        <th class="text-center p-2 font-semibold">Items</th>
-                        <th class="text-right p-2 font-semibold">Action</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">
-                    ${recentHistory.map(entry => `
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead>
+                        <tr class="border-b bg-gray-50">
+                            <th class="text-left p-2 font-semibold">Date</th>
+                            <th class="text-center p-2 font-semibold">Type</th>
+                            <th class="text-left p-2 font-semibold">User</th>
+                            <th class="text-center p-2 font-semibold">Items</th>
+                            <th class="text-right p-2 font-semibold">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200">
+                        ${recentHistory.map(entry => `
                             <tr>
                                 <td class="p-2 whitespace-nowrap text-xs">${new Date(entry.timestamp).toLocaleString()}</td>
                                 <td class="p-2 text-center">
@@ -826,11 +769,9 @@ async function loadStockInHistory() {
                                 </td>
                             </tr>
                         `).join('')}
-                </tbody>
-            </table>
-                </tbody >
-            </table >
-            </div >
+                    </tbody>
+                </table>
+            </div>
         `;
 
         historyContainer.querySelectorAll('.view-details-btn').forEach(btn => {
@@ -857,180 +798,41 @@ async function showStockInDetails(id) {
 
             if (movements && movements.length > 0) {
                 entry.items = movements.map(m => ({
-                    name: m.item_name,
+                    id: m.item_id,
+                    name: m.item_name || 'Unknown Item',
                     quantity: Math.abs(m.qty),
-                    // We might not have cost/price in movement, so we leave it or fetch item
+                    cost_price: 0, // Cost is not preserved in movements
+                    qty: Math.abs(m.qty) // Backwards compatibility
                 }));
             }
         } catch (e) {
-            console.warn("Failed to recover items from movements", e);
-        }
-    }
-}
-// ... (existing showStockInDetails logic continued if any, but since it was truncated in view, I will wrap up here)
-
-// --- Mobile Scanner Logic ---
-
-function setupMobileScannerListeners() {
-    const btnOpen = document.getElementById('btn-open-mobile-scan');
-    const btnClose = document.getElementById('btn-close-stock-camera');
-    const btnFlash = document.getElementById('btn-toggle-stock-flash');
-
-    btnOpen?.addEventListener('click', startStockCamera);
-    btnClose?.addEventListener('click', stopStockCamera);
-    btnFlash?.addEventListener('click', toggleStockFlash);
-}
-
-async function startStockCamera() {
-    if (isCameraRunning) return;
-    const scannerUI = document.getElementById('stock-mobile-scanner');
-    const video = document.getElementById('stock-mobile-video');
-    const btnFlash = document.getElementById('btn-toggle-stock-flash');
-
-    try {
-        if ('BarcodeDetector' in window) {
-            barcodeDetector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'] });
-        } else {
-            console.warn("BarcodeDetector not supported");
-        }
-
-        mobileStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment' }
-        });
-
-        video.srcObject = mobileStream;
-        scannerUI.classList.remove('hidden');
-        isCameraRunning = true;
-        scanDebounce = false;
-        requestAnimationFrame(scanStockLoop);
-
-        // Flash check
-        const track = mobileStream.getVideoTracks()[0];
-        if (track && track.getCapabilities && track.getCapabilities().torch) {
-            btnFlash.classList.remove('hidden');
-        }
-
-    } catch (err) {
-        console.error("Camera start failed:", err);
-        alert("Could not access camera.");
-    }
-}
-
-function stopStockCamera() {
-    if (mobileStream) {
-        mobileStream.getTracks().forEach(track => track.stop());
-        mobileStream = null;
-    }
-    isCameraRunning = false;
-    document.getElementById('stock-mobile-scanner').classList.add('hidden');
-    document.getElementById('btn-toggle-stock-flash').classList.add('hidden');
-}
-
-async function toggleStockFlash() {
-    if (mobileStream) {
-        const track = mobileStream.getVideoTracks()[0];
-        const btn = document.getElementById('btn-toggle-stock-flash');
-        try {
-            const current = track.getSettings().torch;
-            await track.applyConstraints({ advanced: [{ torch: !current }] });
-            if (!current) {
-                btn.classList.remove("text-white");
-                btn.classList.add("text-yellow-400");
-            } else {
-                btn.classList.add("text-white");
-                btn.classList.remove("text-yellow-400");
-            }
-        } catch (e) {
-            console.warn("Flash toggle failed", e);
-        }
-    }
-}
-
-async function scanStockLoop() {
-    if (!isCameraRunning) return;
-    const video = document.getElementById('stock-mobile-video');
-
-    if (barcodeDetector && !scanDebounce && video.readyState === video.HAVE_ENOUGH_DATA) {
-        try {
-            const barcodes = await barcodeDetector.detect(video);
-            if (barcodes.length > 0) {
-                await handleStockScannedCode(barcodes[0].rawValue);
-            }
-        } catch (e) { }
-    }
-
-    if (isCameraRunning) requestAnimationFrame(scanStockLoop);
-}
-
-async function handleStockScannedCode(code) {
-    if (scanDebounce) return;
-    scanDebounce = true;
-
-    const item = allItems.find(i => i.barcode === code);
-
-    const feedback = document.getElementById('last-scanned-msg');
-    const successOverlay = document.getElementById('stock-scan-success');
-
-    if (item) {
-        addToCart(item, 1);
-
-        // Visual Feedback
-        if (successOverlay) {
-            successOverlay.classList.remove("opacity-0");
-        }
-        if (feedback) feedback.textContent = `Added: ${item.name} `;
-
-        // Beep if possible (reusing from other modules if available or simple web audio)
-        // For now simple visual is enough or we can add AudioContext later
-
-        await new Promise(r => setTimeout(r, 600)); // Pause
-
-        if (successOverlay) {
-            successOverlay.classList.add("opacity-0");
-        }
-
-    } else {
-        if (feedback) {
-            feedback.textContent = `Unknown Item: ${code} `;
-            feedback.classList.remove('text-green-600');
-            feedback.classList.add('text-red-500');
-        }
-        await new Promise(r => setTimeout(r, 1000));
-        if (feedback) {
-            feedback.textContent = "";
-            feedback.classList.add('text-green-600');
-            feedback.classList.remove('text-red-500');
+            console.error("Failed to recover items from movements:", e);
         }
     }
 
-    scanDebounce = false;
-}
+    let modal = document.getElementById('stockin-details-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'stockin-details-modal';
+        modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50';
+        document.body.appendChild(modal);
+    }
 
-
-let modal = document.getElementById('stockin-details-modal');
-if (!modal) {
-    modal = document.createElement('div');
-    modal.id = 'stockin-details-modal';
-    modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50';
-    document.body.appendChild(modal);
-}
-
-const itemRows = (entry.items || []).map(item => {
-    const qty = item.quantity || item.qty || 0;
-    const cost = item.cost_price || 0;
-    const isOut = entry.type === 'out';
-    return `
-        < tr class="border-b" >
+    const itemRows = (entry.items || []).map(item => {
+        const qty = item.quantity || item.qty || 0;
+        const cost = item.cost_price || 0;
+        const isOut = entry.type === 'out';
+        return `
+        <tr class="border-b">
             <td class="p-2">${item.name}</td>
             <td class="p-2 text-center font-bold ${isOut ? 'text-red-600' : 'text-green-600'}">${isOut ? '-' : '+'}${qty}</td>
             <td class="p-2 text-right">₱${cost.toFixed(2)}</td>
             <td class="p-2 text-right">₱${(qty * cost).toFixed(2)}</td>
-        </tr >
-        `;
-}).join('');
+        </tr>
+    `}).join('');
 
-modal.innerHTML = `
-        < div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-2xl mx-4" >
+    modal.innerHTML = `
+        <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-2xl mx-4">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-xl font-bold text-gray-800">Transaction Details</h3>
                 <button class="text-gray-500 hover:text-gray-700 text-2xl close-modal">&times;</button>
@@ -1041,11 +843,10 @@ modal.innerHTML = `
                 <div><strong>Type:</strong> <span class="uppercase font-bold ${entry.type === 'out' ? 'text-red-600' : 'text-green-600'}">${entry.type === 'out' ? 'Stock Out' : 'Stock In'}</span></div>
             </div>
             ${(!entry.items || entry.items.length === 0) ?
-        `<div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+            `<div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
                     <p class="text-sm text-yellow-700">Detailed item information is not available for this record.</p>
                  </div>`
-        : ''
-    }
+            : ''}
             <div class="max-h-96 overflow-y-auto border rounded">
                 <table class="w-full text-sm">
                     <thead class="bg-gray-50">
@@ -1062,11 +863,11 @@ modal.innerHTML = `
             <div class="mt-6 flex justify-end">
                 <button class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded shadow close-modal">Close</button>
             </div>
-        </div >
-        `;
+        </div>
+    `;
 
-modal.classList.remove('hidden');
-modal.querySelectorAll('.close-modal').forEach(btn => {
-    btn.addEventListener('click', () => modal.classList.add('hidden'));
-});
+    modal.classList.remove('hidden');
+    modal.querySelectorAll('.close-modal').forEach(btn => {
+        btn.addEventListener('click', () => modal.classList.add('hidden'));
+    });
 }
