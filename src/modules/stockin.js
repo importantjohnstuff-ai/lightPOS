@@ -10,6 +10,14 @@ let suppliersList = [];
 let historyCache = [];
 let currentMode = 'in'; // 'in' or 'out'
 
+// Camera/Mobile State
+let mobileStream = null;
+let isCameraRunning = false;
+let barcodeDetector = null;
+let scanDebounce = false;
+let audioCtx = null;
+
+
 export async function loadStockInView() {
     if (!checkPermission('stockin', 'read')) {
         document.getElementById('main-content').innerHTML = '<div class="p-4">Access Denied</div>';
@@ -102,7 +110,13 @@ function render() {
     content.innerHTML = `
         <div class="p-4 md:p-6">
             <div class="flex flex-col md:flex-row justify-between items-center mb-6">
-                <h2 class="text-2xl font-bold text-gray-800">Stock Management</h2>
+                <div class="flex items-center gap-4">
+                    <h2 class="text-2xl font-bold text-gray-800">Stock Management</h2>
+                    <button id="btn-mobile-mode" class="md:hidden bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-full shadow-lg transition transform hover:scale-105" title="Switch to Mobile View">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                    </button>
+                </div>
+
                 <div class="bg-gray-200 p-1 rounded-lg inline-flex mt-2 md:mt-0">
                     <button id="mode-in" class="px-4 py-2 rounded-md text-sm font-bold transition-colors bg-white text-green-700 shadow-sm border border-gray-200">Stock In (+)</button>
                     <button id="mode-out" class="px-4 py-2 rounded-md text-sm font-bold transition-colors text-gray-600 hover:text-gray-800">Stock Out (-)</button>
@@ -203,6 +217,73 @@ function render() {
                 </div>
             </div>
         </div>
+
+        <!-- Mobile View Container -->
+        <div id="mobile-view-container" class="fixed inset-0 bg-gray-100 z-50 hidden flex flex-col">
+            <!-- Mobile Header -->
+            <div class="bg-blue-600 p-4 flex justify-between items-center shadow-md z-20">
+                <h2 class="text-white font-bold text-lg">Mobile Stock In</h2>
+                <button id="btn-exit-mobile" class="text-white p-2 hover:bg-blue-700 rounded-full">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            <!-- Mobile Search/Manual Input -->
+            <div class="p-4 bg-white shadow-sm z-20">
+                <div class="relative">
+                    <input type="text" id="mobile-search-input" placeholder="Scan barcode or type..." class="w-full p-3 pl-10 border rounded-lg text-lg focus:ring-2 focus:ring-blue-500 outline-none" autocomplete="off">
+                    <svg class="w-6 h-6 absolute left-3 top-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    <!-- Quick Qty Control -->
+                    <div class="absolute right-2 top-2 bottom-2 flex items-center bg-gray-100 rounded px-2">
+                         <span class="text-xs text-gray-500 mr-2">Qty:</span>
+                         <input type="number" id="mobile-qty-input" value="1" min="1" class="w-12 text-center bg-white border rounded p-1 text-sm font-bold">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Camera Viewport -->
+            <div class="flex-1 relative bg-black overflow-hidden flex items-center justify-center">
+                <video id="mobile-camera-video" class="absolute inset-0 w-full h-full object-cover hidden" autoplay playsinline muted></video>
+                
+                <!-- Scanner Overlay -->
+                <div id="scanner-overlay" class="absolute inset-0 border-2 border-red-500 opacity-50 z-10 hidden pointer-events-none">
+                    <div class="absolute top-1/2 left-0 right-0 h-0.5 bg-red-600 shadow-[0_0_10px_rgba(255,0,0,0.8)]"></div>
+                </div>
+
+                <!-- Success Overlay -->
+                <div id="scan-success-overlay" class="absolute inset-0 bg-green-500 opacity-0 z-30 pointer-events-none transition-opacity duration-300 flex items-center justify-center">
+                    <svg class="w-24 h-24 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                </div>
+
+                <!-- Start Camera Button -->
+                <button id="btn-start-camera" class="z-10 bg-blue-600 hover:bg-blue-700 text-white rounded-full p-6 shadow-2xl flex flex-col items-center justify-center transition transform active:scale-95">
+                    <svg class="w-12 h-12 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 16h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
+                    <span class="font-bold text-sm uppercase tracking-wider">Scan</span>
+                </button>
+
+                <!-- Camera Controls -->
+                <div id="camera-controls" class="absolute bottom-6 right-6 z-20 flex flex-col gap-4 hidden">
+                    <button id="btn-switch-camera" class="bg-gray-800 bg-opacity-70 text-white p-3 rounded-full hover:bg-opacity-90 shadow-lg">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    </button>
+                    <button id="btn-toggle-flash" class="bg-gray-800 bg-opacity-70 text-white p-3 rounded-full hover:bg-opacity-90 shadow-lg hidden">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    </button>
+                    <!-- View Cart Button Mobile -->
+                    <button id="btn-view-mobile-cart" class="bg-green-600 text-white p-3 rounded-full shadow-lg relative">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                        <span id="mobile-cart-badge" class="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold px-1.5 rounded-full hidden">0</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Full Screen Notification -->
+            <div id="mobile-notification" class="fixed inset-0 z-[70] hidden flex flex-col items-center justify-center text-center p-8 transition-colors duration-300">
+                <div id="mobile-notif-icon" class="mb-4"></div>
+                <h2 id="mobile-notif-title" class="text-4xl font-black text-white mb-2"></h2>
+                <p id="mobile-notif-msg" class="text-white text-lg opacity-90"></p>
+            </div>
+        </div>
     `;
     updateUIMode();
     renderStockInCart();
@@ -229,6 +310,7 @@ function attachEventListeners() {
         if (!searchResults.contains(document.activeElement)) searchResults.classList.add('hidden');
     }, 200));
     stockinForm.addEventListener('submit', handleAddItemToCart);
+    setupMobileEventListeners();
 
     document.getElementById('save-stock-in-btn')?.addEventListener('click', saveStockIn);
     document.getElementById('clear-cart-btn')?.addEventListener('click', clearCart);
@@ -870,4 +952,244 @@ async function showStockInDetails(id) {
     modal.querySelectorAll('.close-modal').forEach(btn => {
         btn.addEventListener('click', () => modal.classList.add('hidden'));
     });
+}
+
+/* Mobile & Camera Logic */
+function setupMobileEventListeners() {
+    const btnMobileMode = document.getElementById("btn-mobile-mode");
+    const mobileContainer = document.getElementById("mobile-view-container");
+    const btnExitMobile = document.getElementById("btn-exit-mobile");
+    const btnStartCamera = document.getElementById("btn-start-camera");
+    const btnSwitchCamera = document.getElementById("btn-switch-camera");
+    const btnToggleFlash = document.getElementById("btn-toggle-flash");
+    const mobileSearch = document.getElementById("mobile-search-input");
+    const btnViewCart = document.getElementById("btn-view-mobile-cart");
+
+    if (btnMobileMode) {
+        btnMobileMode.addEventListener("click", () => {
+            mobileContainer.classList.remove("hidden");
+            mobileSearch.focus();
+            updateMobileCartBadge();
+        });
+    }
+
+    if (btnExitMobile) {
+        btnExitMobile.addEventListener("click", () => {
+            stopCamera();
+            mobileContainer.classList.add("hidden");
+            renderStockInCart(); // Refresh main view
+        });
+    }
+
+    btnStartCamera?.addEventListener("click", startCamera);
+    btnSwitchCamera?.addEventListener("click", switchCamera);
+    btnToggleFlash?.addEventListener("click", toggleFlash);
+
+    btnViewCart?.addEventListener("click", () => {
+        stopCamera();
+        mobileContainer.classList.add("hidden");
+        document.getElementById("stock-in-cart-container")?.scrollIntoView({ behavior: 'smooth' });
+    });
+
+    // Manual Mobile Input
+    mobileSearch?.addEventListener("keydown", (e) => {
+        if (e.key === 'Enter') {
+            const val = mobileSearch.value.trim();
+            if (val) {
+                const item = allItems.find(i => i.barcode === val);
+                if (item) {
+                    handleScannedCode(val);
+                    mobileSearch.value = "";
+                } else {
+                    showMobileNotification('error', 'Barcode not found');
+                    setTimeout(() => document.getElementById("mobile-notification").classList.add("hidden"), 1500);
+                }
+            }
+        }
+    });
+}
+
+function updateMobileCartBadge() {
+    const badge = document.getElementById("mobile-cart-badge");
+    if (!badge) return;
+    const count = stockInCart.reduce((sum, i) => sum + i.quantity, 0);
+    badge.textContent = count;
+    if (count > 0) badge.classList.remove("hidden");
+    else badge.classList.add("hidden");
+}
+
+async function startCamera() {
+    if (isCameraRunning) return;
+
+    const video = document.getElementById("mobile-camera-video");
+    const btnStart = document.getElementById("btn-start-camera");
+    const controls = document.getElementById("camera-controls");
+    const overlay = document.getElementById("scanner-overlay");
+
+    try {
+        if ('BarcodeDetector' in window) {
+            barcodeDetector = new BarcodeDetector({
+                formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf']
+            });
+        } else {
+            console.warn("BarcodeDetector not supported");
+        }
+
+        const savedFacingMode = localStorage.getItem('stock_camera_facing') || 'environment';
+
+        mobileStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: savedFacingMode }
+        });
+
+        video.srcObject = mobileStream;
+        video.classList.remove("hidden");
+        btnStart.classList.add("hidden");
+        controls.classList.remove("hidden");
+        overlay.classList.remove("hidden");
+
+        isCameraRunning = true;
+        scanDebounce = false;
+        requestAnimationFrame(scanLoop);
+
+        const track = mobileStream.getVideoTracks()[0];
+        if (track && track.getCapabilities) {
+            const capabilities = track.getCapabilities();
+            if (capabilities.torch) {
+                const btnFlash = document.getElementById("btn-toggle-flash");
+                btnFlash.classList.remove("hidden");
+            }
+        }
+
+    } catch (err) {
+        console.error("Camera error:", err);
+        alert("Could not access camera. Ensure permissions are granted.");
+    }
+}
+
+function stopCamera() {
+    if (mobileStream) {
+        mobileStream.getTracks().forEach(track => track.stop());
+        mobileStream = null;
+    }
+    isCameraRunning = false;
+    document.getElementById("mobile-camera-video").classList.add("hidden");
+    document.getElementById("btn-start-camera").classList.remove("hidden");
+    document.getElementById("camera-controls").classList.add("hidden");
+    document.getElementById("scanner-overlay").classList.add("hidden");
+}
+
+async function switchCamera() {
+    stopCamera();
+    const current = localStorage.getItem('stock_camera_facing') || 'environment';
+    const next = current === 'environment' ? 'user' : 'environment';
+    localStorage.setItem('stock_camera_facing', next);
+    await startCamera();
+}
+
+async function toggleFlash() {
+    if (mobileStream) {
+        const track = mobileStream.getVideoTracks()[0];
+        if (track && track.getCapabilities && track.getCapabilities().torch) {
+            const current = track.getSettings().torch;
+            await track.applyConstraints({ advanced: [{ torch: !current }] });
+            const btn = document.getElementById("btn-toggle-flash");
+            if (!current) {
+                btn.classList.add("text-yellow-400");
+                btn.classList.remove("text-white");
+            } else {
+                btn.classList.remove("text-yellow-400");
+                btn.classList.add("text-white");
+            }
+        }
+    }
+}
+
+async function scanLoop() {
+    if (!isCameraRunning) return;
+
+    const video = document.getElementById("mobile-camera-video");
+    if (!video) { isCameraRunning = false; return; }
+
+    if (barcodeDetector && !scanDebounce && video.readyState === video.HAVE_ENOUGH_DATA) {
+        try {
+            const barcodes = await barcodeDetector.detect(video);
+            if (barcodes.length > 0) {
+                handleScannedCode(barcodes[0].rawValue);
+            }
+        } catch (e) { }
+    }
+
+    if (isCameraRunning) requestAnimationFrame(scanLoop);
+}
+
+async function handleScannedCode(code) {
+    if (scanDebounce) return;
+    scanDebounce = true;
+
+    const item = allItems.find(i => i.barcode === code);
+
+    if (item) {
+        playBeep();
+
+        const overlay = document.getElementById("scan-success-overlay");
+        overlay?.classList.remove("opacity-0");
+        overlay?.classList.add("opacity-75");
+
+        await new Promise(r => setTimeout(r, 300));
+
+        overlay?.classList.remove("opacity-75");
+        overlay?.classList.add("opacity-0");
+
+        const qtyInput = document.getElementById("mobile-qty-input");
+        const qty = parseInt(qtyInput?.value || "1");
+
+        addToCart(item, qty);
+        updateMobileCartBadge();
+
+        showMobileNotification('success', `${item.name} (+${qty})`);
+
+        setTimeout(() => {
+            document.getElementById("mobile-notification").classList.add("hidden");
+            scanDebounce = false;
+        }, 1000);
+
+    } else {
+        showMobileNotification('error', `Not Found: ${code}`);
+        setTimeout(() => {
+            document.getElementById("mobile-notification").classList.add("hidden");
+            scanDebounce = false;
+        }, 2000);
+    }
+}
+
+function playBeep(freq = 880, dur = 0.1) {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.frequency.value = freq;
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + dur);
+    osc.stop(audioCtx.currentTime + dur);
+}
+
+function showMobileNotification(type, msg) {
+    const notif = document.getElementById("mobile-notification");
+    const title = document.getElementById("mobile-notif-title");
+    const message = document.getElementById("mobile-notif-msg");
+    const icon = document.getElementById("mobile-notif-icon");
+
+    if (type === 'success') {
+        notif.className = "fixed inset-0 z-[70] flex flex-col items-center justify-center text-center p-8 transition-colors duration-300 bg-green-600";
+        title.textContent = "Added";
+        icon.innerHTML = `<svg class="w-24 h-24 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>`;
+    } else {
+        notif.className = "fixed inset-0 z-[70] flex flex-col items-center justify-center text-center p-8 transition-colors duration-300 bg-red-600";
+        title.textContent = "Error";
+        icon.innerHTML = `<svg class="w-24 h-24 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>`;
+    }
+
+    message.textContent = msg;
+    notif.classList.remove("hidden");
 }
