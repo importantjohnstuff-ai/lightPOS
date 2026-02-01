@@ -9,6 +9,7 @@ import { SyncEngine } from "../services/SyncEngine.js";
 let activeCartIndex = null;
 let qtyBuffer = "";
 let currentSuspendedId = null;
+let currentSuspendedDate = null;
 
 let audioCtx = null;
 function playBeep(freq, dur, type = 'sine') {
@@ -802,6 +803,7 @@ async function renderPosInterface(content) {
         if (posCart.length > 0 && confirm("Are you sure you want to clear the current sale?")) {
             posCart = [];
             currentSuspendedId = null;
+            currentSuspendedDate = null;
             renderCart();
         }
     });
@@ -1867,6 +1869,7 @@ async function processMobileTransaction() {
         lastTransactionData = transaction;
         posCart = [];
         currentSuspendedId = null;
+        currentSuspendedDate = null;
         renderCart();
         selectCustomer({ id: "Guest", name: "Guest" });
         document.getElementById("pos-customer-search").value = "";
@@ -1953,17 +1956,17 @@ function renderGrid(items) {
 
     itemsToRender.forEach((item, index) => {
         const card = document.createElement("div");
-        
+
         let baseClasses = isCompact
             ? "bg-white border rounded p-1.5 shadow-sm transition duration-150 flex flex-col justify-between h-16 select-none relative overflow-hidden group focus:outline-none focus:ring-1 focus:ring-blue-500"
             : "bg-white border rounded-lg p-3 shadow-sm transition duration-150 flex flex-col justify-between h-24 select-none relative overflow-hidden group focus:outline-none focus:ring-2 focus:ring-blue-500";
-            
+
         if (isLocked) {
             baseClasses += " opacity-50 cursor-not-allowed grayscale";
         } else {
             baseClasses += " hover:shadow-md cursor-pointer hover:border-blue-400 active:bg-blue-50";
         }
-        
+
         card.className = baseClasses;
         card.setAttribute("tabindex", "0");
 
@@ -2443,6 +2446,7 @@ async function processTransaction() {
         lastTransactionData = transaction;
         posCart = [];
         currentSuspendedId = null;
+        currentSuspendedDate = null;
         renderCart();
         closeCheckout();
 
@@ -2577,7 +2581,7 @@ async function suspendCurrentTransaction() {
         items: JSON.parse(JSON.stringify(posCart)),
         customer: selectedCustomer,
         user_email: user ? user.email : "Guest",
-        timestamp: new Date(),
+        timestamp: currentSuspendedDate || new Date(),
         total: posCart.reduce((sum, item) => sum + ((item.selling_price || 0) * item.qty), 0),
     };
 
@@ -2587,6 +2591,7 @@ async function suspendCurrentTransaction() {
 
         posCart = [];
         currentSuspendedId = null;
+        currentSuspendedDate = null;
         selectedCustomer = { id: "Guest", name: "Guest" };
         renderCart();
         selectCustomer(selectedCustomer);
@@ -2605,6 +2610,10 @@ async function openSuspendedModal() {
 
     try {
         const suspended = await Repository.getAll('suspended_transactions'); // Already filters _deleted
+
+        // Sort by timestamp (Oldest first)
+        suspended.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
         if (suspended.length === 0) {
             container.innerHTML = `<div class="text-center p-4 text-gray-500">No suspended transactions.</div>`;
             return;
@@ -2716,6 +2725,7 @@ async function resumeTransaction(id) {
 
             selectedCustomer = tx.customer || { id: "Guest", name: "Guest" };
             currentSuspendedId = tx.id; // Use the actual ID from the record
+            currentSuspendedDate = tx.timestamp; // Preserve original timestamp
 
             renderCart();
             selectCustomer(selectedCustomer);
