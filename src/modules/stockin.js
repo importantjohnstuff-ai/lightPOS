@@ -219,65 +219,83 @@ function render() {
         </div>
 
         <!-- Mobile View Container -->
-        <div id="mobile-view-container" class="fixed inset-0 bg-gray-100 z-50 hidden flex flex-col">
-            <!-- Mobile Header -->
-            <div class="bg-blue-600 p-4 flex justify-between items-center shadow-md z-20">
-                <h2 class="text-white font-bold text-lg">Mobile Stock In</h2>
-                <button id="btn-exit-mobile" class="text-white p-2 hover:bg-blue-700 rounded-full">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        <div id="mobile-view-container" class="fixed inset-0 bg-gray-900 z-50 hidden flex flex-col font-sans">
+            <!-- Mobile Header with Search -->
+            <div class="bg-gray-800 p-2 pt-safe-top flex gap-2 items-center shadow-lg z-30 shrink-0 border-b border-gray-700">
+                <button id="btn-exit-mobile" class="text-gray-300 p-3 hover:bg-gray-700 hover:text-white rounded-full shrink-0 transition-colors">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
                 </button>
-            </div>
-
-            <!-- Mobile Search/Manual Input -->
-            <div class="p-4 bg-white shadow-sm z-20">
-                <div class="relative">
-                    <input type="text" id="mobile-search-input" placeholder="Scan barcode or type..." class="w-full p-3 pl-10 border rounded-lg text-lg focus:ring-2 focus:ring-blue-500 outline-none" autocomplete="off">
-                    <svg class="w-6 h-6 absolute left-3 top-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                    <!-- Quick Qty Control -->
-                    <div class="absolute right-2 top-2 bottom-2 flex items-center bg-gray-100 rounded px-2">
-                         <span class="text-xs text-gray-500 mr-2">Qty:</span>
-                         <input type="number" id="mobile-qty-input" value="1" min="1" class="w-12 text-center bg-white border rounded p-1 text-sm font-bold">
-                    </div>
+                <div class="relative flex-grow">
+                    <input type="text" id="mobile-search-input" placeholder="Type or Scan..." class="w-full pl-10 pr-4 py-3 bg-gray-700 text-white border-none rounded-xl text-lg placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:bg-gray-600 transition-all outline-none" autocomplete="off">
+                    <svg class="w-5 h-5 absolute left-3 top-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                </div>
+                 <!-- Qty Input -->
+                 <div class="flex flex-col items-center bg-gray-700 rounded-xl px-2 py-1 shrink-0 border border-gray-600">
+                     <span class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Qty</span>
+                     <input type="number" id="mobile-qty-input" value="1" min="1" class="w-10 text-center bg-transparent text-white font-bold text-xl border-none focus:ring-0 p-0 leading-none">
                 </div>
             </div>
 
             <!-- Camera Viewport -->
-            <div class="flex-1 relative bg-black overflow-hidden flex items-center justify-center">
+            <div class="flex-1 relative bg-black overflow-hidden w-full flex flex-col">
                 <video id="mobile-camera-video" class="absolute inset-0 w-full h-full object-cover hidden" autoplay playsinline muted></video>
                 
-                <!-- Scanner Overlay -->
-                <div id="scanner-overlay" class="absolute inset-0 border-2 border-red-500 opacity-50 z-10 hidden pointer-events-none">
-                    <div class="absolute top-1/2 left-0 right-0 h-0.5 bg-red-600 shadow-[0_0_10px_rgba(255,0,0,0.8)]"></div>
+                <!-- Scanner Guide Overlay -->
+                <div id="scanner-overlay" class="absolute inset-0 z-10 hidden pointer-events-none flex flex-col items-center justify-center">
+                    <div class="w-72 h-48 border-2 border-white/60 rounded-2xl relative shadow-[0_0_100px_rgba(0,0,0,0.5)]">
+                        <div class="absolute top-1/2 left-4 right-4 h-0.5 bg-red-500/80 shadow-[0_0_10px_rgba(255,0,0,0.8)]"></div>
+                        <!-- Corner Markers -->
+                        <div class="absolute -top-0.5 -left-0.5 w-6 h-6 border-t-4 border-l-4 border-blue-500 rounded-tl-lg"></div>
+                        <div class="absolute -top-0.5 -right-0.5 w-6 h-6 border-t-4 border-r-4 border-blue-500 rounded-tr-lg"></div>
+                        <div class="absolute -bottom-0.5 -left-0.5 w-6 h-6 border-b-4 border-l-4 border-blue-500 rounded-bl-lg"></div>
+                        <div class="absolute -bottom-0.5 -right-0.5 w-6 h-6 border-b-4 border-r-4 border-blue-500 rounded-br-lg"></div>
+                    </div>
                 </div>
 
                 <!-- Success Overlay -->
-                <div id="scan-success-overlay" class="absolute inset-0 bg-green-500 opacity-0 z-30 pointer-events-none transition-opacity duration-300 flex items-center justify-center">
-                    <svg class="w-24 h-24 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                <div id="scan-success-overlay" class="absolute inset-0 bg-green-500/90 backdrop-blur-sm opacity-0 z-40 pointer-events-none transition-all duration-300 flex items-center justify-center transform scale-95 data-[active=true]:scale-100">
+                    <div class="bg-white rounded-full p-6 shadow-2xl">
+                         <svg class="w-16 h-16 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
+                    </div>
                 </div>
 
-                <!-- Start Camera Button -->
-                <button id="btn-start-camera" class="z-10 bg-blue-600 hover:bg-blue-700 text-white rounded-full p-6 shadow-2xl flex flex-col items-center justify-center transition transform active:scale-95">
-                    <svg class="w-12 h-12 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 16h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
-                    <span class="font-bold text-sm uppercase tracking-wider">Scan</span>
+                <!-- Start Camera Button (Centered) -->
+                <button id="btn-start-camera" class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-20 bg-blue-600 hover:bg-blue-500 text-white rounded-full w-32 h-32 flex flex-col items-center justify-center shadow-2xl transition hover:scale-105 active:scale-95 group">
+                    <svg class="w-10 h-10 mb-2 group-hover:animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                    <span class="font-bold text-sm uppercase tracking-wider">Tap to Scan</span>
                 </button>
 
-                <!-- Camera Controls -->
-                <div id="camera-controls" class="absolute bottom-6 right-6 z-20 flex flex-col gap-4 hidden">
-                    <button id="btn-switch-camera" class="bg-gray-800 bg-opacity-70 text-white p-3 rounded-full hover:bg-opacity-90 shadow-lg">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                    </button>
-                    <button id="btn-toggle-flash" class="bg-gray-800 bg-opacity-70 text-white p-3 rounded-full hover:bg-opacity-90 shadow-lg hidden">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                    </button>
-                    <!-- View Cart Button Mobile -->
-                    <button id="btn-view-mobile-cart" class="bg-green-600 text-white p-3 rounded-full shadow-lg relative">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
-                        <span id="mobile-cart-badge" class="absolute -top-1 -right-1 bg-red-500 text-white text-xs font-bold px-1.5 rounded-full hidden">0</span>
-                    </button>
+                <!-- Bottom Controls Bar -->
+                <div id="camera-controls" class="absolute bottom-0 left-0 right-0 z-30 hidden">
+                    <div class="bg-gradient-to-t from-black/90 via-black/60 to-transparent pb-8 pt-12 px-8 flex justify-between items-end">
+                        
+                         <!-- Flash -->
+                         <button id="btn-toggle-flash" class="flex flex-col items-center justify-center gap-1.5 group p-2 rounded-2xl active:bg-white/10 transition-colors">
+                             <div class="w-14 h-14 rounded-full bg-gray-600/50 backdrop-blur-md border border-white/20 flex items-center justify-center group-active:scale-95 transition-transform shadow-lg">
+                                <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                             </div>
+                             <span class="text-[10px] font-bold text-white/90 uppercase tracking-wide text-shadow-sm">Flash</span>
+                         </button>
+
+                         <!-- Switch Cam -->
+                         <button id="btn-switch-camera" class="flex flex-col items-center justify-center gap-1.5 group p-2 rounded-2xl active:bg-white/10 transition-colors">
+                             <div class="w-14 h-14 rounded-full bg-gray-600/50 backdrop-blur-md border border-white/20 flex items-center justify-center group-active:scale-95 transition-transform shadow-lg">
+                                <svg class="w-7 h-7 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                             </div>
+                             <span class="text-[10px] font-bold text-white/90 uppercase tracking-wide text-shadow-sm">Flip</span>
+                         </button>
+
+                         <!-- Cart Button (Prominent) -->
+                         <button id="btn-view-mobile-cart" class="flex flex-col items-center justify-center gap-1.5 group relative">
+                            <div class="w-16 h-16 rounded-2xl bg-blue-600 shadow-[0_4px_20px_rgba(37,99,235,0.6)] border border-blue-400 flex items-center justify-center group-active:scale-95 transition-transform">
+                                <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+                            </div>
+                            <span id="mobile-cart-badge" class="absolute -top-1 right-1 bg-red-500 text-white text-[10px] font-bold h-6 min-w-[1.5rem] px-1.5 rounded-full flex items-center justify-center border-2 border-black hidden shadow-sm">0</span>
+                            <span class="text-[10px] font-bold text-blue-200 uppercase tracking-wide text-shadow-sm">Cart</span>
+                         </button>
+                    </div>
                 </div>
             </div>
-
-            <!-- Full Screen Notification -->
             <div id="mobile-notification" class="fixed inset-0 z-[70] hidden flex flex-col items-center justify-center text-center p-8 transition-colors duration-300">
                 <div id="mobile-notif-icon" class="mb-4"></div>
                 <h2 id="mobile-notif-title" class="text-4xl font-black text-white mb-2"></h2>
