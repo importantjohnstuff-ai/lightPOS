@@ -1947,11 +1947,24 @@ function renderGrid(items) {
     const itemsToRender = items.slice(0, 100);
     const isCompact = localStorage.getItem('pos_compact_mode') === 'true';
 
+    // Check if locked: Lock if search input is empty to prevent accidental clicks
+    const searchInput = document.getElementById("pos-search");
+    const isLocked = !searchInput || searchInput.value.trim() === "";
+
     itemsToRender.forEach((item, index) => {
         const card = document.createElement("div");
-        card.className = isCompact
-            ? "bg-white border rounded p-1.5 shadow-sm hover:shadow-md cursor-pointer transition duration-150 flex flex-col justify-between h-16 hover:border-blue-400 active:bg-blue-50 select-none relative overflow-hidden group focus:outline-none focus:ring-1 focus:ring-blue-500"
-            : "bg-white border rounded-lg p-3 shadow-sm hover:shadow-md cursor-pointer transition duration-150 flex flex-col justify-between h-24 hover:border-blue-400 active:bg-blue-50 select-none relative overflow-hidden group focus:outline-none focus:ring-2 focus:ring-blue-500";
+        
+        let baseClasses = isCompact
+            ? "bg-white border rounded p-1.5 shadow-sm transition duration-150 flex flex-col justify-between h-16 select-none relative overflow-hidden group focus:outline-none focus:ring-1 focus:ring-blue-500"
+            : "bg-white border rounded-lg p-3 shadow-sm transition duration-150 flex flex-col justify-between h-24 select-none relative overflow-hidden group focus:outline-none focus:ring-2 focus:ring-blue-500";
+            
+        if (isLocked) {
+            baseClasses += " opacity-50 cursor-not-allowed grayscale";
+        } else {
+            baseClasses += " hover:shadow-md cursor-pointer hover:border-blue-400 active:bg-blue-50";
+        }
+        
+        card.className = baseClasses;
         card.setAttribute("tabindex", "0");
 
         // Stock Indicator Color
@@ -1978,11 +1991,13 @@ function renderGrid(items) {
                 <div class="${priceClass}">₱${(item.selling_price || 0).toFixed(2)}</div>
             </div>
             <!-- Hover Effect Overlay -->
-            <div class="absolute inset-0 bg-blue-600 bg-opacity-0 group-hover:bg-opacity-5 transition duration-150"></div>
+            <div class="absolute inset-0 bg-blue-600 bg-opacity-0 ${isLocked ? '' : 'group-hover:bg-opacity-5'} transition duration-150"></div>
         `;
 
         // Placeholder click
         card.addEventListener("click", async () => {
+            if (isLocked) return;
+
             await addToCart(item, 1);
             const searchInput = document.getElementById("pos-search");
             if (searchInput) {
@@ -1993,7 +2008,7 @@ function renderGrid(items) {
         });
 
         card.addEventListener("keydown", async (e) => {
-            if (activeCartIndex !== null) return;
+            if (activeCartIndex !== null || isLocked) return;
 
             if (e.key === "Enter") {
                 e.preventDefault();
