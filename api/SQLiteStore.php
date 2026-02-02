@@ -190,32 +190,27 @@ class SQLiteStore
                 error_log("SQLiteStore UPDATE Debug - Param count: " . count($updateParams));
 
                 // Bind ALL values as PDO::PARAM_STR (except NULL as PARAM_NULL)
-                // SQLite's type affinity handles conversion reliably
-                // This bypasses strict type checking bugs in PHP PDO driver
+                // Even with emulated prepares, explicit binding ensures consistency.
                 foreach ($updateParams as $i => $val) {
                     $paramType = gettype($val);
                     $paramPos = $i + 1;
 
                     if (is_null($val)) {
-                        error_log("SQLiteStore Bind [$paramPos]: NULL");
                         $stmtUpdate->bindValue($paramPos, null, PDO::PARAM_NULL);
                     } elseif (is_bool($val)) {
                         $strVal = $val ? '1' : '0';
-                        error_log("SQLiteStore Bind [$paramPos]: BOOL->STR '$strVal'");
                         $stmtUpdate->bindValue($paramPos, $strVal, PDO::PARAM_STR);
                     } elseif (is_array($val) || is_object($val)) {
                         $jsonVal = json_encode($val);
-                        error_log("SQLiteStore Bind [$paramPos]: ARRAY/OBJ->JSON (len:" . strlen($jsonVal) . ")");
                         $stmtUpdate->bindValue($paramPos, $jsonVal, PDO::PARAM_STR);
                     } else {
                         $strVal = (string) $val;
-                        error_log("SQLiteStore Bind [$paramPos]: $paramType->STR '" . substr($strVal, 0, 50) . "'");
                         $stmtUpdate->bindValue($paramPos, $strVal, PDO::PARAM_STR);
                     }
                 }
 
                 error_log("SQLiteStore UPDATE Debug - All binds complete, calling execute");
-                $this->executeWithRetry($stmtUpdate, null, $updateParams);
+                $this->executeWithRetry($stmtUpdate);
                 error_log("SQLiteStore UPDATE Debug - Execute successful");
             }
         } else {
