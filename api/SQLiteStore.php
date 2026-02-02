@@ -21,11 +21,11 @@ class SQLiteStore
         // Enable WAL mode for better concurrency
         $this->pdo->exec("PRAGMA journal_mode=WAL;");
         $this->pdo->exec("PRAGMA busy_timeout = 5000;");
-        // Disable emulated prepares to use native SQLite binding
-        // Combined with binding ALL values as PARAM_STR, this resolves Error 21
+        // Enable emulated prepares to avoid "General error: 21 bad parameter or other API misuse"
+        // This forces PDO to handle parameter substitution, preventing native driver binding issues.
         try {
-            $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
-            error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=false");
+            $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, true);
+            error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=true (Fix for Error 21)");
         } catch (Exception $e) {
             error_log("SQLiteStore warning: Could not set ATTR_EMULATE_PREPARES: " . $e->getMessage());
         }
