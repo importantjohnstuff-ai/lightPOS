@@ -5,13 +5,13 @@
 header('Content-Type: application/json');
 header('Cache-Control: no-store, no-cache, must-revalidate');
 
-require_once __DIR__ . '/SQLiteStore.php';
+require_once __DIR__ . '/../core/SQLiteStore.php';
 
 $response = [
     'timestamp' => date('Y-m-d H:i:s'),
     'php_version' => PHP_VERSION,
-    'file_path' => realpath(__DIR__ . '/SQLiteStore.php'),
-    'file_modified' => date('Y-m-d H:i:s', filemtime(__DIR__ . '/SQLiteStore.php')),
+    'file_path' => realpath(__DIR__ . '/../core/SQLiteStore.php'),
+    'file_modified' => date('Y-m-d H:i:s', filemtime(__DIR__ . '/../core/SQLiteStore.php')),
 ];
 
 // Check if VERSION constant exists

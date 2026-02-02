@@ -8,7 +8,7 @@ header('Content-Type: application/json');
 header('Cache-Control: no-store, no-cache, must-revalidate');
 header("Access-Control-Allow-Origin: *");
 
-require_once __DIR__ . '/SQLiteStore.php';
+require_once __DIR__ . '/../core/SQLiteStore.php';
 
 $store = new SQLiteStore();
 

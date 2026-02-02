@@ -1,5 +1,5 @@
 <?php
-require_once __DIR__ . '/SQLiteStore.php';
+require_once __DIR__ . '/../core/SQLiteStore.php';
 
 echo "Seeding database with sample data...\n";
 

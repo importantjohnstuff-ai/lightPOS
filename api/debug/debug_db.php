@@ -1,6 +1,6 @@
 <?php
 header("Content-Type: text/plain");
-require_once __DIR__ . '/SQLiteStore.php';
+require_once __DIR__ . '/../core/SQLiteStore.php';
 
 echo "Database Debug Inspector\n";
 echo "========================\n\n";

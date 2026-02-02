@@ -1,7 +1,8 @@
 <?php
-require_once __DIR__ . '/SQLiteStore.php';
+require_once __DIR__ . '/../core/SQLiteStore.php';
 
-class InventoryOptimizer {
+class InventoryOptimizer
+{
     private $pdo;
 
     // Defaults for EOQ calculation if not in settings
@@ -10,7 +11,8 @@ class InventoryOptimizer {
     private $serviceLevelZ = 1.65; // 95% Service Level
     private $defaultLeadTime = 7;
 
-    public function __construct($pdo = null) {
+    public function __construct($pdo = null)
+    {
         if ($pdo) {
             $this->pdo = $pdo;
         } else {
@@ -22,7 +24,8 @@ class InventoryOptimizer {
     /**
      * Main entry point to recalculate metrics for all items.
      */
-    public function calculateMetrics() {
+    public function calculateMetrics()
+    {
         $processed = 0;
         $errors = 0;
 
@@ -31,7 +34,7 @@ class InventoryOptimizer {
             $stmt = $this->pdo->prepare("SELECT json_body FROM settings WHERE id = 'global'");
             $stmt->execute();
             $settings = json_decode($stmt->fetchColumn() ?: '{}', true);
-            
+
             $this->orderingCost = floatval($settings['procurement']['ordering_cost'] ?? 50.0);
             $this->holdingCostRate = floatval($settings['procurement']['holding_cost_rate'] ?? 20) / 100;
             $this->defaultLeadTime = intval($settings['procurement']['default_lead_time'] ?? 7);
@@ -58,10 +61,10 @@ class InventoryOptimizer {
 
             // Aggregate Sales Data per Item
             $salesData = []; // [itemId => ['dates' => [date => qty], 'total_qty' => 0, 'first_sale' => null]]
-            
+
             foreach ($transactions as $tx) {
                 $txDate = substr($tx['timestamp'], 0, 10); // YYYY-MM-DD
-                
+
                 $rawItems = $tx['items_json'] ?? null;
                 if (empty($rawItems) && !empty($tx['json_body'])) {
                     $body = json_decode($tx['json_body'], true);
@@ -69,12 +72,12 @@ class InventoryOptimizer {
                 }
 
                 $txItems = $rawItems ? json_decode($rawItems, true) : [];
-                
+
                 if (is_array($txItems)) {
                     foreach ($txItems as $item) {
                         $id = $item['id'];
-                        $qty = (float)($item['qty'] ?? 0);
-                        
+                        $qty = (float) ($item['qty'] ?? 0);
+
                         if (!isset($salesData[$id])) {
                             $salesData[$id] = ['dates' => [], 'total_qty' => 0, 'first_sale' => $txDate];
                         }
@@ -99,12 +102,12 @@ class InventoryOptimizer {
             foreach ($items as $item) {
                 $id = $item['id'];
                 $data = $salesData[$id] ?? ['dates' => [], 'total_qty' => 0, 'first_sale' => null];
-                
+
                 // Dynamic Lookback
                 $firstSale = $data['first_sale'] ?? date('Y-m-d');
                 $daysSinceFirstSale = (time() - strtotime($firstSale)) / (60 * 60 * 24);
                 $effectiveDays = max(1, min(180, ceil($daysSinceFirstSale)));
-                
+
                 $velocity = $data['total_qty'] / $effectiveDays;
                 $annualDemand = $velocity * 365;
                 $annualUsageValue = $annualDemand * ($item['cost_price'] ?: 0);
@@ -120,7 +123,7 @@ class InventoryOptimizer {
                     // For simplicity and performance, we'll calculate based on the active sales days vs average.
                     // A more accurate approach fills 0s for non-sale days, but let's stick to the provided data points for now 
                     // or better: Variance = Sum((DailySales - Mean)^2) / N
-                    
+
                     $sumSquaredDiff = 0;
                     // We need to account for 0 sales days to get true volatility
                     // But iterating 180 days is expensive. 
@@ -132,18 +135,20 @@ class InventoryOptimizer {
                     }
                     // Add 0s for days without sales
                     // sumX2 remains same. N = effectiveDays.
-                    
+
                     $variance = ($sumX2 - ($sumX * $sumX / $effectiveDays)) / $effectiveDays;
                     $stdDev = sqrt(max(0, $variance));
-                    
+
                     if ($velocity > 0) {
                         $cv = $stdDev / $velocity;
                     }
                 }
 
                 $xyz = 'Z';
-                if ($cv < 0.2) $xyz = 'X';
-                elseif ($cv <= 0.5) $xyz = 'Y';
+                if ($cv < 0.2)
+                    $xyz = 'X';
+                elseif ($cv <= 0.5)
+                    $xyz = 'Y';
 
                 $itemMetrics[] = [
                     'item' => $item,
@@ -157,7 +162,7 @@ class InventoryOptimizer {
             }
 
             // 5. ABC Analysis (Sort by Value)
-            usort($itemMetrics, function($a, $b) {
+            usort($itemMetrics, function ($a, $b) {
                 return $b['annual_usage_value'] <=> $a['annual_usage_value'];
             });
 
@@ -169,13 +174,15 @@ class InventoryOptimizer {
                 $runningValue += $m['annual_usage_value'];
 
                 $abc = 'C';
-                if ($previousCumulative < 0.80) $abc = 'A';
-                elseif ($previousCumulative < 0.95) $abc = 'B';
+                if ($previousCumulative < 0.80)
+                    $abc = 'A';
+                elseif ($previousCumulative < 0.95)
+                    $abc = 'B';
 
                 // 6. Calculate EOQ & ROP
                 $supplierId = $m['item']['supplier_id'];
                 $config = $supplierConfigs[$supplierId] ?? ['lead_time_days' => 3, 'delivery_cadence' => 'weekly'];
-                
+
                 $leadTime = isset($config['lead_time_days']) ? $config['lead_time_days'] : $this->defaultLeadTime;
                 $cadenceMap = ['weekly' => 7, 'biweekly' => 14, 'monthly' => 30, 'on_order' => 0, 'every_2_days' => 2, 'twice_a_week' => 3.5];
                 $reviewPeriod = $cadenceMap[$config['delivery_cadence'] ?? 'weekly'] ?? 7;
@@ -200,7 +207,7 @@ class InventoryOptimizer {
                 $stmt = $this->pdo->prepare("INSERT OR REPLACE INTO inventory_metrics 
                     (sku_id, first_sale_date, abc_class, xyz_class, cv_value, daily_velocity, std_dev_sales, eoq_qty, rop_trigger, safety_stock, last_recalc, _version, _updatedAt)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)");
-                
+
                 $stmt->execute([
                     $m['item']['id'],
                     $m['first_sale'],
@@ -220,11 +227,11 @@ class InventoryOptimizer {
 
             $this->pdo->commit();
 
-        return [
-            'success' => true,
-            'items_processed' => $processed,
-            'metrics_updated' => $processed
-        ];
+            return [
+                'success' => true,
+                'items_processed' => $processed,
+                'metrics_updated' => $processed
+            ];
         } catch (Exception $e) {
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
@@ -236,4 +243,3 @@ class InventoryOptimizer {
         }
     }
 }
-        

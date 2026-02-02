@@ -1,10 +1,12 @@
 <?php
-require_once __DIR__ . '/SQLiteStore.php';
+require_once __DIR__ . '/../core/SQLiteStore.php';
 
-class ProcurementService {
+class ProcurementService
+{
     private $pdo;
 
-    public function __construct($pdo = null) {
+    public function __construct($pdo = null)
+    {
         if ($pdo) {
             $this->pdo = $pdo;
         } else {
@@ -13,20 +15,22 @@ class ProcurementService {
         }
     }
 
-    public function calculateOtb($supplierId) {
+    public function calculateOtb($supplierId)
+    {
         // 1. Get Global Settings for K-Factor
         $stmt = $this->pdo->prepare("SELECT json_body FROM settings WHERE id = 'global'");
         $stmt->execute();
         $settings = json_decode($stmt->fetchColumn() ?: '{}', true);
         $kFactorSetting = $settings['procurement']['k_factor'] ?? 110;
-        if ($kFactorSetting < 100) $kFactorSetting = 100; // Enforce min 100%
+        if ($kFactorSetting < 100)
+            $kFactorSetting = 100; // Enforce min 100%
         $multiplier = $kFactorSetting / 100;
 
         // 2. Get Supplier Config
         $stmt = $this->pdo->prepare("SELECT * FROM supplier_config WHERE supplier_id = ? AND _deleted = 0");
         $stmt->execute([$supplierId]);
         $config = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         $cadenceMap = ['weekly' => 7, 'biweekly' => 14, 'monthly' => 30, 'on_order' => 7];
         $cadenceDays = $cadenceMap[$config['delivery_cadence'] ?? 'weekly'] ?? 7;
 
@@ -52,7 +56,7 @@ class ProcurementService {
             // OTB = (Velocity * Cadence * K) + Ending(Safety) - Beginning(Current)
             $projectedSales = $velocity * $cadenceDays * $multiplier;
             $requiredQty = $projectedSales + $safetyStock - $currentStock;
-            
+
             if ($requiredQty > 0) {
                 $totalOtb += ($requiredQty * $cost);
             }
@@ -71,7 +75,8 @@ class ProcurementService {
         return ['supplier_id' => $supplierId, 'new_otb' => $totalOtb];
     }
 
-    public function getSuggestedOrder($supplierId) {
+    public function getSuggestedOrder($supplierId)
+    {
         // 1. Get Supplier Config
         $stmt = $this->pdo->prepare("SELECT * FROM supplier_config WHERE supplier_id = ? AND _deleted = 0");
         $stmt->execute([$supplierId]);
@@ -89,14 +94,15 @@ class ProcurementService {
         $stmt = $this->pdo->prepare("SELECT items_json FROM purchase_orders WHERE supplier_id = ? AND status NOT IN ('received', 'cancelled') AND _deleted = 0");
         $stmt->execute([$supplierId]);
         $openPos = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+
         foreach ($openPos as $po) {
             $items = json_decode($po['items_json'], true);
             if (is_array($items)) {
                 foreach ($items as $poItem) {
                     $id = $poItem['item_id'] ?? $poItem['id'];
                     $qty = $poItem['qty'] ?? 0;
-                    if (!isset($onOrderMap[$id])) $onOrderMap[$id] = 0;
+                    if (!isset($onOrderMap[$id]))
+                        $onOrderMap[$id] = 0;
                     $onOrderMap[$id] += $qty;
                 }
             }
@@ -121,15 +127,16 @@ class ProcurementService {
             $stock = $item['stock_level'] ?? 0;
             $onOrder = $onOrderMap[$id] ?? 0;
             $rop = $item['rop_trigger'] ?? 0;
-            
+
             // Trigger Logic: (Current + OnOrder) <= ROP
             if (($stock + $onOrder) <= $rop) {
                 $qty = $item['eoq_qty'] ?? 0;
-                if ($qty <= 0) $qty = 1; // Minimum order 1 if triggered
+                if ($qty <= 0)
+                    $qty = 1; // Minimum order 1 if triggered
 
                 $cost = $item['cost_price'] ?? 0;
                 $lineTotal = $qty * $cost;
-                
+
                 $suggestedItems[] = [
                     'item_id' => $id,
                     'name' => $item['name'] ?? 'Unknown',
@@ -143,7 +150,7 @@ class ProcurementService {
 
         // 4. OTB Optimization (The Triple Filter)
         // Sort Priority: A -> B -> C
-        usort($suggestedItems, function($a, $b) {
+        usort($suggestedItems, function ($a, $b) {
             $priority = ['A' => 1, 'B' => 2, 'C' => 3];
             $pa = $priority[$a['abc']] ?? 3;
             $pb = $priority[$b['abc']] ?? 3;
@@ -155,7 +162,7 @@ class ProcurementService {
 
         foreach ($suggestedItems as $item) {
             $isCritical = ($item['abc'] === 'A');
-            
+
             // Priority 1: Keep Class A items at 100% (even if over budget, usually)
             // But if we strictly follow "If Total > OTB", we might need to check.
             // For now, we assume A is critical.
@@ -194,13 +201,14 @@ class ProcurementService {
         ];
     }
 
-    public function createPurchaseOrder($data) {
+    public function createPurchaseOrder($data)
+    {
         $id = $this->generateUUID();
         $supplierId = $data['supplier_id'];
         $status = $data['status'] ?? 'draft';
         $items = $data['items'] ?? [];
         $itemsJson = json_encode($items);
-        
+
         $total = 0;
         foreach ($items as $i) {
             $total += ($i['qty'] * $i['cost']);
@@ -213,13 +221,14 @@ class ProcurementService {
         $stmt = $this->pdo->prepare("INSERT INTO purchase_orders 
             (id, supplier_id, status, items_json, total_amount, created_at, _version, _updatedAt, _deleted)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)");
-        
+
         $stmt->execute([$id, $supplierId, $status, $itemsJson, $total, $now, $version, $updatedAt]);
 
         return $id;
     }
 
-    public function processRealtimeTriggers($transactions) {
+    public function processRealtimeTriggers($transactions)
+    {
         $generatedPOs = [];
         $supplierItems = []; // supplier_id => [item_id => qty]
 
@@ -230,7 +239,8 @@ class ProcurementService {
                 $items = json_decode($tx['items_json'], true);
             } elseif (isset($tx['json_body'])) {
                 $body = json_decode($tx['json_body'], true);
-                if (isset($body['items'])) $items = $body['items'];
+                if (isset($body['items']))
+                    $items = $body['items'];
             }
 
             if (is_array($items)) {
@@ -241,7 +251,7 @@ class ProcurementService {
                         $stmt = $this->pdo->prepare("SELECT supplier_id, cost_price, name FROM items WHERE id = ?");
                         $stmt->execute([$id]);
                         $itemData = $stmt->fetch(PDO::FETCH_ASSOC);
-                        
+
                         if ($itemData && $itemData['supplier_id']) {
                             $supId = $itemData['supplier_id'];
                             if (!isset($supplierItems[$supId])) {
@@ -249,7 +259,7 @@ class ProcurementService {
                             }
                             if (!isset($supplierItems[$supId][$id])) {
                                 $supplierItems[$supId][$id] = [
-                                    'qty' => 0, 
+                                    'qty' => 0,
                                     'cost' => $itemData['cost_price'],
                                     'name' => $itemData['name']
                                 ];
@@ -317,13 +327,18 @@ class ProcurementService {
         return $generatedPOs;
     }
 
-    private function generateUUID() {
-        return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
-            mt_rand(0, 0xffff), mt_rand(0, 0xffff),
+    private function generateUUID()
+    {
+        return sprintf(
+            '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff),
             mt_rand(0, 0xffff),
             mt_rand(0, 0x0fff) | 0x4000,
             mt_rand(0, 0x3fff) | 0x8000,
-            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff)
         );
     }
 }

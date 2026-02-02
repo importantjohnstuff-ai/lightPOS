@@ -2,7 +2,7 @@
 // api/test_all_modules.php
 ini_set('display_errors', 1);
 error_reporting(E_ALL);
-require_once __DIR__ . '/SQLiteStore.php';
+require_once __DIR__ . '/../core/SQLiteStore.php';
 
 $store = new SQLiteStore();
 $results = [];

@@ -3,7 +3,7 @@
  * Sync Endpoint for the Self-Healing Architecture - DEBUG VERSION.
  * Handles Push (mutations) and Pull (deltas).
  */
-require_once __DIR__ . '/SQLiteStore.php';
+require_once __DIR__ . '/../core/SQLiteStore.php';
 
 header('Content-Type: application/json');
 

@@ -20,10 +20,11 @@ if (isset($_GET['action']) && $_GET['action'] === 'clear_opcache') {
     exit;
 }
 
-require_once __DIR__ . '/SQLiteStore.php';
+require_once __DIR__ . '/core/SQLiteStore.php';
 
 // --- START Schema Initialization Logic ---
-function ensureSchema($pdo) {
+function ensureSchema($pdo)
+{
     // Disable WAL mode to prevent locking issues on some filesystems
     $pdo->exec("PRAGMA journal_mode=DELETE;");
     $pdo->exec("PRAGMA busy_timeout = 5000;");
@@ -35,11 +36,11 @@ function ensureSchema($pdo) {
 
     if (empty($tableInfo)) {
         // If 'settings' table does not exist, execute the full schema
-        $schemaSql = file_get_contents(__DIR__ . '/../schema.sql');
+        $schemaSql = file_get_contents(__DIR__ . '/schema/schema.sql');
         if ($schemaSql === false) {
             error_log("Error: Could not read schema.sql file.");
             // Depending on desired behavior, you might want to throw an exception or die here
-            return; 
+            return;
         }
         $pdo->exec($schemaSql);
         error_log("SQLite database schema initialized successfully.");
@@ -51,7 +52,7 @@ function ensureSchema($pdo) {
     $stmt2 = $pdo->prepare("PRAGMA table_info(purchase_orders)");
     $stmt2->execute();
     if (empty($stmt1->fetchAll()) || empty($stmt2->fetchAll())) {
-        $schemaPo = file_get_contents(__DIR__ . '/schema_po.sql');
+        $schemaPo = file_get_contents(__DIR__ . '/schema/schema_po.sql');
         if ($schemaPo) {
             $pdo->exec($schemaPo);
             error_log("PO Module schema initialized successfully.");
@@ -103,17 +104,24 @@ function ensureSchema($pdo) {
     $stmt = $pdo->query("SELECT COUNT(*) FROM users");
     if ($stmt && $stmt->fetchColumn() == 0) {
         $defaultPermissions = json_encode([
-            "pos" => ["read" => true, "write" => true], "customers" => ["read" => true, "write" => true],
-            "items" => ["read" => true, "write" => true], "suppliers" => ["read" => true, "write" => true],
-            "stockin" => ["read" => true, "write" => true], "stock-count" => ["read" => true, "write" => true],
-            "reports" => ["read" => true, "write" => true], "expenses" => ["read" => true, "write" => true],
-            "users" => ["read" => true, "write" => true], "shifts" => ["read" => true, "write" => true],
-            "migrate" => ["read" => true, "write" => true], "returns" => ["read" => true, "write" => true],
-            "settings" => ["read" => true, "write" => true], "purchase_orders" => ["read" => true, "write" => true]
+            "pos" => ["read" => true, "write" => true],
+            "customers" => ["read" => true, "write" => true],
+            "items" => ["read" => true, "write" => true],
+            "suppliers" => ["read" => true, "write" => true],
+            "stockin" => ["read" => true, "write" => true],
+            "stock-count" => ["read" => true, "write" => true],
+            "reports" => ["read" => true, "write" => true],
+            "expenses" => ["read" => true, "write" => true],
+            "users" => ["read" => true, "write" => true],
+            "shifts" => ["read" => true, "write" => true],
+            "migrate" => ["read" => true, "write" => true],
+            "returns" => ["read" => true, "write" => true],
+            "settings" => ["read" => true, "write" => true],
+            "purchase_orders" => ["read" => true, "write" => true]
         ]);
         $passwordHash = md5('admin123');
         $now = round(microtime(true) * 1000);
-        
+
         $sql = "INSERT INTO users (email, name, password_hash, is_active, permissions_json, _version, _updatedAt, _deleted) 
                 VALUES ('admin@lightpos.com', 'Administrator', '$passwordHash', 1, '$defaultPermissions', 1, $now, 0)";
         $pdo->exec($sql);
@@ -176,12 +184,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
             "_updatedAt" => round(microtime(true) * 1000),
             "_deleted" => false,
             "permissions_json" => json_encode([
-                "pos" => ["read" => true, "write" => true], "customers" => ["read" => true, "write" => true],
-                "items" => ["read" => true, "write" => true], "suppliers" => ["read" => true, "write" => true],
-                "stockin" => ["read" => true, "write" => true], "stock-count" => ["read" => true, "write" => true],
-                "reports" => ["read" => true, "write" => true], "expenses" => ["read" => true, "write" => true],
-                "users" => ["read" => true, "write" => true], "shifts" => ["read" => true, "write" => true],
-                "migrate" => ["read" => true, "write" => true], "returns" => ["read" => true, "write" => true],
+                "pos" => ["read" => true, "write" => true],
+                "customers" => ["read" => true, "write" => true],
+                "items" => ["read" => true, "write" => true],
+                "suppliers" => ["read" => true, "write" => true],
+                "stockin" => ["read" => true, "write" => true],
+                "stock-count" => ["read" => true, "write" => true],
+                "reports" => ["read" => true, "write" => true],
+                "expenses" => ["read" => true, "write" => true],
+                "users" => ["read" => true, "write" => true],
+                "shifts" => ["read" => true, "write" => true],
+                "migrate" => ["read" => true, "write" => true],
+                "returns" => ["read" => true, "write" => true],
                 "settings" => ["read" => true, "write" => true]
             ])
         ];
@@ -194,7 +208,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = json_decode(file_get_contents("php://input"), true);
-    
+
     if ($file && !is_array($input)) {
         http_response_code(400);
         echo json_encode(["error" => "Invalid payload or empty body received."]);
@@ -204,7 +218,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($file) {
         if (!$dryRun) {
             // Helper to process records before insertion
-            $processRecord = function(&$record) use ($file) {
+            $processRecord = function (&$record) use ($file) {
                 // Map 'password' to 'password_hash'
                 if ($file === 'users' && isset($record['password']) && !isset($record['password_hash'])) {
                     $record['password_hash'] = $record['password'];
@@ -225,14 +239,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($mode === 'append') {
                     $currentData = $store->getAll($file);
                     if (is_array($input)) {
-                        foreach($input as $record) {
+                        foreach ($input as $record) {
                             $processRecord($record);
                             $store->upsert($file, $record);
                         }
                     }
                 } else {
                     $store->wipe($file);
-                    foreach($input as $record) {
+                    foreach ($input as $record) {
                         $processRecord($record);
                         $store->upsert($file, $record);
                     }
@@ -252,9 +266,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             // Ensure we wait for locks on login too
             $store->pdo->exec("PRAGMA busy_timeout = 5000;");
-            
+
             $email = $input['email'] ?? '';
-            $password = $input['password'] ?? ''; 
+            $password = $input['password'] ?? '';
 
             $users = $store->getAll('users');
             if (empty($users)) {
@@ -267,12 +281,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     "_updatedAt" => round(microtime(true) * 1000),
                     "_deleted" => false,
                     "permissions_json" => json_encode([
-                        "pos" => ["read" => true, "write" => true], "customers" => ["read" => true, "write" => true],
-                        "items" => ["read" => true, "write" => true], "suppliers" => ["read" => true, "write" => true],
-                        "stockin" => ["read" => true, "write" => true], "stock-count" => ["read" => true, "write" => true],
-                        "reports" => ["read" => true, "write" => true], "expenses" => ["read" => true, "write" => true],
-                        "users" => ["read" => true, "write" => true], "shifts" => ["read" => true, "write" => true],
-                        "migrate" => ["read" => true, "write" => true], "returns" => ["read" => true, "write" => true],
+                        "pos" => ["read" => true, "write" => true],
+                        "customers" => ["read" => true, "write" => true],
+                        "items" => ["read" => true, "write" => true],
+                        "suppliers" => ["read" => true, "write" => true],
+                        "stockin" => ["read" => true, "write" => true],
+                        "stock-count" => ["read" => true, "write" => true],
+                        "reports" => ["read" => true, "write" => true],
+                        "expenses" => ["read" => true, "write" => true],
+                        "users" => ["read" => true, "write" => true],
+                        "shifts" => ["read" => true, "write" => true],
+                        "migrate" => ["read" => true, "write" => true],
+                        "returns" => ["read" => true, "write" => true],
                         "settings" => ["read" => true, "write" => true]
                     ])
                 ];
@@ -328,10 +348,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         echo json_encode(["success" => true, "message" => "Repaired $count user passwords."]);
     } elseif ($action === 'reset_all') {
         $toWipe = [
-            'items', 'transactions', 'shifts', 'expenses', 'stock_movements', 
-            'adjustments', 'customers', 'suppliers', 'stockins', 
-            'suspended_transactions', 'returns', 'notifications', 'stock_logs', 'settings',
-            'users', 'sync_metadata'
+            'items',
+            'transactions',
+            'shifts',
+            'expenses',
+            'stock_movements',
+            'adjustments',
+            'customers',
+            'suppliers',
+            'stockins',
+            'suspended_transactions',
+            'returns',
+            'notifications',
+            'stock_logs',
+            'settings',
+            'users',
+            'sync_metadata'
         ];
         try {
             $store->beginTransaction();
@@ -349,12 +381,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 "_updatedAt" => round(microtime(true) * 1000),
                 "_deleted" => false,
                 "permissions_json" => json_encode([
-                    "pos" => ["read" => true, "write" => true], "customers" => ["read" => true, "write" => true],
-                    "items" => ["read" => true, "write" => true], "suppliers" => ["read" => true, "write" => true],
-                    "stockin" => ["read" => true, "write" => true], "stock-count" => ["read" => true, "write" => true],
-                    "reports" => ["read" => true, "write" => true], "expenses" => ["read" => true, "write" => true],
-                    "users" => ["read" => true, "write" => true], "shifts" => ["read" => true, "write" => true],
-                    "migrate" => ["read" => true, "write" => true], "returns" => ["read" => true, "write" => true],
+                    "pos" => ["read" => true, "write" => true],
+                    "customers" => ["read" => true, "write" => true],
+                    "items" => ["read" => true, "write" => true],
+                    "suppliers" => ["read" => true, "write" => true],
+                    "stockin" => ["read" => true, "write" => true],
+                    "stock-count" => ["read" => true, "write" => true],
+                    "reports" => ["read" => true, "write" => true],
+                    "expenses" => ["read" => true, "write" => true],
+                    "users" => ["read" => true, "write" => true],
+                    "shifts" => ["read" => true, "write" => true],
+                    "migrate" => ["read" => true, "write" => true],
+                    "returns" => ["read" => true, "write" => true],
                     "settings" => ["read" => true, "write" => true]
                 ])
             ];
@@ -370,10 +408,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } elseif ($action === 'restore_from_client') {
         $toWipe = [
-            'items', 'transactions', 'users', 'customers', 'suppliers',
-            'shifts', 'expenses', 'returns', 'stock_movements',
-            'adjustments', 'stockins', 'suspended_transactions', 'sync_metadata',
-            'stock_logs', 'settings', 'notifications'
+            'items',
+            'transactions',
+            'users',
+            'customers',
+            'suppliers',
+            'shifts',
+            'expenses',
+            'returns',
+            'stock_movements',
+            'adjustments',
+            'stockins',
+            'suspended_transactions',
+            'sync_metadata',
+            'stock_logs',
+            'settings',
+            'notifications'
         ];
         $dataDir = __DIR__ . '/../data/';
         $restoreLockFile = $dataDir . 'restore.lock';
@@ -392,7 +442,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // 2. Insert data from client
             foreach ($input as $collection => $records) {
-                if (!in_array($collection, $toWipe)) continue;
+                if (!in_array($collection, $toWipe))
+                    continue;
                 foreach ($records as $record) {
                     $store->upsert($collection, $record);
                 }
@@ -451,10 +502,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     // Wipe all data first
                     $toWipe = [
-                        'items', 'transactions', 'users', 'customers', 'suppliers',
-                        'shifts', 'expenses', 'returns', 'stock_movements',
-                        'adjustments', 'stockins', 'suspended_transactions', 'sync_metadata',
-                        'stock_logs', 'settings', 'notifications'
+                        'items',
+                        'transactions',
+                        'users',
+                        'customers',
+                        'suppliers',
+                        'shifts',
+                        'expenses',
+                        'returns',
+                        'stock_movements',
+                        'adjustments',
+                        'stockins',
+                        'suspended_transactions',
+                        'sync_metadata',
+                        'stock_logs',
+                        'settings',
+                        'notifications'
                     ];
                     $store->beginTransaction();
                     foreach ($toWipe as $col) {

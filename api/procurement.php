@@ -4,9 +4,9 @@
  * Handles Inventory Optimization triggers, Alerts, and PO generation.
  */
 
-require_once __DIR__ . '/SQLiteStore.php';
-require_once __DIR__ . '/InventoryOptimizer.php';
-require_once __DIR__ . '/ProcurementService.php';
+require_once __DIR__ . '/core/SQLiteStore.php';
+require_once __DIR__ . '/services/InventoryOptimizer.php';
+require_once __DIR__ . '/services/ProcurementService.php';
 
 header("Access-Control-Allow-Origin: *");
 header("Content-Type: application/json; charset=UTF-8");
@@ -24,11 +24,12 @@ $pdo = $store->pdo;
 
 // Helper to ensure schema exists (similar to router.php)
 // This ensures that if this endpoint is hit by a Cron job before the UI is loaded, tables exist.
-function ensurePoSchema($pdo) {
+function ensurePoSchema($pdo)
+{
     $stmt = $pdo->prepare("PRAGMA table_info(inventory_metrics)");
     $stmt->execute();
     if (empty($stmt->fetchAll())) {
-        $schemaPo = file_get_contents(__DIR__ . '/schema_po.sql');
+        $schemaPo = file_get_contents(__DIR__ . '/schema/schema_po.sql');
         if ($schemaPo) {
             $pdo->exec($schemaPo);
         }
@@ -76,8 +77,7 @@ try {
             $optimizer = new InventoryOptimizer($pdo);
             $result = $optimizer->calculateMetrics();
             echo json_encode($result);
-        } 
-        elseif ($action === 'alerts') {
+        } elseif ($action === 'alerts') {
             // Fetch items where stock <= ROP
             // We join items and inventory_metrics
             $sql = "
@@ -94,8 +94,7 @@ try {
             $stmt->execute();
             $alerts = $stmt->fetchAll(PDO::FETCH_ASSOC);
             echo json_encode($alerts);
-        } 
-        elseif ($action === 'suggested-order') {
+        } elseif ($action === 'suggested-order') {
             $supplierId = $_GET['supplier_id'] ?? null;
             if (!$supplierId) {
                 http_response_code(400);
@@ -105,8 +104,7 @@ try {
             $service = new ProcurementService($pdo);
             $result = $service->getSuggestedOrder($supplierId);
             echo json_encode($result);
-        } 
-        elseif ($action === 'calculate-otb') {
+        } elseif ($action === 'calculate-otb') {
             $supplierId = $_GET['supplier_id'] ?? null;
             if (!$supplierId) {
                 http_response_code(400);
@@ -116,50 +114,46 @@ try {
             $service = new ProcurementService($pdo);
             $result = $service->calculateOtb($supplierId);
             echo json_encode($result);
-        }
-        else {
+        } else {
             http_response_code(400);
             echo json_encode(['error' => 'Invalid action']);
         }
-    } 
-    elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    } elseif ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $input = json_decode(file_get_contents("php://input"), true);
-        
+
         if ($action === 'settings') {
             if (empty($input['supplier_id'])) {
                 http_response_code(400);
                 echo json_encode(['error' => 'Missing supplier_id']);
                 exit;
             }
-            
+
             // Fetch existing to merge
             $existingStmt = $pdo->prepare("SELECT * FROM supplier_config WHERE supplier_id = ?");
             $existingStmt->execute([$input['supplier_id']]);
             $existing = $existingStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-            
+
             $cadence = $input['delivery_cadence'] ?? $existing['delivery_cadence'] ?? 'weekly';
             $leadTime = $input['lead_time_days'] ?? $existing['lead_time_days'] ?? 7;
             $otb = $input['monthly_otb'] ?? $existing['monthly_otb'] ?? 0;
             $spend = $input['current_spend'] ?? $existing['current_spend'] ?? 0;
             $version = ($existing['_version'] ?? 0) + 1;
             $updatedAt = round(microtime(true) * 1000);
-            
+
             $stmt = $pdo->prepare("INSERT OR REPLACE INTO supplier_config 
                 (supplier_id, delivery_cadence, lead_time_days, monthly_otb, current_spend, _version, _updatedAt, _deleted)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 0)");
-            
+
             $stmt->execute([$input['supplier_id'], $cadence, $leadTime, $otb, $spend, $version, $updatedAt]);
-            
+
             echo json_encode(['success' => true]);
-        }
-        elseif ($action === 'create-po') {
-             $service = new ProcurementService($pdo);
-             $poId = $service->createPurchaseOrder($input);
-             echo json_encode(['success' => true, 'id' => $poId]);
-        }
-        else {
-             http_response_code(400);
-             echo json_encode(['error' => 'Invalid action']);
+        } elseif ($action === 'create-po') {
+            $service = new ProcurementService($pdo);
+            $poId = $service->createPurchaseOrder($input);
+            echo json_encode(['success' => true, 'id' => $poId]);
+        } else {
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid action']);
         }
     }
 } catch (Exception $e) {

@@ -3,8 +3,8 @@
  * Sync Endpoint for the Self-Healing Architecture.
  * Handles Push (mutations) and Pull (deltas).
  */
-require_once __DIR__ . '/SQLiteStore.php';
-require_once __DIR__ . '/ProcurementService.php';
+require_once __DIR__ . '/core/SQLiteStore.php';
+require_once __DIR__ . '/services/ProcurementService.php';
 
 header('Content-Type: application/json');
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
@@ -37,7 +37,7 @@ function ensureSchema($pdo)
 
     if (empty($tableInfo)) {
         // If 'settings' table does not exist, execute the full schema
-        $schemaSql = file_get_contents(__DIR__ . '/../schema.sql');
+        $schemaSql = file_get_contents(__DIR__ . '/schema/schema.sql');
         if ($schemaSql !== false) {
             $pdo->exec($schemaSql);
             error_log("Main schema initialized via sync.php");
@@ -98,7 +98,7 @@ function ensurePoSchema($pdo)
     $stmt = $pdo->prepare("PRAGMA table_info(inventory_metrics)");
     $stmt->execute();
     if (empty($stmt->fetchAll())) {
-        $schemaPo = file_get_contents(__DIR__ . '/schema_po.sql');
+        $schemaPo = file_get_contents(__DIR__ . '/schema/schema_po.sql');
         if ($schemaPo) {
             $pdo->exec($schemaPo);
             error_log("PO schema initialized via sync.php");

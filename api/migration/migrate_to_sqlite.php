@@ -3,7 +3,7 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 require_once __DIR__ . '/JsonStore.php';
-require_once __DIR__ . '/SQLiteStore.php';
+require_once __DIR__ . '/../core/SQLiteStore.php';
 
 $dbFile = __DIR__ . '/../data/database.sqlite';
 $schemaFile = __DIR__ . '/schema.sql';
