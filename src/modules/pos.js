@@ -1946,13 +1946,23 @@ function renderGrid(items) {
     // Limit rendering to top 100 items to maintain performance during rapid searches/scans
     const itemsToRender = items.slice(0, 100);
     const isCompact = localStorage.getItem('pos_compact_mode') === 'true';
+    const isSearchActive = document.getElementById("pos-search").value.trim().length > 0;
 
     itemsToRender.forEach((item, index) => {
         const card = document.createElement("div");
-        card.className = isCompact
-            ? "bg-white border rounded p-1.5 shadow-sm hover:shadow-md cursor-pointer transition duration-150 flex flex-col justify-between h-16 hover:border-blue-400 active:bg-blue-50 select-none relative overflow-hidden group focus:outline-none focus:ring-1 focus:ring-blue-500"
-            : "bg-white border rounded-lg p-3 shadow-sm hover:shadow-md cursor-pointer transition duration-150 flex flex-col justify-between h-24 hover:border-blue-400 active:bg-blue-50 select-none relative overflow-hidden group focus:outline-none focus:ring-2 focus:ring-blue-500";
-        card.setAttribute("tabindex", "0");
+        // Base classes
+        let baseClasses = isCompact
+            ? "bg-white border rounded p-1.5 shadow-sm flex flex-col justify-between h-16 select-none relative overflow-hidden group focus:outline-none focus:ring-1 focus:ring-blue-500"
+            : "bg-white border rounded-lg p-3 shadow-sm flex flex-col justify-between h-24 select-none relative overflow-hidden group focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+        // Interactive vs Locked state
+        if (isSearchActive) {
+            baseClasses += " hover:shadow-md cursor-pointer transition duration-150 hover:border-blue-400 active:bg-blue-50";
+            card.setAttribute("tabindex", "0");
+        } else {
+            baseClasses += " opacity-60 grayscale cursor-not-allowed";
+        }
+        card.className = baseClasses;
 
         // Stock Indicator Color
         let stockColor = 'text-green-600';
@@ -1978,25 +1988,12 @@ function renderGrid(items) {
                 <div class="${priceClass}">₱${(item.selling_price || 0).toFixed(2)}</div>
             </div>
             <!-- Hover Effect Overlay -->
-            <div class="absolute inset-0 bg-blue-600 bg-opacity-0 group-hover:bg-opacity-5 transition duration-150"></div>
+            <div class="absolute inset-0 bg-blue-600 bg-opacity-0 ${isSearchActive ? 'group-hover:bg-opacity-5' : ''} transition duration-150"></div>
         `;
 
-        // Placeholder click
-        card.addEventListener("click", async () => {
-            await addToCart(item, 1);
-            const searchInput = document.getElementById("pos-search");
-            if (searchInput) {
-                searchInput.value = "";
-                filterItems("");
-                searchInput.focus();
-            }
-        });
-
-        card.addEventListener("keydown", async (e) => {
-            if (activeCartIndex !== null) return;
-
-            if (e.key === "Enter") {
-                e.preventDefault();
+        // Only attach listeners if search is active
+        if (isSearchActive) {
+            card.addEventListener("click", async () => {
                 await addToCart(item, 1);
                 const searchInput = document.getElementById("pos-search");
                 if (searchInput) {
@@ -2004,10 +2001,25 @@ function renderGrid(items) {
                     filterItems("");
                     searchInput.focus();
                 }
-            } else {
-                handleGridNavigation(e, index, items.length);
-            }
-        });
+            });
+
+            card.addEventListener("keydown", async (e) => {
+                if (activeCartIndex !== null) return;
+
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    await addToCart(item, 1);
+                    const searchInput = document.getElementById("pos-search");
+                    if (searchInput) {
+                        searchInput.value = "";
+                        filterItems("");
+                        searchInput.focus();
+                    }
+                } else {
+                    handleGridNavigation(e, index, items.length);
+                }
+            });
+        }
 
         fragment.appendChild(card);
     });
@@ -2019,6 +2031,17 @@ function renderGrid(items) {
         fragment.appendChild(moreInfo);
     }
 
+    if (!isSearchActive && items.length > 0) {
+        const lockMsg = document.createElement("div");
+        lockMsg.className = "col-span-full text-center text-gray-400 italic text-sm mt-4";
+        lockMsg.textContent = "Start typing to select items...";
+        // Insert at top
+        grid.innerHTML = "";
+        grid.appendChild(lockMsg);
+    }
+
+    // Append items if we are allowed to show them, or if we want to show 'disabled' items (user preference check could be here)
+    // For now, based on request, we show them as locked.
     requestAnimationFrame(() => {
         grid.appendChild(fragment);
     });
