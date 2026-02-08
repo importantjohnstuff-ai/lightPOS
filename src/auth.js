@@ -12,12 +12,12 @@ export async function login(email, password) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ email, password })
         });
-        
+
         const text = await response.text();
         console.log("Server Response:", text); // Debug log
-        
+
         const data = JSON.parse(text);
-        
+
         if (response.ok && data.success) {
             currentUserProfile = data.user;
             console.log("Logged in user profile:", currentUserProfile); // Added for debugging
@@ -60,7 +60,7 @@ export function checkPermission(module, type) {
 }
 
 export const permissionManager = {
-    check: function(module, type) {
+    check: function (module, type) {
         if (!currentUserProfile || !currentUserProfile.is_active) return false;
         const perms = currentUserProfile.permissions || {};
         return perms[module]?.[type] === true;
@@ -82,20 +82,31 @@ const MANAGER_LOCKOUT_MS = 30000; // 30 seconds
 export async function verifyManagerPassword(password) {
     const now = Date.now();
     const lockoutUntil = parseInt(localStorage.getItem('manager_lockout_until') || '0');
-    
+
     if (now < lockoutUntil) return false;
 
     try {
         if (navigator.onLine) {
             await SyncEngine.sync();
         }
-        
-        const users = await Repository.getAll('users');
 
+        // First, check against the Manager Password from Settings (synced across all terminals)
+        const settings = await Repository.get('settings', 'global');
+        const managerPassword = settings?.security?.manager_password;
+
+        if (managerPassword && password === managerPassword) {
+            // Direct match with the configured manager password
+            localStorage.removeItem('manager_lockout_attempts');
+            localStorage.removeItem('manager_lockout_until');
+            return true;
+        }
+
+        // Fallback: Check against active user passwords with appropriate permissions
+        const users = await Repository.getAll('users');
         const hashed = md5(password);
-        const isValid = users.some(u => 
-            u.is_active && 
-            (u.permissions?.pos?.write || u.permissions?.shifts?.write) && 
+        const isValid = users.some(u =>
+            u.is_active &&
+            (u.permissions?.pos?.write || u.permissions?.shifts?.write) &&
             u.password === hashed
         );
 
@@ -150,7 +161,7 @@ export async function requestManagerApproval() {
             const password = input.value;
             const now = Date.now();
             const lockoutUntil = parseInt(localStorage.getItem('manager_lockout_until') || '0');
-            
+
             if (now < lockoutUntil) {
                 const remaining = Math.ceil((lockoutUntil - now) / 1000);
                 errorEl.textContent = `Too many failed attempts. Try again in ${remaining}s.`;
