@@ -108,6 +108,7 @@ export async function loadExpensesView() {
                                 <option value="Salary">Salary</option>
                                 <option value="Maintenance">Maintenance</option>
                                 <option value="Karinderya">Karinderya</option>
+                                <option value="CHMSU">CHMSU</option>
                                 <option value="Other">Other</option>
                             </select>
                         </div>

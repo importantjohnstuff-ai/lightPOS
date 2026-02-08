@@ -9,6 +9,7 @@ import { SyncEngine } from "../services/SyncEngine.js";
 let activeCartIndex = null;
 let qtyBuffer = "";
 let currentSuspendedId = null;
+let currentSuspendedCreatedAt = null;
 
 let audioCtx = null;
 function playBeep(freq, dur, type = 'sine') {
@@ -802,6 +803,7 @@ async function renderPosInterface(content) {
         if (posCart.length > 0 && confirm("Are you sure you want to clear the current sale?")) {
             posCart = [];
             currentSuspendedId = null;
+            currentSuspendedCreatedAt = null;
             renderCart();
         }
     });
@@ -1217,7 +1219,12 @@ async function renderPosInterface(content) {
                     printShiftReport({ ...activeShift, ...financials });
                 }
 
-                loadPosView();
+                // Ask user if they want to go to Shifts module
+                if (confirm("Would you like to go to the Shifts module?")) {
+                    window.location.hash = "#shifts";
+                } else {
+                    loadPosView();
+                }
             }
         } catch (error) {
             console.error("Error closing shift:", error);
@@ -1867,6 +1874,7 @@ async function processMobileTransaction() {
         lastTransactionData = transaction;
         posCart = [];
         currentSuspendedId = null;
+        currentSuspendedCreatedAt = null;
         renderCart();
         selectCustomer({ id: "Guest", name: "Guest" });
         document.getElementById("pos-customer-search").value = "";
@@ -2451,6 +2459,7 @@ async function processTransaction() {
         lastTransactionData = transaction;
         posCart = [];
         currentSuspendedId = null;
+        currentSuspendedCreatedAt = null;
         renderCart();
         closeCheckout();
 
@@ -2586,6 +2595,7 @@ async function suspendCurrentTransaction() {
         customer: selectedCustomer,
         user_email: user ? user.email : "Guest",
         timestamp: new Date(),
+        created_at: currentSuspendedCreatedAt || new Date(), // Preserve original creation time for ordering
         total: posCart.reduce((sum, item) => sum + ((item.selling_price || 0) * item.qty), 0),
     };
 
@@ -2595,6 +2605,7 @@ async function suspendCurrentTransaction() {
 
         posCart = [];
         currentSuspendedId = null;
+        currentSuspendedCreatedAt = null;
         selectedCustomer = { id: "Guest", name: "Guest" };
         renderCart();
         selectCustomer(selectedCustomer);
@@ -2613,6 +2624,8 @@ async function openSuspendedModal() {
 
     try {
         const suspended = await Repository.getAll('suspended_transactions'); // Already filters _deleted
+        // Sort by created_at ascending so new transactions go to bottom, resumed ones keep position
+        suspended.sort((a, b) => new Date(a.created_at || a.timestamp) - new Date(b.created_at || b.timestamp));
         if (suspended.length === 0) {
             container.innerHTML = `<div class="text-center p-4 text-gray-500">No suspended transactions.</div>`;
             return;
@@ -2724,6 +2737,7 @@ async function resumeTransaction(id) {
 
             selectedCustomer = tx.customer || { id: "Guest", name: "Guest" };
             currentSuspendedId = tx.id; // Use the actual ID from the record
+            currentSuspendedCreatedAt = tx.created_at || tx.timestamp; // Preserve original creation time
 
             renderCart();
             selectCustomer(selectedCustomer);
