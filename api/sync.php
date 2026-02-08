@@ -428,7 +428,8 @@ if ($method === 'GET') {
         'supplier_config',
         'inventory_metrics',
         'spatial_shelves',
-        'spatial_placements'
+        'spatial_placements',
+        'discount_codes'
     ];
     $response = [];
     $debug_info = [
