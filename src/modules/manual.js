@@ -322,7 +322,7 @@ export function loadManualView() {
         {
             id: "shifts",
             title: "How do I manage shifts?",
-            keywords: "shift open close x-report z-report cash register",
+            keywords: "shift open close x-report z-report cash register adjust",
             content: `
                 <div class="max-w-3xl">
                     <h2 class="text-3xl font-bold text-gray-800 mb-6 border-b pb-4">Shift Management</h2>
@@ -337,6 +337,13 @@ export function loadManualView() {
                             <h3 class="font-bold text-green-800 mb-2">X-Report (Snapshot)</h3>
                             <p class="text-sm text-green-700">Use this to check current sales totals <em>without</em> closing the shift. Useful for mid-day checks.</p>
                         </div>
+                        <div class="bg-amber-50 p-4 rounded-lg border border-amber-100">
+                            <h3 class="font-bold text-amber-800 mb-2">Adjust Cash</h3>
+                            <p class="text-sm text-amber-700">
+                                Make corrections to the cash amount during an active shift. 
+                                <br><strong>Requires Manager Password</strong> (set in Settings > Advanced > Security).
+                            </p>
+                        </div>
                         <div class="bg-purple-50 p-4 rounded-lg border border-purple-100">
                             <h3 class="font-bold text-purple-800 mb-2">Closing a Shift (Z-Report)</h3>
                             <p class="text-sm text-purple-700">
@@ -345,6 +352,7 @@ export function loadManualView() {
                                 <br>2. Enter the <strong>Closing Cash</strong> amount.
                                 <br>3. The system will calculate any <strong>Overage</strong> or <strong>Shortage</strong>.
                                 <br>4. Confirm to generate the Z-Report.
+                                <br>5. After closing, you can choose to print the report and navigate to the <strong>Shifts Module</strong> for review.
                             </p>
                         </div>
                     </div>
@@ -410,7 +418,7 @@ export function loadManualView() {
         {
             id: "settings",
             title: "How do I configure settings?",
-            keywords: "settings store backup restore logo tax configuration",
+            keywords: "settings store backup restore logo tax configuration manager password security discount codes",
             content: `
                 <div class="max-w-3xl">
                     <h2 class="text-3xl font-bold text-gray-800 mb-6 border-b pb-4">System Settings</h2>
@@ -426,12 +434,79 @@ export function loadManualView() {
                             <p class="text-sm text-gray-600">Configure your Tax Rate (%) and Currency symbol.</p>
                         </div>
                         <div>
+                            <h3 class="font-bold text-gray-800">Security (Advanced Tab)</h3>
+                            <p class="text-sm text-gray-600">
+                                <strong>Manager Password:</strong> Set a master password for high-clearance actions like <strong>Adjust Cash</strong> in the Shifts module.
+                                <br><em class="text-gray-500">This password syncs across all terminals connected to the server.</em>
+                            </p>
+                        </div>
+                        <div>
+                            <h3 class="font-bold text-gray-800">Discount Codes (Advanced Tab)</h3>
+                            <p class="text-sm text-gray-600">
+                                Create and manage discount codes that cashiers can apply at checkout.
+                                <br>• <strong>Code:</strong> The text cashiers type to apply the discount.
+                                <br>• <strong>Type:</strong> Percentage (%) or Fixed amount.
+                                <br>• <strong>Value:</strong> The discount amount or percentage.
+                                <br><em class="text-gray-500">Discount codes sync automatically to all terminals.</em>
+                            </p>
+                        </div>
+                        <div>
                             <h3 class="font-bold text-gray-800">Data Management</h3>
                             <p class="text-sm text-gray-600">
                                 <strong>Backup:</strong> Download a full JSON backup of your database.<br>
                                 <strong>Restore:</strong> Upload a backup file to restore data (Warning: Overwrites current data).<br>
                                 <strong>Reset:</strong> Factory reset the application (Advanced users only).
                             </p>
+                        </div>
+                    </div>
+                </div>
+            `
+        },
+        {
+            id: "adjustcash",
+            title: "How do I adjust cash in a shift?",
+            keywords: "adjust cash shift correction manager password security",
+            content: `
+                <div class="max-w-3xl">
+                    <h2 class="text-3xl font-bold text-gray-800 mb-6 border-b pb-4">Adjusting Cash in a Shift</h2>
+                    <p class="mb-6 text-lg text-gray-600">Make corrections to the cash amount during an active shift.</p>
+                    
+                    <div class="bg-amber-50 border-l-4 border-amber-400 p-5 mb-8 rounded-r-lg">
+                        <h4 class="text-amber-800 font-bold mb-2">⚠️ Manager Approval Required</h4>
+                        <p class="text-amber-700 text-sm">
+                            Adjusting cash requires the <strong>Manager Password</strong> set in Settings > Advanced > Security.
+                            This password is synced across all terminals.
+                        </p>
+                    </div>
+                    
+                    <div class="space-y-8">
+                        <div class="flex gap-6">
+                            <div class="flex-shrink-0 w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-lg shadow-md">1</div>
+                            <div class="pt-1">
+                                <h3 class="text-xl font-bold text-gray-800 mb-2">Open the Shifts Module</h3>
+                                <p class="text-gray-600">Navigate to <strong>Shifts</strong> (⏱️ icon) in the sidebar.</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-6">
+                            <div class="flex-shrink-0 w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-lg shadow-md">2</div>
+                            <div class="pt-1">
+                                <h3 class="text-xl font-bold text-gray-800 mb-2">Click Adjust Cash</h3>
+                                <p class="text-gray-600">On the active shift card, click the <strong>Adjust Cash</strong> button.</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-6">
+                            <div class="flex-shrink-0 w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-lg shadow-md">3</div>
+                            <div class="pt-1">
+                                <h3 class="text-xl font-bold text-gray-800 mb-2">Enter Manager Password</h3>
+                                <p class="text-gray-600">A prompt will appear asking for the Manager Password. This is set in <strong>Settings > Advanced > Security</strong>.</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-6">
+                            <div class="flex-shrink-0 w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-lg shadow-md">4</div>
+                            <div class="pt-1">
+                                <h3 class="text-xl font-bold text-gray-800 mb-2">Enter Adjustment Details</h3>
+                                <p class="text-gray-600">Enter the adjustment amount (positive to add, negative to subtract) and provide a reason for the adjustment.</p>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -449,7 +524,7 @@ export function loadManualView() {
         guides.forEach(guide => {
             if (filter && !guide.title.toLowerCase().includes(filter) && !guide.keywords.includes(filter)) return;
             hasResults = true;
-            
+
             const btn = document.createElement("button");
             btn.className = "text-left px-4 py-3 rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-all focus:outline-none w-full text-sm font-medium text-gray-600 border border-transparent";
             btn.textContent = guide.title;
@@ -462,7 +537,7 @@ export function loadManualView() {
                 // Set active
                 btn.classList.remove("hover:bg-blue-50", "hover:text-blue-700", "text-gray-600");
                 btn.classList.add("bg-blue-600", "text-white", "shadow-md", "hover:bg-blue-700", "hover:text-white");
-                
+
                 // Render Content with fade animation
                 contentArea.style.opacity = "0";
                 setTimeout(() => {
@@ -484,7 +559,7 @@ export function loadManualView() {
 
     // Initial Render
     renderTOC();
-    
+
     // Add transition style
     contentArea.style.transition = "opacity 0.15s ease-in-out";
 }
