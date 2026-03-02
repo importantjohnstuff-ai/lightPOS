@@ -134,6 +134,7 @@ document.addEventListener("keydown", (e) => {
         const modals = [
             "modal-suspended",
             "modal-pos-history",
+            "modal-pos-tx-details",
             "modal-checkout",
             "modal-quick-customer",
             "modal-remittance",
@@ -537,6 +538,65 @@ async function renderPosInterface(content) {
             </div>
         </div>
 
+        <!-- Transaction Details Modal -->
+        <div id="modal-pos-tx-details" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-[60]">
+            <div class="bg-white rounded-lg shadow-lg w-full max-w-3xl flex flex-col h-[80vh]">
+                <!-- Header -->
+                <div class="p-4 border-b bg-gray-50 flex justify-between items-center shrink-0 rounded-t-lg">
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-800">Transaction Details</h3>
+                        <p id="tx-details-header-info" class="text-xs text-gray-500 font-mono"></p>
+                    </div>
+                    <button id="btn-close-tx-details" class="text-gray-500 hover:text-gray-700 text-2xl font-bold">&times;</button>
+                </div>
+                
+                <!-- Content -->
+                <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
+                    <table class="min-w-full text-sm border bg-white rounded shadow-sm">
+                        <thead class="bg-gray-100 text-gray-600 text-[10px] uppercase">
+                            <tr>
+                                <th class="py-2 px-3 text-left">Item Name</th>
+                                <th class="py-2 px-3 text-center">Qty</th>
+                                <th class="py-2 px-3 text-right">Unit Price</th>
+                                <th class="py-2 px-3 text-right">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tx-details-items-body" class="text-gray-700 text-xs">
+                            <!-- Items injected here -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Footer / Summary -->
+                <div class="p-4 border-t bg-white shrink-0 rounded-b-lg">
+                    <div class="flex justify-end">
+                        <div class="w-64 space-y-2 text-sm">
+                            <div class="flex justify-between text-gray-600">
+                                <span>Subtotal:</span>
+                                <span id="tx-details-subtotal" class="font-mono">₱0.00</span>
+                            </div>
+                            <div class="flex justify-between text-red-500">
+                                <span>Discount:</span>
+                                <span id="tx-details-discount" class="font-mono">-₱0.00</span>
+                            </div>
+                            <div class="flex justify-between font-bold text-gray-800 text-lg border-t pt-2">
+                                <span>Total:</span>
+                                <span id="tx-details-total" class="font-mono">₱0.00</span>
+                            </div>
+                            <div class="flex justify-between text-gray-600 text-xs pt-2">
+                                <span>Amount Tendered:</span>
+                                <span id="tx-details-tendered" class="font-mono font-bold">₱0.00</span>
+                            </div>
+                            <div class="flex justify-between text-green-600 text-xs font-bold">
+                                <span>Change:</span>
+                                <span id="tx-details-change" class="font-mono">₱0.00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Quick Customer Modal -->
         <div id="modal-quick-customer" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-[60]">
             <div class="bg-white rounded-lg shadow-lg p-6 w-96">
@@ -818,6 +878,11 @@ async function renderPosInterface(content) {
     // History Logic
     document.getElementById("btn-pos-history").addEventListener("click", openHistoryModal);
     document.getElementById("btn-close-history").addEventListener("click", () => document.getElementById("modal-pos-history").classList.add("hidden"));
+
+    const btnCloseTxDetails = document.getElementById("btn-close-tx-details");
+    if (btnCloseTxDetails) {
+        btnCloseTxDetails.addEventListener("click", () => document.getElementById("modal-pos-tx-details").classList.add("hidden"));
+    }
 
     // Customer Search Logic
     const custInput = document.getElementById("pos-customer-search");
@@ -2510,6 +2575,7 @@ async function openHistoryModal() {
                 <td class="p-2 text-xs">${tx.customer_name}</td>
                 <td class="p-2 text-right font-bold">₱${tx.total_amount.toFixed(2)}</td>
                 <td class="p-2 text-center flex justify-center gap-2">
+                    <button class="bg-blue-100 text-blue-700 hover:bg-blue-200 px-2 py-1 rounded text-xs font-bold btn-view-tx" data-id="${tx.id}">View</button>
                     <button class="bg-gray-100 text-gray-700 hover:bg-gray-200 px-2 py-1 rounded text-xs font-bold btn-print-tx" data-id="${tx.id}">Print</button>
                     ${tx.is_voided
                 ? '<span class="text-red-600 font-bold text-xs uppercase">Voided</span>'
@@ -2528,9 +2594,37 @@ async function openHistoryModal() {
                 if (tx) await printReceipt(tx, true);
             });
         });
+        tbody.querySelectorAll(".btn-view-tx").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const tx = txs.find(t => t.id === btn.dataset.id);
+                if (tx) viewTransactionDetails(tx);
+            });
+        });
     } catch (error) {
         tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-red-500">Error loading history.</td></tr>`;
     }
+}
+
+function viewTransactionDetails(tx) {
+    document.getElementById("tx-details-header-info").textContent = `${new Date(tx.timestamp).toLocaleString()} | ID: ${tx.id.substring(0, 8)}...`;
+
+    document.getElementById("tx-details-items-body").innerHTML = tx.items.map(item => `
+        <tr class="border-b hover:bg-gray-50">
+            <td class="py-2 px-3 font-medium text-gray-800">${item.name}</td>
+            <td class="py-2 px-3 text-center">${item.qty} ${item.unit || 'pcs'}</td>
+            <td class="py-2 px-3 text-right">₱${item.price.toFixed(2)}</td>
+            <td class="py-2 px-3 text-right font-bold">₱${(item.price * item.qty).toFixed(2)}</td>
+        </tr>
+    `).join('');
+
+    // Totals
+    document.getElementById("tx-details-subtotal").textContent = `₱${tx.subtotal.toFixed(2)}`;
+    document.getElementById("tx-details-discount").textContent = `-₱${(tx.discount_amount || 0).toFixed(2)}`;
+    document.getElementById("tx-details-total").textContent = `₱${tx.total_amount.toFixed(2)}`;
+    document.getElementById("tx-details-tendered").textContent = `₱${tx.amount_tendered.toFixed(2)}`;
+    document.getElementById("tx-details-change").textContent = `₱${tx.change.toFixed(2)}`;
+
+    document.getElementById("modal-pos-tx-details").classList.remove("hidden");
 }
 
 async function voidTransaction(id) {

@@ -364,7 +364,7 @@ async function handleSaveCustomer(e) {
     await Repository.upsert('customers', customerData);
 
     // 2. Trigger Sync
-    SyncEngine.sync();
+    await SyncEngine.sync();
 
     document.getElementById("modal-add-customer").classList.add("hidden");
     fetchCustomers();

@@ -1230,7 +1230,7 @@ async function handleSave(e) {
         });
 
         // Trigger background sync
-        SyncEngine.sync();
+        await SyncEngine.sync();
 
         alert("Settings saved.");
         renderHeader(); // Refresh title bar
@@ -2422,12 +2422,13 @@ async function handleAddDiscountCode() {
         id: generateUUID(),
         sync_status: 'pending',
         _version: 1,
-        _updatedAt: new Date().toISOString(),
+        _updatedAt: Date.now(),
         _deleted: 0
     };
 
     try {
         await Repository.upsert('discount_codes', newDiscount);
+        await SyncEngine.sync();
 
         // Reset Inputs
         codeInput.value = '';
@@ -2450,6 +2451,7 @@ async function handleDeleteDiscountCode(e) {
 
         try {
             await Repository.remove('discount_codes', id);
+            await SyncEngine.sync();
             loadDiscountCodes();
         } catch (err) {
             console.error("Failed to delete", err);
