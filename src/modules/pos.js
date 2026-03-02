@@ -2618,11 +2618,12 @@ function viewTransactionDetails(tx) {
     `).join('');
 
     // Totals
-    document.getElementById("tx-details-subtotal").textContent = `₱${tx.subtotal.toFixed(2)}`;
+    const subtotal = tx.subtotal !== undefined ? tx.subtotal : (tx.total_amount + (tx.discount_amount || 0));
+    document.getElementById("tx-details-subtotal").textContent = `₱${subtotal.toFixed(2)}`;
     document.getElementById("tx-details-discount").textContent = `-₱${(tx.discount_amount || 0).toFixed(2)}`;
-    document.getElementById("tx-details-total").textContent = `₱${tx.total_amount.toFixed(2)}`;
-    document.getElementById("tx-details-tendered").textContent = `₱${tx.amount_tendered.toFixed(2)}`;
-    document.getElementById("tx-details-change").textContent = `₱${tx.change.toFixed(2)}`;
+    document.getElementById("tx-details-total").textContent = `₱${(tx.total_amount || 0).toFixed(2)}`;
+    document.getElementById("tx-details-tendered").textContent = `₱${(tx.amount_tendered || 0).toFixed(2)}`;
+    document.getElementById("tx-details-change").textContent = `₱${(tx.change || 0).toFixed(2)}`;
 
     document.getElementById("modal-pos-tx-details").classList.remove("hidden");
 }
