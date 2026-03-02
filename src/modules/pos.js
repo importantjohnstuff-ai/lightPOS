@@ -2612,8 +2612,8 @@ function viewTransactionDetails(tx) {
         <tr class="border-b hover:bg-gray-50">
             <td class="py-2 px-3 font-medium text-gray-800">${item.name}</td>
             <td class="py-2 px-3 text-center">${item.qty} ${item.unit || 'pcs'}</td>
-            <td class="py-2 px-3 text-right">₱${item.price.toFixed(2)}</td>
-            <td class="py-2 px-3 text-right font-bold">₱${(item.price * item.qty).toFixed(2)}</td>
+            <td class="py-2 px-3 text-right">₱${(item.selling_price || item.price || 0).toFixed(2)}</td>
+            <td class="py-2 px-3 text-right font-bold">₱${((item.selling_price || item.price || 0) * item.qty).toFixed(2)}</td>
         </tr>
     `).join('');
 
