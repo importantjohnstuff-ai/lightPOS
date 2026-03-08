@@ -2578,6 +2578,10 @@ let currentHistoryPage = 1;
 let historyDateFilter = getLocalDateString(new Date());
 
 async function openHistoryModal(page = 1) {
+    // If called directly from an event listener, 'page' might be a PointerEvent
+    if (typeof page !== 'number') {
+        page = 1;
+    }
     currentHistoryPage = page;
     const modal = document.getElementById("modal-pos-history");
     const tbody = document.getElementById("pos-history-body");
