@@ -2,6 +2,7 @@ import { checkPermission } from "../auth.js";
 import { generateUUID } from "../utils.js";
 import { dbRepository as Repository } from "../db.js";
 import { SyncEngine } from "../services/SyncEngine.js";
+import { showToast } from "../utils.js";
 
 let suppliersList = [];
 
@@ -129,6 +130,15 @@ export async function loadExpensesView() {
                             <input type="text" id="exp-invoice-no" class="w-full border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="e.g. 00123">
                         </div>
                     </div>
+
+                    <div class="mb-6 border border-red-200 bg-red-50 p-4 rounded-lg">
+                        <label class="block text-red-700 text-xs font-bold uppercase mb-1">Has this been Stocked In?</label>
+                        <select id="exp-stocked-in" class="w-full border border-red-300 rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-red-500 outline-none bg-white">
+                            <option value="No">No</option>
+                            <option value="Yes">Yes</option>
+                        </select>
+                        <p class="text-[10px] text-red-500 mt-1 font-medium">Expenses must be stocked in before recording.</p>
+                    </div>
                     
                     <div class="flex items-center gap-2 pt-2">
                         <button type="button" id="btn-cancel-expense" class="w-1/3 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-2 rounded-lg transition duration-150">Cancel</button>
@@ -155,6 +165,24 @@ export async function loadExpensesView() {
             document.getElementById("exp-id").value = "";
             document.getElementById("form-add-expense").reset();
             document.getElementById("exp-date").value = today;
+            document.getElementById("exp-stocked-in").value = "No";
+
+            const pendingDataStr = localStorage.getItem('pending_expense');
+            if (pendingDataStr) {
+                try {
+                    const pendingData = JSON.parse(pendingDataStr);
+                    document.getElementById("exp-desc").value = pendingData.description || "";
+                    document.getElementById("exp-amount").value = pendingData.amount || "";
+                    document.getElementById("exp-category").value = pendingData.category || "Procurement";
+                    setTimeout(() => {
+                        document.getElementById("exp-supplier").value = pendingData.supplier_id || "";
+                    }, 100);
+                    document.getElementById("exp-invoice-no").value = pendingData.invoice_number || "";
+                    document.getElementById("exp-date").value = pendingData.date || today;
+                    localStorage.removeItem('pending_expense');
+                } catch (e) { }
+            }
+
             modal.classList.remove("hidden");
         });
     }
@@ -221,6 +249,24 @@ async function saveExpense() {
     const supplierId = document.getElementById("exp-supplier").value;
     const invoiceNo = document.getElementById("exp-invoice-no").value;
     const dateVal = document.getElementById("exp-date").value;
+    const stockedIn = document.getElementById("exp-stocked-in").value;
+
+    if (stockedIn === "No") {
+        const pendingData = {
+            description: desc,
+            amount: amount,
+            category: category,
+            supplier_id: supplierId,
+            invoice_number: invoiceNo,
+            date: dateVal
+        };
+        localStorage.setItem('pending_expense', JSON.stringify(pendingData));
+
+        document.getElementById("modal-add-expense").classList.add("hidden");
+        window.location.hash = "#stockin";
+        setTimeout(() => showToast("Please Stock In all Expenses", "error"), 500);
+        return;
+    }
 
     const supplierName = supplierId ? suppliersList.find(s => s.id === supplierId)?.name : null;
     const user = JSON.parse(localStorage.getItem('pos_user'))?.email || "Unknown";
@@ -342,6 +388,7 @@ async function fetchExpenses() {
                 document.getElementById("exp-supplier").value = data.supplier_id || "";
                 document.getElementById("exp-invoice-no").value = data.invoice_number || "";
                 document.getElementById("exp-date").value = data.date;
+                document.getElementById("exp-stocked-in").value = "Yes";
                 document.getElementById("modal-add-expense").classList.remove("hidden");
             });
 
