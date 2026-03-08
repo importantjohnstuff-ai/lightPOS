@@ -2566,8 +2566,16 @@ async function processTransaction() {
         btnConfirm.textContent = originalText;
     }
 }
+function getLocalDateString(date) {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
 let currentHistoryPage = 1;
-let historyDateFilter = new Date().toISOString().split('T')[0];
+let historyDateFilter = getLocalDateString(new Date());
 
 async function openHistoryModal(page = 1) {
     currentHistoryPage = page;
@@ -2604,17 +2612,18 @@ async function openHistoryModal(page = 1) {
     try {
         let filteredTxs = await Repository.getAll('transactions');
 
-        // Apply Date Filter FIRST to catch all transactions for the day
+        // Apply Date FilterFIRST (iterating backward avoids needing to full-sort first)
         if (historyDateFilter) {
-            const filterDate = new Date(historyDateFilter).toISOString().split('T')[0];
+            const filterDate = historyDateFilter; // e.g., "2026-03-08"
             filteredTxs = filteredTxs.filter(tx => {
-                const txDate = new Date(tx.timestamp).toISOString().split('T')[0];
+                const txDate = getLocalDateString(tx.timestamp);
                 return txDate === filterDate;
             });
         }
 
-        // Sort by most recent
-        filteredTxs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        // Since Dexie/IndexedDB generally returns records in insertion order (by ID),
+        // we can just reverse the filtered array instead of doing an expensive Date sort.
+        filteredTxs.reverse();
 
         // Pagination Logic (50 per page as requested)
         const itemsPerPage = 50;
@@ -2626,6 +2635,8 @@ async function openHistoryModal(page = 1) {
 
         const startIndex = (currentHistoryPage - 1) * itemsPerPage;
         const endIndex = startIndex + itemsPerPage;
+
+        // Only slice out the 50 items we need
         const paginatedTxs = filteredTxs.slice(startIndex, endIndex);
 
         // Update Pagination UI
