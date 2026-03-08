@@ -1094,10 +1094,6 @@ async function renderShiftDetail(shiftId) {
                     <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
                     Back to List
                 </button>
-                <button id="btn-view-shift-txs" class="flex items-center text-blue-600 hover:text-blue-800 transition font-medium px-3 py-1 rounded bg-blue-50 hover:bg-blue-100 border border-blue-200">
-                    <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg>
-                    View Transactions
-                </button>
             </div>
             <div class="text-right">
                 <div class="text-sm text-gray-500">Shift ID: <span class="font-mono text-xs">${fullShift.id.slice(0, 8)}...</span></div>
@@ -1105,57 +1101,65 @@ async function renderShiftDetail(shiftId) {
             </div>
         </div>
         
-        <!-- High Level Stats -->
-        <div class="grid grid-cols-4 gap-4 p-4 text-center text-sm border-b border-gray-100">
-             <div class="bg-blue-50 p-2 rounded border border-blue-100">
-                <div class="text-xs text-gray-500 uppercase">Opening</div>
-                <div class="font-bold text-blue-800">₱${(fullShift.opening_cash || 0).toFixed(2)}</div>
-             </div>
-             <div class="bg-gray-50 p-2 rounded border border-gray-200 relative group">
-                <div class="text-xs text-gray-500 uppercase">Expected</div>
-                <div class="font-bold text-gray-800">₱${(expectedInDrawer).toFixed(2)}</div>
-                <!-- Tooltip for Breakdown -->
-                <div class="absolute left-1/2 -translate-x-1/2 top-full mt-2 w-48 bg-gray-800 text-white text-xs rounded p-2 hidden group-hover:block z-20 shadow-lg text-left">
-                    <div>Op: ₱${(parseFloat(fullShift.opening_cash) || 0).toFixed(2)}</div>
-                    <div>+ Sales: ₱${calcSales.toFixed(2)}</div>
-                    <div>${calcExchange >= 0 ? '+' : '-'} Exch: ₱${Math.abs(calcExchange).toFixed(2)}</div>
-                    <div>${netAdjustments >= 0 ? '+' : '-'} Adj: ₱${Math.abs(netAdjustments).toFixed(2)}</div>
-                    <div>- Remit: ₱${totalRemittances.toFixed(2)}</div>
-                    <div>- Exp: ₱${totalExpenses.toFixed(2)}</div>
-                    <div class="border-t mt-1 pt-1 font-bold">= Drawer: ₱${expectedInDrawer.toFixed(2)}</div>
-                </div>
-             </div>
-             <div class="bg-gray-50 p-2 rounded border border-gray-200">
-                <div class="text-xs text-gray-500 uppercase">Closing</div>
-                <div class="font-bold text-gray-800">₱${(parseFloat(fullShift.closing_cash) || 0).toFixed(2)}</div>
-             </div>
-             <div class="${((fullShift.closing_cash + totalRemittances + totalExpenses - grossAccountability) < 0 ? 'bg-red-50 border-red-100 text-red-800' : 'bg-green-50 border-green-100 text-green-800')} p-2 rounded border">
-                <div class="text-xs opacity-75 uppercase">Variance</div>
-                <div class="font-bold">₱${((parseFloat(fullShift.closing_cash || 0) + totalRemittances + totalExpenses) - grossAccountability).toFixed(2)}</div>
-             </div>
+        <div class="mb-6">
+            <div class="text-sm text-gray-500">Start Time</div>
+            <div class="font-medium text-gray-800">${new Date(fullShift.start_time).toLocaleString()}</div>
+            <div class="text-sm text-gray-500 mt-2">End Time</div>
+            <div class="font-medium text-gray-800">${fullShift.end_time ? new Date(fullShift.end_time).toLocaleString() : 'Active'}</div>
         </div>
 
-        <!-- Detailed Reconciliation Bar -->
-        <div class="grid grid-cols-3 gap-2 px-4 pb-4 text-center text-xs text-gray-600">
-             <div class="flex items-center justify-center gap-2 bg-gray-50 rounded py-1 px-2 border border-gray-100 cursor-help" title="Based on ${txs.filter(t => t.payment_method === 'Cash').length} Cash Transactions">
-                <span>Total Cash Sales:</span>
-                <span class="font-bold text-gray-800">₱${calcSales.toFixed(2)}</span>
-             </div>
-             <div class="flex items-center justify-center gap-2 bg-gray-50 rounded py-1 px-2 border border-gray-100">
-                <span>Net Returns/Exch:</span>
-                <span class="font-bold ${calcExchange < 0 ? 'text-red-500' : 'text-green-600'}">₱${calcExchange.toFixed(2)}</span>
-             </div>
-             <div class="flex items-center justify-center gap-2 bg-gray-50 rounded py-1 px-2 border border-gray-100">
-                <span>Net Adjustments:</span>
-                <span class="font-bold ${netAdjustments < 0 ? 'text-red-500' : 'text-green-600'}">₱${netAdjustments.toFixed(2)}</span>
-             </div>
+        <div class="overflow-x-auto mb-6">
+            <table class="w-full text-sm border-collapse border border-gray-200">
+                <tbody>
+                    <tr class="bg-gray-50 border-b">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2">Opening Cash</td>
+                        <td class="border p-2 text-right font-bold text-gray-800">₱${(parseFloat(fullShift.opening_cash) || 0).toFixed(2)}</td>
+                    </tr>
+                    <tr class="bg-white border-b hover:bg-blue-50 cursor-pointer transition-colors" id="row-report-cash-count">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2 flex items-center justify-between">
+                            <span>Cash Count</span>
+                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                        </td>
+                        <td class="border p-2 text-right font-bold text-blue-600">₱${(parseFloat(fullShift.closing_cash) || 0).toFixed(2)}</td>
+                    </tr>
+                    <tr class="bg-gray-50 border-b hover:bg-blue-50 cursor-pointer transition-colors" id="row-report-precounted">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2 flex items-center justify-between">
+                            <span>Precounted Money</span>
+                             <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                        </td>
+                        <td class="border p-2 text-right font-bold text-gray-800">₱${((parseFloat(fullShift.precounted_bills) || 0) + (parseFloat(fullShift.precounted_coins) || 0)).toFixed(2)}</td>
+                    </tr>
+                    <tr class="bg-white border-b">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2">Cashout</td>
+                        <td class="border p-2 text-right font-bold text-purple-600">₱${totalRemittances.toFixed(2)}</td>
+                    </tr>
+                    <tr class="bg-gray-50 border-b">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2">Expenses</td>
+                        <td class="border p-2 text-right font-bold text-red-600">₱${totalExpenses.toFixed(2)}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="mb-6 p-4 ${(((parseFloat(fullShift.closing_cash) || 0) + totalRemittances + totalExpenses) - grossAccountability) < 0 ? "text-red-600 bg-red-50" : "text-gray-600 bg-gray-50"} rounded border border-opacity-20 flex justify-between items-center">
+            <span class="font-bold text-sm uppercase">Variance</span>
+            <span class="text-2xl font-bold">₱${(((parseFloat(fullShift.closing_cash) || 0) + totalRemittances + totalExpenses) - grossAccountability).toFixed(2)}</span>
         </div>
     `;
 
-    // Detail Body (Adjustments & Remittances)
-    contentContainer.innerHTML = `
-        <div class="space-y-6">
-            <!-- Adjustments -->
+    <div class="flex flex-col gap-3 mb-6">
+        <h4 class="font-bold text-gray-700 border-b pb-2 mb-2">Actions</h4>
+        <div class="grid grid-cols-2 gap-3">
+            <button id="btn-detail-transactions" class="bg-teal-50 text-teal-700 hover:bg-teal-100 border border-teal-200 py-2 rounded font-bold text-sm transition">Transactions</button>
+            <button id="btn-detail-history" class="bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200 py-2 rounded font-bold text-sm transition">View Adjustments & Remittances</button>
+        </div>
+    </div>
+    `;
+
+    // Detail Body (Adjustments & Remittances) -> Hidden initially just like Shifts
+    contentContainer.innerHTML += `
+        <div id = "report-shift-details-history" class="hidden space-y-6">
+            <!--Adjustments -->
             <div class="border rounded-lg overflow-hidden">
                 <div class="bg-gray-100 px-4 py-2 font-bold text-sm text-gray-700">Cash Adjustments</div>
                 ${adjustments.length === 0 ? '<div class="p-4 text-center text-gray-500 text-sm">No adjustments.</div>' : `
@@ -1182,7 +1186,7 @@ async function renderShiftDetail(shiftId) {
                 `}
             </div>
 
-            <!-- Remittances -->
+            <!--Remittances -->
              <div class="border rounded-lg overflow-hidden">
                 <div class="bg-gray-100 px-4 py-2 font-bold text-sm text-gray-700">Remittances (Cash Out)</div>
                 ${remittances.length === 0 ? '<div class="p-4 text-center text-gray-500 text-sm">No remittances.</div>' : `
@@ -1209,8 +1213,9 @@ async function renderShiftDetail(shiftId) {
                 `}
             </div>
             
-            <!-- Receipts/Expenses Scan if any -->
-             ${(fullShift.closing_receipts && fullShift.closing_receipts.length > 0) ? `
+            <!--Receipts / Expenses Scan if any-- >
+        ${
+            (fullShift.closing_receipts && fullShift.closing_receipts.length > 0) ? `
              <div class="border rounded-lg overflow-hidden">
                 <div class="bg-gray-100 px-4 py-2 font-bold text-sm text-gray-700">Closing Expenses</div>
                 <table class="min-w-full text-sm">
@@ -1224,17 +1229,87 @@ async function renderShiftDetail(shiftId) {
                     </tbody>
                 </table>
              </div>
-             ` : ''}
+             ` : ''
+    }
 
         </div>
-    `;
+        `;
 
     document.getElementById("btn-back-shifts").addEventListener("click", () => {
         renderShiftReports(lastShiftData);
     });
-    document.getElementById("btn-view-shift-txs").addEventListener("click", () => {
-        showShiftTransactions(fullShift);
+    document.getElementById("btn-detail-transactions")?.addEventListener("click", () => showShiftTransactions(fullShift));
+    document.getElementById("btn-detail-history")?.addEventListener("click", () => {
+        const historyDiv = document.getElementById("report-shift-details-history");
+        historyDiv.classList.toggle("hidden");
     });
+    document.getElementById("row-report-cash-count")?.addEventListener("click", () => showReportCashBreakdownModal(fullShift));
+    document.getElementById("row-report-precounted")?.addEventListener("click", () => showReportPrecountedModal(fullShift));
+}
+
+function showReportCashBreakdownModal(shift) {
+    const breakdown = shift.cash_breakdown || {};
+    const hasData = Object.keys(breakdown).length > 0;
+
+    const div = document.createElement("div");
+    div.className = "fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-[70]";
+
+    const denoms = Object.keys(breakdown).sort((a, b) => parseFloat(b) - parseFloat(a));
+
+    const rows = denoms.map(denom => `
+        <div class="flex justify-between border-b py-2 last:border-0">
+            <div class="font-bold text-gray-700">₱${denom}</div>
+            <div class="text-gray-900 mx-2">x ${breakdown[denom]}</div>
+            <div class="font-bold text-gray-900">₱${(parseFloat(denom) * breakdown[denom]).toLocaleString()}</div>
+        </div>
+        `).join("");
+
+    div.innerHTML = `
+        <div class="bg-white rounded-lg shadow-xl p-6 w-96 max-w-full">
+            <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                Cash Count Details
+            </h3>
+            <div class="mb-4 text-sm bg-gray-50 rounded p-3">
+                ${hasData ? rows : '<div class="text-center text-gray-500 italic">No breakdown details available.</div>'}
+            </div>
+            <div class="flex justify-end pt-2 border-t">
+                 <div class="flex-1 text-left font-bold text-lg text-blue-800 self-center">Total: ₱${(shift.closing_cash || 0).toLocaleString()}</div>
+                 <button class="bg-gray-800 text-white px-4 py-2 rounded font-bold hover:bg-gray-700 transition" onclick="this.closest('.fixed').remove()">Close</button>
+            </div>
+        </div>
+        `;
+    document.body.appendChild(div);
+}
+
+function showReportPrecountedModal(shift) {
+    const bills = parseFloat(shift.precounted_bills) || 0;
+    const coins = parseFloat(shift.precounted_coins) || 0;
+
+    const div = document.createElement("div");
+    div.className = "fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-[70]";
+    div.innerHTML = `
+        <div class="bg-white rounded-lg shadow-xl p-6 w-80 max-w-full">
+            <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                <svg class="w-6 h-6 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                Precounted Money
+            </h3>
+            <div class="space-y-3 mb-6">
+                <div class="flex justify-between items-center p-3 bg-green-50 rounded border border-green-100">
+                    <span class="text-sm font-bold text-gray-600 uppercase">Bills</span>
+                    <span class="text-xl font-bold text-green-700">₱${bills.toLocaleString()}</span>
+                </div>
+                <div class="flex justify-between items-center p-3 bg-yellow-50 rounded border border-yellow-100">
+                    <span class="text-sm font-bold text-gray-600 uppercase">Coins</span>
+                    <span class="text-xl font-bold text-yellow-700">₱${coins.toLocaleString()}</span>
+                </div>
+            </div>
+            <div class="flex justify-end">
+                 <button class="bg-gray-800 text-white px-4 py-2 rounded font-bold hover:bg-gray-700 transition w-full" onclick="this.closest('.fixed').remove()">Close</button>
+            </div>
+        </div>
+        `;
+    document.body.appendChild(div);
 }
 
 // --- Drill Down Views ---
@@ -1273,12 +1348,12 @@ async function showShiftTransactions(shift) {
                 <div class="font-bold text-gray-800">${userTxs.length} Transactions</div>
             </div>
         </div>
-    `;
+        `;
 
     document.getElementById("btn-back-shift-detail").addEventListener("click", () => renderShiftDetail(shift.id));
 
     if (userTxs.length === 0) {
-        contentContainer.innerHTML = `<div class="p-10 text-center text-gray-500">No transactions found for this shift.</div>`;
+        contentContainer.innerHTML = `<div class="p-10 text-center text-gray-500"> No transactions found for this shift.</div> `;
         return;
     }
 
@@ -1291,7 +1366,7 @@ async function showShiftTransactions(shift) {
                         <th class="py-2 px-4 text-left text-xs font-semibold text-gray-600 uppercase">Type</th>
                         <th class="py-2 px-4 text-center text-xs font-semibold text-gray-600 uppercase">Method</th>
                         <th class="py-2 px-4 text-right text-xs font-semibold text-gray-600 uppercase">Total</th>
-                         <th class="py-2 px-4 text-right text-xs font-semibold text-gray-600 uppercase"></th>
+                        <th class="py-2 px-4 text-right text-xs font-semibold text-gray-600 uppercase"></th>
                     </tr>
                 </thead>
                 <tbody class="text-sm divide-y divide-gray-100">
@@ -1309,7 +1384,7 @@ async function showShiftTransactions(shift) {
                 </tbody>
             </table>
         </div>
-    `;
+        `;
 
     contentContainer.querySelectorAll('.tx-row').forEach(row => {
         row.addEventListener('click', () => {
@@ -1335,7 +1410,7 @@ function showTransactionDetails(tx, shift) {
                 <div class="font-mono text-sm font-bold text-gray-800">#${tx.id}</div>
             </div>
         </div>
-    `;
+        `;
 
     document.getElementById("btn-back-tx-list").addEventListener("click", () => showShiftTransactions(shift));
 
@@ -1394,7 +1469,7 @@ function showTransactionDetails(tx, shift) {
                 </tfoot>
             </table>
         </div>
-    `;
+        `;
 }
 
 function renderStockMovement(movements) {
@@ -1406,7 +1481,7 @@ function renderStockMovement(movements) {
     contentContainer.innerHTML = "";
 
     if (!movements || movements.length === 0) {
-        contentContainer.innerHTML = `<div class="p-10 text-center text-gray-500">No movements found for this period.</div>`;
+        contentContainer.innerHTML = `<div class="p-10 text-center text-gray-500"> No movements found for this period.</div> `;
         return;
     }
 
@@ -1434,9 +1509,9 @@ function renderStockMovement(movements) {
                             <td class="py-2 px-4 text-gray-900 whitespace-nowrap">${new Date(m.timestamp).toLocaleString()}</td>
                              <td class="py-2 px-4">
                                 <span class="px-2 py-1 rounded text-xs font-bold ${m.type === 'Sale' ? 'bg-green-100 text-green-800' :
-            m.type === 'Return' ? 'bg-yellow-100 text-yellow-800' :
-                m.type === 'Shrinkage' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
-        }">${m.type}</span>
+                            m.type === 'Return' ? 'bg-yellow-100 text-yellow-800' :
+                                m.type === 'Shrinkage' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
+                        }">${m.type}</span>
                             </td>
                             <td class="py-2 px-4 text-gray-700">${m.item_name || 'Unkown'} <span class="text-xs text-gray-400">(${m.item_id || '-'})</span></td>
                             <td class="py-2 px-4 text-right ${m.qty < 0 ? 'text-red-600' : 'text-green-600'} font-bold">${m.qty}</td>
@@ -1447,7 +1522,7 @@ function renderStockMovement(movements) {
                 </tbody>
             </table>
         </div>
-    `;
+        `;
 }
 
 function closeReportModal() {
@@ -1496,7 +1571,7 @@ function renderInventoryValuation(items, suppliers = []) {
 
     // Render Layout
     content.innerHTML = `
-        <!-- Chart Section -->
+        <!--Chart Section-- >
         <div class="bg-white border rounded-lg shadow-sm p-4 mb-6">
             <div class="flex flex-col sm:flex-row justify-between items-center mb-4">
                 <h4 class="font-bold text-gray-800 flex items-center gap-2">
@@ -1520,7 +1595,7 @@ function renderInventoryValuation(items, suppliers = []) {
             </div>
         </div>
 
-        <!-- Controls -->
+        <!--Controls -->
         <div class="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
              <div class="relative w-full sm:w-auto">
                 <span class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -1601,12 +1676,12 @@ function renderInventoryValuation(items, suppliers = []) {
 
         // This is a bit manual, but robust enough
         if (key === 'chartGroupBy') {
-            document.getElementById('iv-chart-grp-cat').className = `px-3 py-1 rounded-md font-medium transition-colors ${val === 'category' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`;
-            document.getElementById('iv-chart-grp-sup').className = `px-3 py-1 rounded-md font-medium transition-colors ${val === 'supplier' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`;
+            document.getElementById('iv-chart-grp-cat').className = `px - 3 py - 1 rounded - md font - medium transition - colors ${ val === 'category' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900' } `;
+            document.getElementById('iv-chart-grp-sup').className = `px - 3 py - 1 rounded - md font - medium transition - colors ${ val === 'supplier' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900' } `;
         }
         if (key === 'chartMetric') {
-            document.getElementById('iv-chart-met-qty').className = `px-3 py-1 rounded-md font-medium transition-colors ${val === 'qty' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`;
-            document.getElementById('iv-chart-met-val').className = `px-3 py-1 rounded-md font-medium transition-colors ${val === 'value' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`;
+            document.getElementById('iv-chart-met-qty').className = `px - 3 py - 1 rounded - md font - medium transition - colors ${ val === 'qty' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900' } `;
+            document.getElementById('iv-chart-met-val').className = `px - 3 py - 1 rounded - md font - medium transition - colors ${ val === 'value' ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900' } `;
         }
         renderInvValChart();
     };
@@ -1749,7 +1824,7 @@ function renderInvValMetrics() {
                 <div class="text-3xl font-bold text-yellow-800 mt-1">${lowStockItems}</div>
             </div>
         </div>
-    `;
+        `;
 }
 
 function getFilteredInvValItems() {
@@ -1805,10 +1880,10 @@ function renderInvValRows() {
     });
 
     // Update Count
-    document.getElementById("inv-val-count").textContent = `Showing ${filtered.length} items`;
+    document.getElementById("inv-val-count").textContent = `Showing ${ filtered.length } items`;
 
     if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-4 text-center text-gray-500">No items found matching criteria.</td></tr>`;
+        tbody.innerHTML = `< tr > <td colspan="4" class="px-6 py-4 text-center text-gray-500">No items found matching criteria.</td></tr > `;
         return;
     }
 
@@ -1816,7 +1891,7 @@ function renderInvValRows() {
     const displayItems = filtered.slice(0, limit);
 
     tbody.innerHTML = displayItems.map(item => `
-        <tr class="hover:bg-gray-50">
+        < tr class="hover:bg-gray-50">
             <td class="px-6 py-4 whitespace-nowrap">
                 <div class="text-sm font-medium text-gray-900">${item.name}</div>
                 <div class="text-xs text-gray-500">${item.barcode || '-'}</div>
@@ -1830,8 +1905,8 @@ function renderInvValRows() {
             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-gray-900 font-mono">
                 ₱${(item.subtotal || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </td>
-        </tr>
-    `).join('') + (filtered.length > limit ? `<tr><td colspan="4" class="text-center py-2 text-xs text-gray-500">...and ${filtered.length - limit} more items (export to see all)</td></tr>` : '');
+        </tr >
+        `).join('') + (filtered.length > limit ? ` < tr > <td colspan="4" class="text-center py-2 text-xs text-gray-500">...and ${filtered.length - limit} more items (export to see all)</td></tr > ` : '');
 }
 
 function exportInvValCSV() {
@@ -1843,26 +1918,27 @@ function exportInvValCSV() {
 
     const headers = ["Item Name", "Barcode", "Category", "Supplier ID", "Quantity", "Unit Cost", "Subtotal Value"];
     const rows = items.map(i => [
-        `"${(i.name || '').replace(/"/g, '""')}"`, // Escape quotes
-        `"${(i.barcode || '')}"`,
-        `"${(i.category || '')}"`,
-        `"${(i.supplier_id || '')}"`,
-        i.stock_level,
-        (i.cost_price || 0).toFixed(2),
-        (i.subtotal || 0).toFixed(2)
+        `"${(i.name || '').replace(/" / g, '""')
+} "`, // Escape quotes
+    `"${(i.barcode || '')}"`,
+    `"${(i.category || '')}"`,
+    `"${(i.supplier_id || '')}"`,
+    i.stock_level,
+    (i.cost_price || 0).toFixed(2),
+    (i.subtotal || 0).toFixed(2)
     ]);
 
-    const csvContent = [
-        headers.join(","),
-        ...rows.map(r => r.join(","))
-    ].join("\n");
+const csvContent = [
+    headers.join(","),
+    ...rows.map(r => r.join(","))
+].join("\n");
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `inventory_valuation_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+const url = URL.createObjectURL(blob);
+const link = document.createElement("a");
+link.setAttribute("href", url);
+link.setAttribute("download", `inventory_valuation_${new Date().toISOString().split('T')[0]}.csv`);
+document.body.appendChild(link);
+link.click();
+document.body.removeChild(link);
 }

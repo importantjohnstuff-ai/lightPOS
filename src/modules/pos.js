@@ -2567,7 +2567,7 @@ async function processTransaction() {
     }
 }
 let currentHistoryPage = 1;
-let historyDateFilter = "";
+let historyDateFilter = new Date().toISOString().split('T')[0];
 
 async function openHistoryModal(page = 1) {
     currentHistoryPage = page;
@@ -2577,6 +2577,7 @@ async function openHistoryModal(page = 1) {
 
     // Bind date filter events if not already bound
     if (!dateInput.dataset.bound) {
+        dateInput.value = historyDateFilter;
         dateInput.addEventListener("change", (e) => {
             historyDateFilter = e.target.value;
             openHistoryModal(1);
