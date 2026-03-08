@@ -2602,10 +2602,9 @@ async function openHistoryModal(page = 1) {
     tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center">Loading...</td></tr>`;
 
     try {
-        const allTxs = await Repository.getAll('transactions');
-        let filteredTxs = allTxs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        let filteredTxs = await Repository.getAll('transactions');
 
-        // Apply Date Filter
+        // Apply Date Filter FIRST to catch all transactions for the day
         if (historyDateFilter) {
             const filterDate = new Date(historyDateFilter).toISOString().split('T')[0];
             filteredTxs = filteredTxs.filter(tx => {
@@ -2614,27 +2613,31 @@ async function openHistoryModal(page = 1) {
             });
         }
 
-        // Cap to the most recent 50 transactions *after* filtering
-        const recent50 = filteredTxs.slice(0, 50);
+        // Sort by most recent
+        filteredTxs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-        // Pagination Logic (10 per page)
-        const itemsPerPage = 10;
-        const totalItems = recent50.length;
+        // Pagination Logic (50 per page as requested)
+        const itemsPerPage = 50;
+        const totalItems = filteredTxs.length;
         const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
 
         // Ensure current page is valid
         if (currentHistoryPage > totalPages) currentHistoryPage = totalPages;
 
         const startIndex = (currentHistoryPage - 1) * itemsPerPage;
-        const paginatedTxs = recent50.slice(startIndex, startIndex + itemsPerPage);
+        const endIndex = startIndex + itemsPerPage;
+        const paginatedTxs = filteredTxs.slice(startIndex, endIndex);
 
         // Update Pagination UI
-        document.getElementById("pos-history-page-info").textContent = `Page ${currentHistoryPage} of ${totalPages} (Total: ${totalItems})`;
+        const showingStart = totalItems === 0 ? 0 : startIndex + 1;
+        const showingEnd = Math.min(endIndex, totalItems);
+        document.getElementById("pos-history-page-info").textContent = `Showing ${showingStart}-${showingEnd} of ${totalItems} (Page ${currentHistoryPage}/${totalPages})`;
+
         document.getElementById("btn-history-prev").disabled = currentHistoryPage <= 1;
         document.getElementById("btn-history-next").disabled = currentHistoryPage >= totalPages;
 
         if (paginatedTxs.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500 italic">No transactions found.</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500 italic">No transactions found for ${historyDateFilter || 'any date'}.</td></tr>`;
             return;
         }
 
