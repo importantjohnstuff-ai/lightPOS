@@ -1362,12 +1362,20 @@ async function showShiftTransactions(shift) {
                 <td class="py-2 px-4 text-right font-bold text-gray-800">₱${entry.total.toFixed(2)}</td>
                 <td class="py-2 px-4 text-center text-xs font-bold uppercase ${statusColor}">${statusText}</td>
                 <td class="py-2 px-4 text-center flex justify-center gap-2">
+                    ${!isExchange ? `<button class="bg-indigo-100 text-indigo-700 hover:bg-indigo-200 px-2 py-1 rounded text-xs font-bold btn-view-tx" data-id="${tx.id}">View</button>` : ''}
                     ${!isExchange ? `<button class="bg-blue-100 text-blue-700 hover:bg-blue-200 px-2 py-1 rounded text-xs font-bold btn-print-tx" data-id="${tx.id}">Print</button>` : ''}
                     ${!entry.is_voided && !isExchange ? `<button class="bg-red-100 text-red-700 hover:bg-red-200 px-2 py-1 rounded text-xs font-bold btn-void-tx" data-id="${tx.id}">Void</button>` : ''}
                 </td>
             </tr>
             `;
         }).join('');
+
+        tbody.querySelectorAll(".btn-view-tx").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const tx = allTxs.find(t => t.id === btn.dataset.id);
+                if (tx) viewShiftTransactionDetails(tx);
+            });
+        });
 
         tbody.querySelectorAll(".btn-print-tx").forEach(btn => {
             btn.addEventListener("click", async () => {
@@ -1408,28 +1416,109 @@ async function voidShiftTransaction(txId, shiftId) {
             ...tx,
             is_voided: true,
             voided_at: new Date().toISOString(),
-            voided_by: user ? user.email : "Manager",
-            void_reason: reason || "Voided from Shift View"
+            voided_by: user ? user.email : "System",
+            void_reason: reason || "No reason provided"
         });
 
+        // 2. Reverse Stock
         for (const item of tx.items) {
             const current = await Repository.get('items', item.id);
             if (current) {
                 await Repository.upsert('items', { ...current, stock_level: current.stock_level + item.qty });
+                await Repository.upsert('stock_movements', {
+                    id: generateUUID(), item_id: item.id, item_name: item.name, timestamp: new Date().toISOString(),
+                    type: 'Void', qty: item.qty, user: user ? user.email : "System", reason: `Void Shift Tx ${txId}`
+                });
             }
         }
 
-        await SyncEngine.sync();
-        await addNotification('Void', `Transaction ${txId} was voided by ${user ? user.email : "Manager"}`);
-        alert("Transaction voided.");
-
-        // Refresh shift details
-        const updatedShift = await Repository.get('shifts', shiftId);
-        selectShift(updatedShift);
+        SyncEngine.sync();
+        alert("Transaction voided successfully.");
     } catch (e) {
-        console.error(e);
-        alert("Error voiding transaction.");
+        console.error("Void Error", e);
+        alert("Failed to void.");
     }
+}
+
+function viewShiftTransactionDetails(tx) {
+    let modal = document.getElementById("modal-shift-tx-details");
+    if (modal) modal.remove();
+
+    const div = document.createElement("div");
+    div.id = "modal-shift-tx-details";
+    div.className = "fixed inset-0 bg-gray-900 bg-opacity-70 flex items-center justify-center z-[60]";
+
+    const itemsHtml = tx.items.map(item => `
+        <tr class="border-b hover:bg-gray-50">
+            <td class="py-2 px-3 font-medium text-gray-800">${item.name}</td>
+            <td class="py-2 px-3 text-center">${item.qty} ${item.unit || 'pcs'}</td>
+            <td class="py-2 px-3 text-right">₱${(item.selling_price || item.price || 0).toFixed(2)}</td>
+            <td class="py-2 px-3 text-right font-bold">₱${((item.selling_price || item.price || 0) * item.qty).toFixed(2)}</td>
+        </tr>
+    `).join('');
+
+    const subtotal = tx.subtotal !== undefined ? tx.subtotal : (tx.total_amount + (tx.discount_amount || 0));
+
+    div.innerHTML = `
+        <div class="bg-white rounded-lg shadow-lg w-full max-w-3xl flex flex-col h-[80vh]">
+            <!-- Header -->
+            <div class="p-4 border-b bg-gray-50 flex justify-between items-center shrink-0 rounded-t-lg">
+                <div>
+                    <h3 class="text-lg font-bold text-gray-800">Transaction Details</h3>
+                    <p class="text-xs text-gray-500 font-mono">${new Date(tx.timestamp).toLocaleString()} | ID: ${tx.id.substring(0, 8)}...</p>
+                </div>
+                <button id="btn-close-shift-tx-details" class="text-gray-500 hover:text-gray-700 text-2xl font-bold">&times;</button>
+            </div>
+            
+            <!-- Content -->
+            <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
+                <table class="min-w-full text-sm border bg-white rounded shadow-sm">
+                    <thead class="bg-gray-100 text-gray-600 text-[10px] uppercase">
+                        <tr>
+                            <th class="py-2 px-3 text-left">Item Name</th>
+                            <th class="py-2 px-3 text-center">Qty</th>
+                            <th class="py-2 px-3 text-right">Unit Price</th>
+                            <th class="py-2 px-3 text-right">Total</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-gray-700 text-xs">
+                        ${itemsHtml}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Footer / Summary -->
+            <div class="p-4 border-t bg-white shrink-0 rounded-b-lg">
+                <div class="flex justify-end">
+                    <div class="w-64 space-y-2 text-sm">
+                        <div class="flex justify-between text-gray-600">
+                            <span>Subtotal:</span>
+                            <span class="font-mono">₱${subtotal.toFixed(2)}</span>
+                        </div>
+                        <div class="flex justify-between text-red-500">
+                            <span>Discount:</span>
+                            <span class="font-mono">-₱${(tx.discount_amount || 0).toFixed(2)}</span>
+                        </div>
+                        <div class="flex justify-between font-bold text-gray-800 text-lg border-t pt-2">
+                            <span>Total:</span>
+                            <span class="font-mono">₱${(tx.total_amount || 0).toFixed(2)}</span>
+                        </div>
+                        <div class="flex justify-between text-gray-600 text-xs pt-2">
+                            <span>Amount Tendered:</span>
+                            <span class="font-mono font-bold">₱${(tx.amount_tendered || 0).toFixed(2)}</span>
+                        </div>
+                        <div class="flex justify-between text-green-600 text-xs font-bold">
+                            <span>Change:</span>
+                            <span class="font-mono">₱${(tx.change || 0).toFixed(2)}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(div);
+    document.getElementById("btn-close-shift-tx-details").addEventListener("click", () => div.remove());
 }
 
 async function printTransaction(tx, isReprint = false) {

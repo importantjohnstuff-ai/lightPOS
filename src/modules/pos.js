@@ -517,23 +517,32 @@ async function renderPosInterface(content) {
 
         <!-- Transaction History Modal -->
         <div id="modal-pos-history" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50">
-            <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-2xl">
-                <div class="flex justify-between items-center mb-4">
+            <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-2xl flex flex-col h-[80vh]">
+                <div class="flex justify-between items-center mb-4 shrink-0 border-b pb-4">
                     <h3 class="text-xl font-bold text-gray-800">Recent Transactions</h3>
-                    <button id="btn-close-history" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+                    <div class="flex gap-2 items-center">
+                        <input type="date" id="history-date-filter" class="border rounded p-1 text-sm bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none">
+                        <button id="btn-clear-history-date" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-1 px-2 rounded" title="Clear Date Filter">Clear</button>
+                        <button id="btn-close-history" class="text-gray-500 hover:text-gray-700 text-2xl ml-2">&times;</button>
+                    </div>
                 </div>
-                <div class="overflow-y-auto max-h-96">
+                <div class="overflow-y-auto flex-1 border rounded-lg">
                     <table class="min-w-full text-sm">
-                        <thead class="bg-gray-50">
-                            <tr class="border-b">
+                        <thead class="bg-gray-50 sticky top-0">
+                            <tr class="border-b shadow-sm">
                                 <th class="text-left p-2">Time</th>
                                 <th class="text-left p-2">Customer</th>
                                 <th class="text-right p-2">Total</th>
                                 <th class="text-center p-2">Action</th>
                             </tr>
                         </thead>
-                        <tbody id="pos-history-body"></tbody>
+                        <tbody id="pos-history-body" class="divide-y divide-gray-100"></tbody>
                     </table>
+                </div>
+                <div class="mt-4 pt-4 border-t flex justify-between items-center shrink-0">
+                    <button id="btn-history-prev" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded font-bold text-sm disabled:opacity-50" disabled>Previous</button>
+                    <span id="pos-history-page-info" class="text-sm font-bold text-gray-600">Page 1 of 1</span>
+                    <button id="btn-history-next" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded font-bold text-sm disabled:opacity-50" disabled>Next</button>
                 </div>
             </div>
         </div>
@@ -2557,19 +2566,78 @@ async function processTransaction() {
         btnConfirm.textContent = originalText;
     }
 }
+let currentHistoryPage = 1;
+let historyDateFilter = "";
 
-async function openHistoryModal() {
+async function openHistoryModal(page = 1) {
+    currentHistoryPage = page;
     const modal = document.getElementById("modal-pos-history");
     const tbody = document.getElementById("pos-history-body");
+    const dateInput = document.getElementById("history-date-filter");
+
+    // Bind date filter events if not already bound
+    if (!dateInput.dataset.bound) {
+        dateInput.addEventListener("change", (e) => {
+            historyDateFilter = e.target.value;
+            openHistoryModal(1);
+        });
+        document.getElementById("btn-clear-history-date").addEventListener("click", () => {
+            dateInput.value = "";
+            historyDateFilter = "";
+            openHistoryModal(1);
+        });
+
+        document.getElementById("btn-history-prev").addEventListener("click", () => {
+            if (currentHistoryPage > 1) openHistoryModal(currentHistoryPage - 1);
+        });
+        document.getElementById("btn-history-next").addEventListener("click", () => {
+            openHistoryModal(currentHistoryPage + 1);
+        });
+
+        dateInput.dataset.bound = "true";
+    }
+
     modal.classList.remove("hidden");
     tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center">Loading...</td></tr>`;
 
     try {
         const allTxs = await Repository.getAll('transactions');
-        const txs = allTxs
-            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-            .slice(0, 50);
-        tbody.innerHTML = txs.map(tx => `
+        let filteredTxs = allTxs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+        // Apply Date Filter
+        if (historyDateFilter) {
+            const filterDate = new Date(historyDateFilter).toISOString().split('T')[0];
+            filteredTxs = filteredTxs.filter(tx => {
+                const txDate = new Date(tx.timestamp).toISOString().split('T')[0];
+                return txDate === filterDate;
+            });
+        }
+
+        // Cap to the most recent 50 transactions *after* filtering
+        const recent50 = filteredTxs.slice(0, 50);
+
+        // Pagination Logic (10 per page)
+        const itemsPerPage = 10;
+        const totalItems = recent50.length;
+        const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
+
+        // Ensure current page is valid
+        if (currentHistoryPage > totalPages) currentHistoryPage = totalPages;
+
+        const startIndex = (currentHistoryPage - 1) * itemsPerPage;
+        const paginatedTxs = recent50.slice(startIndex, startIndex + itemsPerPage);
+
+        // Update Pagination UI
+        document.getElementById("pos-history-page-info").textContent = `Page ${currentHistoryPage} of ${totalPages} (Total: ${totalItems})`;
+        document.getElementById("btn-history-prev").disabled = currentHistoryPage <= 1;
+        document.getElementById("btn-history-next").disabled = currentHistoryPage >= totalPages;
+
+        if (paginatedTxs.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500 italic">No transactions found.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = paginatedTxs.map(tx => `
             <tr class="border-b ${tx.is_voided ? 'bg-red-50 opacity-60' : ''}">
                 <td class="p-2 text-xs">${new Date(tx.timestamp).toLocaleString()}</td>
                 <td class="p-2 text-xs">${tx.customer_name}</td>
@@ -2590,13 +2658,13 @@ async function openHistoryModal() {
         });
         tbody.querySelectorAll(".btn-print-tx").forEach(btn => {
             btn.addEventListener("click", async () => {
-                const tx = txs.find(t => t.id === btn.dataset.id);
+                const tx = allTxs.find(t => t.id === btn.dataset.id);
                 if (tx) await printReceipt(tx, true);
             });
         });
         tbody.querySelectorAll(".btn-view-tx").forEach(btn => {
             btn.addEventListener("click", () => {
-                const tx = txs.find(t => t.id === btn.dataset.id);
+                const tx = allTxs.find(t => t.id === btn.dataset.id);
                 if (tx) viewTransactionDetails(tx);
             });
         });
