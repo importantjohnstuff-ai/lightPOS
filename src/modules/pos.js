@@ -2625,9 +2625,9 @@ async function openHistoryModal(page = 1) {
             });
         }
 
-        // Since Dexie/IndexedDB generally returns records in insertion order (by ID),
-        // we can just reverse the filtered array instead of doing an expensive Date sort.
-        filteredTxs.reverse();
+        // Explicitly sort transactions by timestamp (newest first / descending chronological)
+        // to ensure accurate ordering regardless of IndexedDB insertion order.
+        filteredTxs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
         // Pagination Logic (50 per page as requested)
         const itemsPerPage = 50;
