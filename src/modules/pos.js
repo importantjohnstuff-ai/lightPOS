@@ -3127,8 +3127,8 @@ async function requestQuickCustomer(tx) {
         btnSave.onclick = async () => {
             const name = nameInput.value.trim();
             const phone = phoneInput.value.trim();
-            if (!name || !phone) {
-                alert("Please enter both name and phone number or select an existing customer.");
+            if (!name) {
+                alert("Please enter at least a name or select an existing customer.");
                 return;
             }
 
