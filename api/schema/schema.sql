@@ -167,6 +167,7 @@ CREATE TABLE discount_codes (
     value REAL,
     usage_limit TEXT,
     is_active INTEGER,
+    auto_record INTEGER DEFAULT 0,
     _version INTEGER,
     _updatedAt INTEGER,
     _deleted INTEGER DEFAULT 0

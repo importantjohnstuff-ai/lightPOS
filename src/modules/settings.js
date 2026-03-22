@@ -2380,13 +2380,13 @@ async function loadDiscountCodes() {
             <td class="p-2 border-b text-right font-mono">${code.type === 'percentage' ? code.value + '%' : '₱' + parseFloat(code.value).toFixed(2)}</td>
             <td class="p-2 border-b capitalize text-sm">${(code.usage_limit || 'unlimited').replace(/_/g, ' ')}</td>
             <td class="p-2 border-b text-center text-xs font-bold">
-                <button type="button" class="btn-toggle-auto-record px-2 py-1 rounded cursor-pointer ${code.auto_record ? 'text-blue-600 hover:bg-blue-50' : 'text-gray-400 hover:bg-gray-100'}" data-id="${code.id}" data-state="${code.auto_record}">
-                    ${code.auto_record ? 'Yes' : 'No'}
+                <button type="button" class="btn-toggle-auto-record px-2 py-1 rounded cursor-pointer ${(code.auto_record && code.auto_record != '0') ? 'text-blue-600 hover:bg-blue-50' : 'text-gray-400 hover:bg-gray-100'}" data-id="${code.id}">
+                    ${(code.auto_record && code.auto_record != '0') ? 'Yes' : 'No'}
                 </button>
             </td>
             <td class="p-2 border-b text-center">
-                <span class="px-2 py-1 rounded-full text-xs font-bold ${code.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
-                    ${code.is_active ? 'Active' : 'Inactive'}
+                <span class="px-2 py-1 rounded-full text-xs font-bold ${(code.is_active && code.is_active != '0') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                    ${(code.is_active && code.is_active != '0') ? 'Active' : 'Inactive'}
                 </span>
             </td>
             <td class="p-2 border-b text-center">
@@ -2480,7 +2480,8 @@ async function handleDeleteDiscountCode(e) {
             const id = toggleBtn.dataset.id;
             const codeRecord = await Repository.get('discount_codes', id);
             if (codeRecord) {
-                codeRecord.auto_record = !codeRecord.auto_record;
+                const currentAuto = codeRecord.auto_record === true || codeRecord.auto_record === 1 || codeRecord.auto_record === '1';
+                codeRecord.auto_record = !currentAuto;
                 await Repository.upsert('discount_codes', codeRecord);
                 await SyncEngine.sync();
                 loadDiscountCodes();

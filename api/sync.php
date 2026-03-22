@@ -154,6 +154,7 @@ function ensureDiscountCodesSchema($pdo)
             value REAL,
             usage_limit TEXT,
             is_active INTEGER,
+            auto_record INTEGER DEFAULT 0,
             _version INTEGER,
             _updatedAt INTEGER,
             _deleted INTEGER DEFAULT 0
@@ -167,6 +168,12 @@ function ensureDiscountCodesSchema($pdo)
         if (!in_array('usage_limit', $columns)) {
             $pdo->exec("ALTER TABLE discount_codes ADD COLUMN usage_limit TEXT");
             error_log("DB Migration: Added usage_limit column to discount_codes table.");
+        }
+        
+        // Migration: Add auto_record if missing
+        if (!in_array('auto_record', $columns)) {
+            $pdo->exec("ALTER TABLE discount_codes ADD COLUMN auto_record INTEGER DEFAULT 0");
+            error_log("DB Migration: Added auto_record column to discount_codes table.");
         }
     }
 }
