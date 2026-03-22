@@ -2677,13 +2677,13 @@ async function openHistoryModal(page = 1) {
         });
         tbody.querySelectorAll(".btn-print-tx").forEach(btn => {
             btn.addEventListener("click", async () => {
-                const tx = allTxs.find(t => t.id === btn.dataset.id);
+                const tx = filteredTxs.find(t => t.id === btn.dataset.id);
                 if (tx) await printReceipt(tx, true);
             });
         });
         tbody.querySelectorAll(".btn-view-tx").forEach(btn => {
             btn.addEventListener("click", () => {
-                const tx = allTxs.find(t => t.id === btn.dataset.id);
+                const tx = filteredTxs.find(t => t.id === btn.dataset.id);
                 if (tx) viewTransactionDetails(tx);
             });
         });
