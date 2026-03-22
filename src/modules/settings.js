@@ -2380,7 +2380,9 @@ async function loadDiscountCodes() {
             <td class="p-2 border-b text-right font-mono">${code.type === 'percentage' ? code.value + '%' : '₱' + parseFloat(code.value).toFixed(2)}</td>
             <td class="p-2 border-b capitalize text-sm">${(code.usage_limit || 'unlimited').replace(/_/g, ' ')}</td>
             <td class="p-2 border-b text-center text-xs font-bold">
-                ${code.auto_record ? '<span class="text-blue-600">Yes</span>' : '<span class="text-gray-400">No</span>'}
+                <button type="button" class="btn-toggle-auto-record px-2 py-1 rounded cursor-pointer ${code.auto_record ? 'text-blue-600 hover:bg-blue-50' : 'text-gray-400 hover:bg-gray-100'}" data-id="${code.id}" data-state="${code.auto_record}">
+                    ${code.auto_record ? 'Yes' : 'No'}
+                </button>
             </td>
             <td class="p-2 border-b text-center">
                 <span class="px-2 py-1 rounded-full text-xs font-bold ${code.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
@@ -2447,6 +2449,7 @@ async function handleAddDiscountCode() {
         codeInput.value = '';
         valueInput.value = '';
         activeInput.checked = true;
+        if (autoRecordInput) autoRecordInput.checked = false;
 
         loadDiscountCodes();
     } catch (e) {
@@ -2456,19 +2459,34 @@ async function handleAddDiscountCode() {
 }
 
 async function handleDeleteDiscountCode(e) {
-    if (e.target.classList.contains('btn-delete-discount') || e.target.closest('.btn-delete-discount')) {
+    const deleteBtn = e.target.closest('.btn-delete-discount');
+    const toggleBtn = e.target.closest('.btn-toggle-auto-record');
+
+    if (deleteBtn) {
         if (!confirm("Delete this discount code?")) return;
-
-        const btn = e.target.closest('.btn-delete-discount');
-        const id = btn.dataset.id;
-
         try {
-            await Repository.remove('discount_codes', id);
+            await Repository.remove('discount_codes', deleteBtn.dataset.id);
             await SyncEngine.sync();
             loadDiscountCodes();
         } catch (err) {
             console.error("Failed to delete", err);
             alert("Error deleting code");
+        }
+        return;
+    }
+
+    if (toggleBtn) {
+        try {
+            const id = toggleBtn.dataset.id;
+            const codeRecord = await Repository.get('discount_codes', id);
+            if (codeRecord) {
+                codeRecord.auto_record = !codeRecord.auto_record;
+                await Repository.upsert('discount_codes', codeRecord);
+                await SyncEngine.sync();
+                loadDiscountCodes();
+            }
+        } catch (err) {
+            console.error("Failed to toggle auto record", err);
         }
     }
 }
