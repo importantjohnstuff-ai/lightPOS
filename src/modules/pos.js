@@ -2527,6 +2527,29 @@ async function processTransaction() {
             await Repository.upsert('customers', updatedCustomer);
         }
 
+        // Auto-Record Discount as Expense if configured
+        if (discountCode && discountAmount > 0) {
+            const sysCodes = await Repository.getAll('discount_codes');
+            const appliedCode = sysCodes?.find(c => c.code === discountCode);
+            if (appliedCode && appliedCode.auto_record) {
+                const cashierName = transaction.user_name || transaction.user_email || 'System';
+                const expense = {
+                    id: generateUUID(),
+                    description: `${cashierName} ${discountCode}`,
+                    amount: discountAmount,
+                    category: 'Other',
+                    supplier_id: "",
+                    supplier_name: null,
+                    invoice_number: transaction.id,
+                    date: new Date().toISOString().split('T')[0],
+                    user_id: transaction.user_email,
+                    _updatedAt: Date.now(),
+                    created_at: new Date()
+                };
+                await Repository.upsert('expenses', expense);
+            }
+        }
+
         // 4. Trigger Background Sync
         SyncEngine.sync();
 

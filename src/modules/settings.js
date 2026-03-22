@@ -166,6 +166,12 @@ export async function loadSettingsView() {
                             </div>
                             <div class="pb-2">
                                 <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="discount-auto-record-input" class="form-checkbox h-4 w-4 text-blue-600">
+                                    <span class="ml-2 text-xs font-bold text-gray-700">Auto Record</span>
+                                </label>
+                            </div>
+                            <div class="pb-2">
+                                <label class="inline-flex items-center cursor-pointer">
                                     <input type="checkbox" id="discount-active-input" class="form-checkbox h-4 w-4 text-blue-600" checked>
                                     <span class="ml-2 text-xs font-bold text-gray-700">Active</span>
                                 </label>
@@ -181,6 +187,7 @@ export async function loadSettingsView() {
                                         <th class="p-2 text-left border-b font-bold text-gray-600">Type</th>
                                         <th class="p-2 text-right border-b font-bold text-gray-600">Value</th>
                                         <th class="p-2 text-left border-b font-bold text-gray-600">Frequency</th>
+                                        <th class="p-2 text-center border-b font-bold text-gray-600">Auto Record</th>
                                         <th class="p-2 text-center border-b font-bold text-gray-600">Status</th>
                                         <th class="p-2 text-center border-b font-bold text-gray-600">Action</th>
                                     </tr>
@@ -2372,6 +2379,9 @@ async function loadDiscountCodes() {
             <td class="p-2 border-b capitalize">${code.type}</td>
             <td class="p-2 border-b text-right font-mono">${code.type === 'percentage' ? code.value + '%' : '₱' + parseFloat(code.value).toFixed(2)}</td>
             <td class="p-2 border-b capitalize text-sm">${(code.usage_limit || 'unlimited').replace(/_/g, ' ')}</td>
+            <td class="p-2 border-b text-center text-xs font-bold">
+                ${code.auto_record ? '<span class="text-blue-600">Yes</span>' : '<span class="text-gray-400">No</span>'}
+            </td>
             <td class="p-2 border-b text-center">
                 <span class="px-2 py-1 rounded-full text-xs font-bold ${code.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
                     ${code.is_active ? 'Active' : 'Inactive'}
@@ -2397,12 +2407,14 @@ async function handleAddDiscountCode() {
     const valueInput = document.getElementById('discount-value-input');
     const usageInput = document.getElementById('discount-usage-input');
     const activeInput = document.getElementById('discount-active-input');
+    const autoRecordInput = document.getElementById('discount-auto-record-input');
 
     const code = codeInput.value.trim().toUpperCase();
     const type = typeInput.value;
     const value = parseFloat(valueInput.value);
     const usage = usageInput.value;
     const isActive = activeInput.checked;
+    const autoRecord = autoRecordInput ? autoRecordInput.checked : false;
 
     if (!code) {
         alert("Please enter a code.");
@@ -2419,6 +2431,7 @@ async function handleAddDiscountCode() {
         value,
         usage_limit: usage,
         is_active: isActive,
+        auto_record: autoRecord,
         id: generateUUID(),
         sync_status: 'pending',
         _version: 1,
