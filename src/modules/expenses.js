@@ -56,6 +56,10 @@ export async function loadExpensesView() {
                     <input type="date" id="exp-filter-end" class="border rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none">
                 </div>
                 <button id="btn-clear-filters" class="text-xs text-gray-500 hover:text-red-500 font-bold mb-2">Clear</button>
+                <button id="btn-export-expenses" class="flex items-center gap-1.5 px-4 py-2 border border-green-600 text-green-600 rounded-lg hover:bg-green-50 transition text-xs font-bold shadow-sm">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    Export CSV
+                </button>
             </div>
 
             <!-- Expenses Table -->
@@ -203,6 +207,11 @@ export async function loadExpensesView() {
         document.getElementById("exp-filter-start").value = today;
         document.getElementById("exp-filter-end").value = today;
         fetchExpenses();
+    });
+
+    // Export CSV Listener
+    document.getElementById("btn-export-expenses").addEventListener("click", async () => {
+        await exportExpensesCSV();
     });
 
     // Quick Sum Listeners
@@ -451,5 +460,71 @@ function updateQuickSum() {
     } else {
         selectAll.checked = false;
         selectAll.indeterminate = false;
+    }
+}
+
+async function exportExpensesCSV() {
+    const searchTerm = document.getElementById("exp-search")?.value.toLowerCase() || "";
+    const startDate = document.getElementById("exp-filter-start")?.value || "";
+    const endDate = document.getElementById("exp-filter-end")?.value || "";
+
+    try {
+        let expenses = await Repository.getAll('expenses');
+
+        // Apply same filters as the table view
+        expenses = expenses.filter(exp => {
+            const matchesSearch = exp.description.toLowerCase().includes(searchTerm) ||
+                exp.category.toLowerCase().includes(searchTerm) ||
+                (exp.supplier_name && exp.supplier_name.toLowerCase().includes(searchTerm)) ||
+                (exp.invoice_number && exp.invoice_number.toLowerCase().includes(searchTerm));
+
+            const expDate = exp.date;
+            const matchesStart = !startDate || expDate >= startDate;
+            const matchesEnd = !endDate || expDate <= endDate;
+
+            return matchesSearch && matchesStart && matchesEnd;
+        });
+
+        // Sort by date desc
+        expenses.sort((a, b) => b.date.localeCompare(a.date) || (b._updatedAt || 0) - (a._updatedAt || 0));
+
+        if (expenses.length === 0) {
+            showToast("No expenses to export", "error");
+            return;
+        }
+
+        const headers = ["Date", "Description", "Category", "Supplier", "Invoice No.", "Amount", "Recorded By"];
+        const rows = expenses.map(exp => [
+            `"${exp.date}"`,
+            `"${(exp.description || '').replace(/"/g, '""')}"`,
+            `"${exp.category || ''}"`,
+            `"${(exp.supplier_name || '').replace(/"/g, '""')}"`,
+            `"${exp.invoice_number || ''}"`,
+            (exp.amount || 0).toFixed(2),
+            `"${exp.user_id || ''}"`
+        ]);
+
+        // Add total row
+        const totalAmount = expenses.reduce((sum, exp) => sum + (exp.amount || 0), 0);
+        rows.push([`""`, `"TOTAL"`, `""`, `""`, `""`, totalAmount.toFixed(2), `""`]);
+
+        const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+
+        const dateLabel = startDate && endDate ? `${startDate}_to_${endDate}` : new Date().toISOString().split('T')[0];
+        link.setAttribute("download", `expenses_${dateLabel}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        showToast(`Exported ${expenses.length} expense(s) to CSV`, "success");
+    } catch (error) {
+        console.error("Error exporting expenses:", error);
+        showToast("Failed to export expenses", "error");
     }
 }
