@@ -2100,11 +2100,24 @@ function openSalesExportPanel() {
         allItems.forEach(i => { itemCostMap[i.id] = { cost_price: i.cost_price || 0, category: i.category || 'Uncategorized' }; });
         console.log(`[Export] Built cost map for ${allItems.length} items`);
 
+        // Strip transactions to ONLY fields the worker needs (avoids massive structured clone)
+        const leanTxs = transactions.map(tx => ({
+            id: tx.id,
+            timestamp: tx.timestamp,
+            is_voided: tx.is_voided,
+            total_amount: tx.total_amount,
+            user_email: tx.user_email,
+            payment_method: tx.payment_method,
+            items: (tx.items || []).map(li => ({ id: li.id, qty: li.qty, cost: li.cost, price: li.price }))
+        }));
+        console.log(`[Export] Stripped ${leanTxs.length} transactions for worker in ${(performance.now() - t0).toFixed(0)}ms`);
+
         console.log('[Export] Dispatching to worker...');
         generalReportWorker.postMessage({
             type: 'GENERATE_EXPORT_DATA',
-            payload: { transactions, itemCostMap, startDate: startStr, endDate: endStr, mode: currentMode }
+            payload: { transactions: leanTxs, itemCostMap, startDate: startStr, endDate: endStr, mode: currentMode }
         });
+        console.log(`[Export] postMessage sent in ${(performance.now() - t0).toFixed(0)}ms`);
 
         const result = await new Promise((resolve, reject) => {
             exportResolve = resolve;
