@@ -206,28 +206,19 @@ function generateShiftReports(payload) {
 }
 
 function generateExportData(payload) {
-    const { transactions, items, startDate, endDate, mode } = payload;
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    const { transactions, itemCostMap, startDate, endDate, mode } = payload;
 
-    // Build lookup map
-    const itemMap = new Map();
-    items.forEach(i => itemMap.set(i.id, i));
-
-    // Filter valid transactions in date range
-    const validTxs = transactions.filter(tx => {
-        const d = new Date(tx.timestamp);
-        return d >= start && d <= end && !tx.is_voided;
-    });
+    // Transactions are already pre-filtered by date on the main thread
+    // Just filter out voided ones
+    const validTxs = transactions.filter(tx => !tx.is_voided);
 
     if (mode === 'daily') {
-        // One row per transaction
         const rows = validTxs.map(tx => {
             let lineCost = 0;
             let itemCount = 0;
             if (tx.items && Array.isArray(tx.items)) {
                 tx.items.forEach(li => {
-                    const master = itemMap.get(li.id);
+                    const master = itemCostMap ? itemCostMap[li.id] : null;
                     const cost = parseFloat(li.cost || (master ? master.cost_price : 0) || 0);
                     const qty = parseFloat(li.qty || 0);
                     lineCost += cost * qty;
@@ -249,7 +240,6 @@ function generateExportData(payload) {
             };
         });
 
-        // Sort by timestamp ascending
         rows.sort((a, b) => {
             const dA = new Date(a.date + ' ' + a.time);
             const dB = new Date(b.date + ' ' + b.time);
@@ -258,7 +248,6 @@ function generateExportData(payload) {
 
         return { mode: 'daily', rows, totalRows: rows.length };
     } else {
-        // Summarized: one row per day
         const dayMap = {};
         validTxs.forEach(tx => {
             const dateKey = new Date(tx.timestamp).toLocaleDateString();
@@ -284,7 +273,7 @@ function generateExportData(payload) {
 
             if (tx.items && Array.isArray(tx.items)) {
                 tx.items.forEach(li => {
-                    const master = itemMap.get(li.id);
+                    const master = itemCostMap ? itemCostMap[li.id] : null;
                     const cost = parseFloat(li.cost || (master ? master.cost_price : 0) || 0);
                     const qty = parseFloat(li.qty || 0);
                     day.cogs += cost * qty;
@@ -295,18 +284,15 @@ function generateExportData(payload) {
         const rows = Object.values(dayMap).map(d => {
             d.netSales = d.grossSales - d.cogs;
             d.avgTicket = d.transactionCount > 0 ? d.grossSales / d.transactionCount : 0;
-            // Round
             d.grossSales = Math.round(d.grossSales * 100) / 100;
             d.cogs = Math.round(d.cogs * 100) / 100;
             d.netSales = Math.round(d.netSales * 100) / 100;
             d.avgTicket = Math.round(d.avgTicket * 100) / 100;
-            // Flatten payment breakdown to string
             d.paymentMethods = Object.entries(d.paymentBreakdown)
                 .map(([m, v]) => `${m}: ₱${v.toFixed(2)}`).join(', ');
             return d;
         });
 
-        // Sort by date ascending
         rows.sort((a, b) => a._sortDate.localeCompare(b._sortDate));
 
         return { mode: 'summarized', rows, totalRows: rows.length };

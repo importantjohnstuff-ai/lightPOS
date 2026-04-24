@@ -2077,20 +2077,28 @@ function openSalesExportPanel() {
         console.log(`[Export] Fetching data: ${startDate} to ${endDate}, mode: ${currentMode}`);
         const t0 = performance.now();
 
-        const db = await dbPromise;
-        console.log('[Export] DB opened');
-        const transactions = await db.transactions.toArray();
-        console.log(`[Export] Loaded ${transactions.length} transactions from DB in ${(performance.now() - t0).toFixed(0)}ms`);
-        const items = await db.items.toArray();
-        console.log(`[Export] Loaded ${items.length} items from DB`);
-
         const startStr = new Date(startDate + 'T00:00:00').toISOString();
         const endStr = new Date(endDate + 'T23:59:59').toISOString();
+
+        const db = await dbPromise;
+        console.log('[Export] DB opened');
+
+        // Pre-filter transactions by date at DB level (avoids loading entire history)
+        const transactions = await db.transactions
+            .where('timestamp').between(startStr, endStr, true, true)
+            .toArray();
+        console.log(`[Export] Loaded ${transactions.length} transactions (filtered) in ${(performance.now() - t0).toFixed(0)}ms`);
+
+        // Build lightweight cost map instead of sending all item objects
+        const allItems = await db.items.toArray();
+        const itemCostMap = {};
+        allItems.forEach(i => { itemCostMap[i.id] = { cost_price: i.cost_price || 0, category: i.category || 'Uncategorized' }; });
+        console.log(`[Export] Built cost map for ${allItems.length} items`);
 
         console.log('[Export] Dispatching to worker...');
         generalReportWorker.postMessage({
             type: 'GENERATE_EXPORT_DATA',
-            payload: { transactions, items, startDate: startStr, endDate: endStr, mode: currentMode }
+            payload: { transactions, itemCostMap, startDate: startStr, endDate: endStr, mode: currentMode }
         });
 
         const result = await new Promise((resolve, reject) => {
