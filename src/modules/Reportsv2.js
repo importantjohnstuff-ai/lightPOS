@@ -258,6 +258,7 @@ async function openReportModal(report) {
 }
 
 async function generateReport(reportId) {
+    console.log('[Reports] generateReport called, id:', reportId);
     if (!reportId) return;
 
     // Fetch Date Range
@@ -835,6 +836,7 @@ function renderPerfRows(page) {
 }
 
 function renderSalesSummary(data) {
+    console.log('[Reports] renderSalesSummary called', data);
     const { summary, paymentMethods, categorySales } = data;
     const metricsContainer = document.getElementById("report-metrics-container");
     const contentContainer = document.getElementById("report-modal-content");
@@ -936,7 +938,10 @@ function renderSalesSummary(data) {
     }
 
     // Attach Export Button Listener
-    document.getElementById('btn-open-export')?.addEventListener('click', () => {
+    const exportBtn = document.getElementById('btn-open-export');
+    console.log('[Reports] Export button found:', !!exportBtn);
+    exportBtn?.addEventListener('click', () => {
+        console.log('[Export] Export button clicked');
         openSalesExportPanel();
     });
 }
