@@ -14,7 +14,7 @@ reportWorker.onmessage = (e) => {
     }
 };
 
-const generalReportWorker = new Worker('src/workers/generalReportWorker.js', { type: 'module' });
+const generalReportWorker = new Worker('src/workers/generalReportWorker.js?v=' + Date.now(), { type: 'module' });
 let generalResolve = null;
 let generalReject = null;
 let lastShiftData = null; // Cache for navigation
@@ -23,14 +23,26 @@ let exportResolve = null;
 let exportReject = null;
 
 generalReportWorker.onmessage = (e) => {
-    const { type, success, data, message } = e.data;
+    const { type, success, data, message, stack } = e.data;
+    console.log('[Worker Response]', type, success ? '✅' : '❌');
     if (type === 'Re:GENERATE_SHIFTS' || type === 'Re:GENERATE_SUMMARY') {
         if (success && generalResolve) generalResolve(data);
         else if (!success && generalReject) generalReject(new Error(message));
     } else if (type === 'Re:GENERATE_EXPORT_DATA') {
         if (success && exportResolve) exportResolve(data);
         else if (!success && exportReject) exportReject(new Error(message));
+    } else if (type === 'ERROR') {
+        console.error('[Worker ERROR]', message, stack);
+        // Reject whichever promise is pending
+        if (exportReject) exportReject(new Error(message));
+        else if (generalReject) generalReject(new Error(message));
     }
+};
+
+generalReportWorker.onerror = (e) => {
+    console.error('[Worker FATAL]', e.message, e.filename, e.lineno);
+    if (exportReject) exportReject(new Error(e.message));
+    else if (generalReject) generalReject(new Error(e.message));
 };
 
 let currentModalReportId = null;
