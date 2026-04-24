@@ -9,6 +9,9 @@ self.onmessage = function (e) {
         } else if (type === 'GENERATE_SUMMARY') {
             const result = generateSalesSummary(payload);
             self.postMessage({ type: 'Re:GENERATE_SUMMARY', success: true, data: result });
+        } else if (type === 'GENERATE_EXPORT_DATA') {
+            const result = generateExportData(payload);
+            self.postMessage({ type: 'Re:GENERATE_EXPORT_DATA', success: true, data: result });
         }
     } catch (error) {
         self.postMessage({ type: 'ERROR', message: error.message, stack: error.stack });
@@ -197,4 +200,112 @@ function generateShiftReports(payload) {
             totalSales: totalSalesGlobal
         }
     };
+}
+
+function generateExportData(payload) {
+    const { transactions, items, startDate, endDate, mode } = payload;
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    // Build lookup map
+    const itemMap = new Map();
+    items.forEach(i => itemMap.set(i.id, i));
+
+    // Filter valid transactions in date range
+    const validTxs = transactions.filter(tx => {
+        const d = new Date(tx.timestamp);
+        return d >= start && d <= end && !tx.is_voided;
+    });
+
+    if (mode === 'daily') {
+        // One row per transaction
+        const rows = validTxs.map(tx => {
+            let lineCost = 0;
+            let itemCount = 0;
+            if (tx.items && Array.isArray(tx.items)) {
+                tx.items.forEach(li => {
+                    const master = itemMap.get(li.id);
+                    const cost = parseFloat(li.cost || (master ? master.cost_price : 0) || 0);
+                    const qty = parseFloat(li.qty || 0);
+                    lineCost += cost * qty;
+                    itemCount += qty;
+                });
+            }
+            const gross = parseFloat(tx.total_amount || 0);
+            const net = gross - lineCost;
+            return {
+                date: new Date(tx.timestamp).toLocaleDateString(),
+                time: new Date(tx.timestamp).toLocaleTimeString(),
+                transactionId: tx.id,
+                cashier: tx.user_email || '-',
+                paymentMethod: tx.payment_method || 'Cash',
+                itemCount,
+                grossSales: Math.round(gross * 100) / 100,
+                cogs: Math.round(lineCost * 100) / 100,
+                netSales: Math.round(net * 100) / 100
+            };
+        });
+
+        // Sort by timestamp ascending
+        rows.sort((a, b) => {
+            const dA = new Date(a.date + ' ' + a.time);
+            const dB = new Date(b.date + ' ' + b.time);
+            return dA - dB;
+        });
+
+        return { mode: 'daily', rows, totalRows: rows.length };
+    } else {
+        // Summarized: one row per day
+        const dayMap = {};
+        validTxs.forEach(tx => {
+            const dateKey = new Date(tx.timestamp).toLocaleDateString();
+            if (!dayMap[dateKey]) {
+                dayMap[dateKey] = {
+                    date: dateKey,
+                    _sortDate: new Date(tx.timestamp).toISOString().split('T')[0],
+                    transactionCount: 0,
+                    grossSales: 0,
+                    cogs: 0,
+                    netSales: 0,
+                    paymentBreakdown: {}
+                };
+            }
+            const day = dayMap[dateKey];
+            day.transactionCount++;
+            const gross = parseFloat(tx.total_amount || 0);
+            day.grossSales += gross;
+
+            const method = tx.payment_method || 'Cash';
+            if (!day.paymentBreakdown[method]) day.paymentBreakdown[method] = 0;
+            day.paymentBreakdown[method] += gross;
+
+            if (tx.items && Array.isArray(tx.items)) {
+                tx.items.forEach(li => {
+                    const master = itemMap.get(li.id);
+                    const cost = parseFloat(li.cost || (master ? master.cost_price : 0) || 0);
+                    const qty = parseFloat(li.qty || 0);
+                    day.cogs += cost * qty;
+                });
+            }
+        });
+
+        const rows = Object.values(dayMap).map(d => {
+            d.netSales = d.grossSales - d.cogs;
+            d.avgTicket = d.transactionCount > 0 ? d.grossSales / d.transactionCount : 0;
+            // Round
+            d.grossSales = Math.round(d.grossSales * 100) / 100;
+            d.cogs = Math.round(d.cogs * 100) / 100;
+            d.netSales = Math.round(d.netSales * 100) / 100;
+            d.avgTicket = Math.round(d.avgTicket * 100) / 100;
+            // Flatten payment breakdown to string
+            d.paymentMethods = Object.entries(d.paymentBreakdown)
+                .map(([m, v]) => `${m}: ₱${v.toFixed(2)}`).join(', ');
+            return d;
+        });
+
+        // Sort by date ascending
+        rows.sort((a, b) => a._sortDate.localeCompare(b._sortDate));
+
+        return { mode: 'summarized', rows, totalRows: rows.length };
+    }
 }

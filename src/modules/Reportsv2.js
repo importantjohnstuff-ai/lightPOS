@@ -19,11 +19,17 @@ let generalResolve = null;
 let generalReject = null;
 let lastShiftData = null; // Cache for navigation
 
+let exportResolve = null;
+let exportReject = null;
+
 generalReportWorker.onmessage = (e) => {
     const { type, success, data, message } = e.data;
     if (type === 'Re:GENERATE_SHIFTS' || type === 'Re:GENERATE_SUMMARY') {
         if (success && generalResolve) generalResolve(data);
         else if (!success && generalReject) generalReject(new Error(message));
+    } else if (type === 'Re:GENERATE_EXPORT_DATA') {
+        if (success && exportResolve) exportResolve(data);
+        else if (!success && exportReject) exportReject(new Error(message));
     }
 };
 
@@ -853,6 +859,12 @@ function renderSalesSummary(data) {
                 <div class="text-3xl font-bold text-yellow-800 mt-1">₱${summary.avgTicket.toFixed(2)}</div>
             </div>
         </div>
+        <div class="px-6 pb-4 flex justify-end">
+            <button id="btn-open-export" class="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold shadow transition-colors">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                Export Sales Data
+            </button>
+        </div>
     `;
 
     // Main Content
@@ -922,6 +934,11 @@ function renderSalesSummary(data) {
     } else {
         contentContainer.innerHTML += `<div class="w-full text-center text-red-500 mt-4">Chart.js library not found. Charts cannot be displayed.</div>`;
     }
+
+    // Attach Export Button Listener
+    document.getElementById('btn-open-export')?.addEventListener('click', () => {
+        openSalesExportPanel();
+    });
 }
 
 function renderShiftReports(data) {
@@ -1901,4 +1918,448 @@ function exportInvValCSV() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+}
+
+// ============================================
+// ===== Sales Summary Export Panel Logic ======
+// ============================================
+
+let exportPanelData = null; // Cached export data for download
+
+function openSalesExportPanel() {
+    const contentContainer = document.getElementById("report-modal-content");
+
+    // Get current report range dates for defaults
+    const drp = $('#report-range').data('daterangepicker');
+    const defaultStart = drp ? drp.startDate.format('YYYY-MM-DD') : new Date().toISOString().split('T')[0];
+    const defaultEnd = drp ? drp.endDate.format('YYYY-MM-DD') : new Date().toISOString().split('T')[0];
+
+    contentContainer.innerHTML = `
+        <div class="max-w-5xl mx-auto">
+            <!-- Export Panel Header -->
+            <div class="flex items-center justify-between mb-6">
+                <div class="flex items-center gap-3">
+                    <button id="btn-export-back" class="flex items-center text-gray-600 hover:text-blue-600 transition font-medium px-3 py-1 rounded hover:bg-white border border-transparent hover:border-gray-200">
+                        <svg class="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                        Back to Summary
+                    </button>
+                </div>
+                <h3 class="text-lg font-bold text-gray-800">Export Sales Data</h3>
+            </div>
+
+            <!-- Config Card -->
+            <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <!-- Date Range -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Date Range</label>
+                        <div class="flex gap-2">
+                            <div class="flex-1">
+                                <label class="block text-xs text-gray-400 mb-1">Start</label>
+                                <input type="date" id="export-start-date" value="${defaultStart}" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                            </div>
+                            <div class="flex-1">
+                                <label class="block text-xs text-gray-400 mb-1">End</label>
+                                <input type="date" id="export-end-date" value="${defaultEnd}" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-indigo-500 focus:border-indigo-500">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Detail Level -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Detail Level</label>
+                        <div class="flex bg-gray-100 rounded-lg p-1 mt-1">
+                            <button class="export-mode-btn flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors bg-white shadow text-indigo-600" data-mode="summarized">Summarized</button>
+                            <button class="export-mode-btn flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors text-gray-600 hover:text-gray-900" data-mode="daily">Daily (Transactions)</button>
+                        </div>
+                        <p class="text-xs text-gray-400 mt-2" id="export-mode-desc">One row per day with totals.</p>
+                    </div>
+
+                    <!-- Format -->
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Export Format</label>
+                        <div class="flex gap-2 mt-1">
+                            <button class="export-fmt-btn flex-1 px-3 py-2 rounded-lg border-2 text-sm font-bold transition-all border-indigo-500 bg-indigo-50 text-indigo-700" data-fmt="csv">
+                                <svg class="w-4 h-4 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                CSV
+                            </button>
+                            <button class="export-fmt-btn flex-1 px-3 py-2 rounded-lg border-2 text-sm font-bold transition-all border-gray-200 bg-white text-gray-600 hover:border-gray-400" data-fmt="json">
+                                <svg class="w-4 h-4 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path></svg>
+                                JSON
+                            </button>
+                            <button class="export-fmt-btn flex-1 px-3 py-2 rounded-lg border-2 text-sm font-bold transition-all border-gray-200 bg-white text-gray-600 hover:border-gray-400" data-fmt="pdf">
+                                <svg class="w-4 h-4 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                                PDF
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex justify-between items-center mt-6 pt-4 border-t border-gray-100">
+                    <button id="btn-generate-preview" class="flex items-center gap-2 px-5 py-2.5 bg-gray-800 hover:bg-gray-900 text-white rounded-lg text-sm font-bold shadow transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                        Generate Preview
+                    </button>
+                    <button id="btn-download-export" disabled class="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold shadow transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        Download
+                    </button>
+                </div>
+            </div>
+
+            <!-- Preview Area -->
+            <div id="export-preview-area" class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+                <div class="p-10 text-center text-gray-400">
+                    <svg class="w-12 h-12 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    <p class="text-sm">Click "Generate Preview" to see your data before exporting.</p>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // State
+    let currentMode = 'summarized';
+    let currentFormat = 'csv';
+    exportPanelData = null;
+
+    // Back button
+    document.getElementById('btn-export-back').addEventListener('click', () => {
+        generateReport('fin-summary');
+    });
+
+    // Mode toggle
+    document.querySelectorAll('.export-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            currentMode = btn.dataset.mode;
+            document.querySelectorAll('.export-mode-btn').forEach(b => {
+                b.classList.remove('bg-white', 'shadow', 'text-indigo-600');
+                b.classList.add('text-gray-600');
+            });
+            btn.classList.remove('text-gray-600');
+            btn.classList.add('bg-white', 'shadow', 'text-indigo-600');
+            document.getElementById('export-mode-desc').textContent = currentMode === 'summarized'
+                ? 'One row per day with totals.'
+                : 'One row per transaction with full details.';
+            // Clear preview when mode changes
+            exportPanelData = null;
+            document.getElementById('btn-download-export').disabled = true;
+            document.getElementById('export-preview-area').innerHTML = `
+                <div class="p-10 text-center text-gray-400">
+                    <svg class="w-12 h-12 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                    <p class="text-sm">Click "Generate Preview" to see your data before exporting.</p>
+                </div>
+            `;
+        });
+    });
+
+    // Format toggle
+    document.querySelectorAll('.export-fmt-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            currentFormat = btn.dataset.fmt;
+            document.querySelectorAll('.export-fmt-btn').forEach(b => {
+                b.classList.remove('border-indigo-500', 'bg-indigo-50', 'text-indigo-700');
+                b.classList.add('border-gray-200', 'bg-white', 'text-gray-600');
+            });
+            btn.classList.remove('border-gray-200', 'bg-white', 'text-gray-600');
+            btn.classList.add('border-indigo-500', 'bg-indigo-50', 'text-indigo-700');
+        });
+    });
+
+    // Generate Preview
+    document.getElementById('btn-generate-preview').addEventListener('click', async () => {
+        const startDate = document.getElementById('export-start-date').value;
+        const endDate = document.getElementById('export-end-date').value;
+
+        if (!startDate || !endDate) {
+            alert('Please select both start and end dates.');
+            return;
+        }
+        if (new Date(startDate) > new Date(endDate)) {
+            alert('Start date must be before end date.');
+            return;
+        }
+
+        const previewArea = document.getElementById('export-preview-area');
+        previewArea.innerHTML = `
+            <div class="flex justify-center items-center p-10">
+                <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
+            </div>
+        `;
+
+        try {
+            const db = await dbPromise;
+            const transactions = await db.transactions.toArray();
+            const items = await db.items.toArray();
+
+            const startStr = new Date(startDate + 'T00:00:00').toISOString();
+            const endStr = new Date(endDate + 'T23:59:59').toISOString();
+
+            generalReportWorker.postMessage({
+                type: 'GENERATE_EXPORT_DATA',
+                payload: { transactions, items, startDate: startStr, endDate: endStr, mode: currentMode }
+            });
+
+            const result = await new Promise((resolve, reject) => {
+                exportResolve = resolve;
+                exportReject = reject;
+            });
+
+            exportPanelData = result;
+            renderExportPreview(result);
+            document.getElementById('btn-download-export').disabled = false;
+        } catch (err) {
+            previewArea.innerHTML = `
+                <div class="p-6 text-center text-red-500">
+                    <p class="font-bold">Error generating preview</p>
+                    <p class="text-sm mt-1">${err.message}</p>
+                </div>
+            `;
+        }
+    });
+
+    // Download
+    document.getElementById('btn-download-export').addEventListener('click', () => {
+        if (!exportPanelData) return;
+        const startDate = document.getElementById('export-start-date').value;
+        const endDate = document.getElementById('export-end-date').value;
+
+        if (currentFormat === 'csv') exportSalesCSV(exportPanelData, startDate, endDate);
+        else if (currentFormat === 'json') exportSalesJSON(exportPanelData, startDate, endDate);
+        else if (currentFormat === 'pdf') exportSalesPDF(exportPanelData, startDate, endDate);
+    });
+}
+
+function renderExportPreview(data) {
+    const previewArea = document.getElementById('export-preview-area');
+    const { mode, rows, totalRows } = data;
+    const previewRows = rows.slice(0, 25);
+
+    if (rows.length === 0) {
+        previewArea.innerHTML = `
+            <div class="p-10 text-center text-gray-400">
+                <svg class="w-12 h-12 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path></svg>
+                <p class="text-sm font-medium">No transactions found for this date range.</p>
+            </div>
+        `;
+        return;
+    }
+
+    let tableHTML = '';
+
+    if (mode === 'daily') {
+        tableHTML = `
+            <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+                <span class="text-sm font-bold text-gray-700">Preview — Daily Transactions</span>
+                <span class="text-xs text-gray-500">${totalRows} total rows${totalRows > 25 ? ' (showing first 25)' : ''}</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Transaction ID</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Cashier</th>
+                            <th class="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Payment</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Items</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Gross Sales</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">COGS</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Net Sales</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-100">
+                        ${previewRows.map(r => `
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-2 text-gray-700">${r.date}</td>
+                                <td class="px-4 py-2 text-gray-500">${r.time}</td>
+                                <td class="px-4 py-2 font-mono text-xs text-gray-500">${(r.transactionId || '').slice(0, 12)}...</td>
+                                <td class="px-4 py-2 text-gray-600">${r.cashier}</td>
+                                <td class="px-4 py-2 text-center"><span class="px-2 py-0.5 rounded-full text-xs font-bold ${r.paymentMethod === 'Cash' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}">${r.paymentMethod}</span></td>
+                                <td class="px-4 py-2 text-right font-mono text-gray-600">${r.itemCount}</td>
+                                <td class="px-4 py-2 text-right font-mono font-medium text-gray-800">₱${r.grossSales.toFixed(2)}</td>
+                                <td class="px-4 py-2 text-right font-mono text-red-500">₱${r.cogs.toFixed(2)}</td>
+                                <td class="px-4 py-2 text-right font-mono font-bold text-green-700">₱${r.netSales.toFixed(2)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    } else {
+        tableHTML = `
+            <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
+                <span class="text-sm font-bold text-gray-700">Preview — Daily Summary</span>
+                <span class="text-xs text-gray-500">${totalRows} total rows${totalRows > 25 ? ' (showing first 25)' : ''}</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200 text-sm">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Transactions</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Gross Sales</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">COGS</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Net Sales</th>
+                            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Avg Ticket</th>
+                            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Payment Methods</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-100">
+                        ${previewRows.map(r => `
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-2 font-medium text-gray-800">${r.date}</td>
+                                <td class="px-4 py-2 text-right font-mono text-gray-600">${r.transactionCount}</td>
+                                <td class="px-4 py-2 text-right font-mono font-medium text-gray-800">₱${r.grossSales.toFixed(2)}</td>
+                                <td class="px-4 py-2 text-right font-mono text-red-500">₱${r.cogs.toFixed(2)}</td>
+                                <td class="px-4 py-2 text-right font-mono font-bold text-green-700">₱${r.netSales.toFixed(2)}</td>
+                                <td class="px-4 py-2 text-right font-mono text-gray-600">₱${r.avgTicket.toFixed(2)}</td>
+                                <td class="px-4 py-2 text-gray-500 text-xs">${r.paymentMethods}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    // Grand totals
+    const totalGross = rows.reduce((s, r) => s + r.grossSales, 0);
+    const totalCogs = rows.reduce((s, r) => s + r.cogs, 0);
+    const totalNet = rows.reduce((s, r) => s + r.netSales, 0);
+
+    tableHTML += `
+        <div class="bg-gray-50 px-4 py-3 border-t border-gray-200 flex justify-between items-center text-sm">
+            <span class="font-bold text-gray-700">Totals</span>
+            <div class="flex gap-6">
+                <span class="text-gray-600">Gross: <b class="text-gray-800">₱${totalGross.toFixed(2)}</b></span>
+                <span class="text-gray-600">COGS: <b class="text-red-600">₱${totalCogs.toFixed(2)}</b></span>
+                <span class="text-gray-600">Net: <b class="text-green-700">₱${totalNet.toFixed(2)}</b></span>
+            </div>
+        </div>
+    `;
+
+    previewArea.innerHTML = tableHTML;
+}
+
+// --- Export Download Functions ---
+
+function exportSalesCSV(data, startDate, endDate) {
+    const { mode, rows } = data;
+    let headers, csvRows;
+
+    if (mode === 'daily') {
+        headers = ['Date', 'Time', 'Transaction ID', 'Cashier', 'Payment Method', 'Item Count', 'Gross Sales', 'COGS', 'Net Sales'];
+        csvRows = rows.map(r => [
+            `"${r.date}"`, `"${r.time}"`, `"${r.transactionId}"`, `"${r.cashier}"`,
+            `"${r.paymentMethod}"`, r.itemCount, r.grossSales.toFixed(2), r.cogs.toFixed(2), r.netSales.toFixed(2)
+        ]);
+    } else {
+        headers = ['Date', 'Transactions', 'Gross Sales', 'COGS', 'Net Sales', 'Avg Ticket', 'Payment Methods'];
+        csvRows = rows.map(r => [
+            `"${r.date}"`, r.transactionCount, r.grossSales.toFixed(2), r.cogs.toFixed(2),
+            r.netSales.toFixed(2), r.avgTicket.toFixed(2), `"${r.paymentMethods}"`
+        ]);
+    }
+
+    const csvContent = [headers.join(','), ...csvRows.map(r => r.join(','))].join('\n');
+    downloadFile(csvContent, `sales_${mode}_${startDate}_to_${endDate}.csv`, 'text/csv;charset=utf-8;');
+}
+
+function exportSalesJSON(data, startDate, endDate) {
+    const { mode, rows } = data;
+    const exportObj = {
+        reportType: 'Sales Summary',
+        mode,
+        dateRange: { start: startDate, end: endDate },
+        generatedAt: new Date().toISOString(),
+        totalRows: rows.length,
+        data: rows.map(r => {
+            // Strip internal fields
+            const clean = { ...r };
+            delete clean._sortDate;
+            delete clean.paymentBreakdown;
+            return clean;
+        })
+    };
+    const jsonStr = JSON.stringify(exportObj, null, 2);
+    downloadFile(jsonStr, `sales_${mode}_${startDate}_to_${endDate}.json`, 'application/json');
+}
+
+function exportSalesPDF(data, startDate, endDate) {
+    const { mode, rows } = data;
+
+    if (typeof window.jspdf === 'undefined') {
+        alert('PDF library not loaded. Please check your internet connection and refresh.');
+        return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape' });
+
+    // Title
+    doc.setFontSize(16);
+    doc.text('Sales Summary Report', 14, 18);
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Period: ${startDate} to ${endDate}  |  Mode: ${mode === 'daily' ? 'Daily Transactions' : 'Daily Summary'}  |  Generated: ${new Date().toLocaleString()}`, 14, 25);
+
+    let head, body;
+
+    if (mode === 'daily') {
+        head = [['Date', 'Time', 'Transaction ID', 'Cashier', 'Payment', 'Items', 'Gross Sales', 'COGS', 'Net Sales']];
+        body = rows.map(r => [
+            r.date, r.time, (r.transactionId || '').slice(0, 16), r.cashier,
+            r.paymentMethod, r.itemCount, r.grossSales.toFixed(2), r.cogs.toFixed(2), r.netSales.toFixed(2)
+        ]);
+    } else {
+        head = [['Date', 'Transactions', 'Gross Sales', 'COGS', 'Net Sales', 'Avg Ticket', 'Payment Methods']];
+        body = rows.map(r => [
+            r.date, r.transactionCount, r.grossSales.toFixed(2), r.cogs.toFixed(2),
+            r.netSales.toFixed(2), r.avgTicket.toFixed(2), r.paymentMethods
+        ]);
+    }
+
+    // Grand totals row
+    const totalGross = rows.reduce((s, r) => s + r.grossSales, 0);
+    const totalCogs = rows.reduce((s, r) => s + r.cogs, 0);
+    const totalNet = rows.reduce((s, r) => s + r.netSales, 0);
+
+    if (mode === 'daily') {
+        body.push(['', '', '', '', 'TOTALS', '', totalGross.toFixed(2), totalCogs.toFixed(2), totalNet.toFixed(2)]);
+    } else {
+        const totalTx = rows.reduce((s, r) => s + r.transactionCount, 0);
+        body.push(['TOTALS', totalTx, totalGross.toFixed(2), totalCogs.toFixed(2), totalNet.toFixed(2), '', '']);
+    }
+
+    doc.autoTable({
+        head,
+        body,
+        startY: 30,
+        theme: 'grid',
+        headStyles: { fillColor: [67, 56, 202], fontSize: 8 },
+        bodyStyles: { fontSize: 7 },
+        alternateRowStyles: { fillColor: [245, 247, 250] },
+        didParseCell: function(data) {
+            // Bold the totals row
+            if (data.row.index === body.length - 1) {
+                data.cell.styles.fontStyle = 'bold';
+                data.cell.styles.fillColor = [229, 231, 235];
+            }
+        }
+    });
+
+    doc.save(`sales_${mode}_${startDate}_to_${endDate}.pdf`);
+}
+
+function downloadFile(content, filename, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 }
