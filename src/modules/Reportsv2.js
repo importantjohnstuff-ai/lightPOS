@@ -1927,6 +1927,7 @@ function exportInvValCSV() {
 let exportPanelData = null; // Cached export data for download
 
 function openSalesExportPanel() {
+    console.log('[Export] Opening sales export panel');
     const contentContainer = document.getElementById("report-modal-content");
 
     // Get current report range dates for defaults
@@ -2001,7 +2002,7 @@ function openSalesExportPanel() {
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                         Generate Preview
                     </button>
-                    <button id="btn-download-export" disabled class="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold shadow transition-colors">
+                    <button id="btn-download-export" class="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-bold shadow transition-colors">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                         Download
                     </button>
@@ -2043,7 +2044,7 @@ function openSalesExportPanel() {
                 : 'One row per transaction with full details.';
             // Clear preview when mode changes
             exportPanelData = null;
-            document.getElementById('btn-download-export').disabled = true;
+            console.log('[Export] Mode changed to:', currentMode);
             document.getElementById('export-preview-area').innerHTML = `
                 <div class="p-10 text-center text-gray-400">
                     <svg class="w-12 h-12 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
@@ -2066,74 +2067,91 @@ function openSalesExportPanel() {
         });
     });
 
-    // Generate Preview
-    document.getElementById('btn-generate-preview').addEventListener('click', async () => {
+    // Shared helper: fetch export data from worker
+    async function fetchExportData() {
         const startDate = document.getElementById('export-start-date').value;
         const endDate = document.getElementById('export-end-date').value;
+        if (!startDate || !endDate) { alert('Please select both start and end dates.'); return null; }
+        if (new Date(startDate) > new Date(endDate)) { alert('Start date must be before end date.'); return null; }
 
-        if (!startDate || !endDate) {
-            alert('Please select both start and end dates.');
-            return;
-        }
-        if (new Date(startDate) > new Date(endDate)) {
-            alert('Start date must be before end date.');
-            return;
-        }
+        console.log(`[Export] Fetching data: ${startDate} to ${endDate}, mode: ${currentMode}`);
+        const t0 = performance.now();
 
+        const db = await dbPromise;
+        console.log('[Export] DB opened');
+        const transactions = await db.transactions.toArray();
+        console.log(`[Export] Loaded ${transactions.length} transactions from DB in ${(performance.now() - t0).toFixed(0)}ms`);
+        const items = await db.items.toArray();
+        console.log(`[Export] Loaded ${items.length} items from DB`);
+
+        const startStr = new Date(startDate + 'T00:00:00').toISOString();
+        const endStr = new Date(endDate + 'T23:59:59').toISOString();
+
+        console.log('[Export] Dispatching to worker...');
+        generalReportWorker.postMessage({
+            type: 'GENERATE_EXPORT_DATA',
+            payload: { transactions, items, startDate: startStr, endDate: endStr, mode: currentMode }
+        });
+
+        const result = await new Promise((resolve, reject) => {
+            exportResolve = resolve;
+            exportReject = reject;
+        });
+
+        console.log(`[Export] Worker returned ${result.totalRows} rows in ${(performance.now() - t0).toFixed(0)}ms total`);
+        exportPanelData = result;
+        return result;
+    }
+
+    // Generate Preview (optional — just for viewing)
+    document.getElementById('btn-generate-preview').addEventListener('click', async () => {
         const previewArea = document.getElementById('export-preview-area');
-        previewArea.innerHTML = `
-            <div class="flex justify-center items-center p-10">
-                <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
-            </div>
-        `;
-
+        previewArea.innerHTML = `<div class="flex justify-center items-center p-10"><div class="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div></div>`;
         try {
-            const db = await dbPromise;
-            const transactions = await db.transactions.toArray();
-            const items = await db.items.toArray();
-
-            const startStr = new Date(startDate + 'T00:00:00').toISOString();
-            const endStr = new Date(endDate + 'T23:59:59').toISOString();
-
-            generalReportWorker.postMessage({
-                type: 'GENERATE_EXPORT_DATA',
-                payload: { transactions, items, startDate: startStr, endDate: endStr, mode: currentMode }
-            });
-
-            const result = await new Promise((resolve, reject) => {
-                exportResolve = resolve;
-                exportReject = reject;
-            });
-
-            exportPanelData = result;
-            renderExportPreview(result);
-            document.getElementById('btn-download-export').disabled = false;
+            const result = await fetchExportData();
+            if (result) renderExportPreview(result);
         } catch (err) {
-            previewArea.innerHTML = `
-                <div class="p-6 text-center text-red-500">
-                    <p class="font-bold">Error generating preview</p>
-                    <p class="text-sm mt-1">${err.message}</p>
-                </div>
-            `;
+            console.error('[Export] Preview error:', err);
+            previewArea.innerHTML = `<div class="p-6 text-center text-red-500"><p class="font-bold">Error generating preview</p><p class="text-sm mt-1">${err.message}</p></div>`;
         }
     });
 
-    // Download
-    document.getElementById('btn-download-export').addEventListener('click', () => {
-        if (!exportPanelData) return;
+    // Download — works independently, fetches data if not already cached
+    document.getElementById('btn-download-export').addEventListener('click', async () => {
         const startDate = document.getElementById('export-start-date').value;
         const endDate = document.getElementById('export-end-date').value;
+        console.log(`[Export] Download clicked, format: ${currentFormat}`);
 
-        if (currentFormat === 'csv') exportSalesCSV(exportPanelData, startDate, endDate);
-        else if (currentFormat === 'json') exportSalesJSON(exportPanelData, startDate, endDate);
-        else if (currentFormat === 'pdf') exportSalesPDF(exportPanelData, startDate, endDate);
+        try {
+            // Fetch data if not already available
+            if (!exportPanelData) {
+                console.log('[Export] No cached data, fetching first...');
+                const btn = document.getElementById('btn-download-export');
+                btn.innerHTML = `<div class="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div> Preparing...`;
+                btn.disabled = true;
+                const result = await fetchExportData();
+                btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg> Download`;
+                btn.disabled = false;
+                if (!result) return;
+            }
+
+            console.log(`[Export] Exporting as ${currentFormat}, ${exportPanelData.totalRows} rows`);
+            if (currentFormat === 'csv') exportSalesCSV(exportPanelData, startDate, endDate);
+            else if (currentFormat === 'json') exportSalesJSON(exportPanelData, startDate, endDate);
+            else if (currentFormat === 'pdf') exportSalesPDF(exportPanelData, startDate, endDate);
+        } catch (err) {
+            console.error('[Export] Download error:', err);
+            alert('Export failed: ' + err.message);
+        }
     });
 }
 
 function renderExportPreview(data) {
+    console.log('[Export] Rendering preview table...');
+    const t0 = performance.now();
     const previewArea = document.getElementById('export-preview-area');
     const { mode, rows, totalRows } = data;
-    const previewRows = rows.slice(0, 25);
+    const previewRows = rows.slice(0, 15);
 
     if (rows.length === 0) {
         previewArea.innerHTML = `
@@ -2151,7 +2169,7 @@ function renderExportPreview(data) {
         tableHTML = `
             <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
                 <span class="text-sm font-bold text-gray-700">Preview — Daily Transactions</span>
-                <span class="text-xs text-gray-500">${totalRows} total rows${totalRows > 25 ? ' (showing first 25)' : ''}</span>
+                <span class="text-xs text-gray-500">${totalRows} total rows${totalRows > 15 ? ' (showing first 15)' : ''}</span>
             </div>
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-200 text-sm">
@@ -2190,7 +2208,7 @@ function renderExportPreview(data) {
         tableHTML = `
             <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex justify-between items-center">
                 <span class="text-sm font-bold text-gray-700">Preview — Daily Summary</span>
-                <span class="text-xs text-gray-500">${totalRows} total rows${totalRows > 25 ? ' (showing first 25)' : ''}</span>
+                <span class="text-xs text-gray-500">${totalRows} total rows${totalRows > 15 ? ' (showing first 15)' : ''}</span>
             </div>
             <div class="overflow-x-auto">
                 <table class="min-w-full divide-y divide-gray-200 text-sm">
@@ -2240,11 +2258,13 @@ function renderExportPreview(data) {
     `;
 
     previewArea.innerHTML = tableHTML;
+    console.log(`[Export] Preview rendered in ${(performance.now() - t0).toFixed(0)}ms`);
 }
 
 // --- Export Download Functions ---
 
 function exportSalesCSV(data, startDate, endDate) {
+    console.log('[Export] Building CSV...');
     const { mode, rows } = data;
     let headers, csvRows;
 
@@ -2264,9 +2284,11 @@ function exportSalesCSV(data, startDate, endDate) {
 
     const csvContent = [headers.join(','), ...csvRows.map(r => r.join(','))].join('\n');
     downloadFile(csvContent, `sales_${mode}_${startDate}_to_${endDate}.csv`, 'text/csv;charset=utf-8;');
+    console.log('[Export] CSV download triggered');
 }
 
 function exportSalesJSON(data, startDate, endDate) {
+    console.log('[Export] Building JSON...');
     const { mode, rows } = data;
     const exportObj = {
         reportType: 'Sales Summary',
@@ -2284,9 +2306,11 @@ function exportSalesJSON(data, startDate, endDate) {
     };
     const jsonStr = JSON.stringify(exportObj, null, 2);
     downloadFile(jsonStr, `sales_${mode}_${startDate}_to_${endDate}.json`, 'application/json');
+    console.log('[Export] JSON download triggered');
 }
 
 function exportSalesPDF(data, startDate, endDate) {
+    console.log('[Export] Building PDF...');
     const { mode, rows } = data;
 
     if (typeof window.jspdf === 'undefined') {
@@ -2350,6 +2374,7 @@ function exportSalesPDF(data, startDate, endDate) {
     });
 
     doc.save(`sales_${mode}_${startDate}_to_${endDate}.pdf`);
+    console.log('[Export] PDF download triggered');
 }
 
 function downloadFile(content, filename, mimeType) {
