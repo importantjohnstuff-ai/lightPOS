@@ -10,7 +10,10 @@ self.onmessage = function (e) {
             const result = generateSalesSummary(payload);
             self.postMessage({ type: 'Re:GENERATE_SUMMARY', success: true, data: result });
         } else if (type === 'GENERATE_EXPORT_DATA') {
+            console.log('[Worker] GENERATE_EXPORT_DATA received, mode:', payload.mode);
+            const t0 = performance.now();
             const result = generateExportData(payload);
+            console.log(`[Worker] GENERATE_EXPORT_DATA done in ${(performance.now() - t0).toFixed(0)}ms, rows: ${result.totalRows}`);
             self.postMessage({ type: 'Re:GENERATE_EXPORT_DATA', success: true, data: result });
         }
     } catch (error) {
