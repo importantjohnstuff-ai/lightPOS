@@ -1679,6 +1679,11 @@ async function analyzeSync() {
 
     try {
         const serverRes = await fetch(`${API_URL}?since=0&_t=${Date.now()}`, { headers: { 'Cache-Control': 'no-cache' } });
+        if (!serverRes.ok) {
+            const errorText = await serverRes.text();
+            console.error(`Server returned ${serverRes.status}:`, errorText);
+            throw new Error(`Server returned HTTP ${serverRes.status}. Check PHP error logs for details.`);
+        }
         const response = await serverRes.json();
         const serverDeltas = response.deltas || {};
 
@@ -1822,8 +1827,8 @@ async function analyzeSync() {
             if (btnSyncAll) btnSyncAll.classList.remove("hidden");
         }
     } catch (e) {
-        console.error(e);
-        tbody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-red-600">Error analyzing data. Check console.</td></tr>`;
+        console.error('Analyze Sync Error:', e);
+        tbody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-red-600">Error: ${e.message}</td></tr>`;
     } finally {
         btnAnalyze.disabled = false; btnAnalyze.classList.remove("opacity-50");
     }
@@ -1838,6 +1843,11 @@ async function syncAllDiffs() {
 
     try {
         const serverRes = await fetch(`${API_URL}?since=0&_t=${Date.now()}`, { headers: { 'Cache-Control': 'no-cache' } });
+        if (!serverRes.ok) {
+            const errorText = await serverRes.text();
+            console.error(`Server returned ${serverRes.status}:`, errorText);
+            throw new Error(`Server returned HTTP ${serverRes.status}. Check PHP error logs for details.`);
+        }
         const response = await serverRes.json();
         const serverDeltas = response.deltas || {};
 

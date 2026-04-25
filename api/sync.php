@@ -446,9 +446,15 @@ if ($method === 'GET') {
 
     foreach ($collections as $col) {
         $debug_info['queries'][$col] = "SELECT * FROM $col WHERE _updatedAt > $since";
-        $deltas = $store->getChanges($col, $since);
-        if (!empty($deltas)) {
-            $response[$col] = $deltas;
+        try {
+            $deltas = $store->getChanges($col, $since);
+            if (!empty($deltas)) {
+                $response[$col] = $deltas;
+            }
+        } catch (Exception $e) {
+            // Log but don't crash — the table may not exist yet
+            error_log("sync.php: getChanges failed for '$col': " . $e->getMessage());
+            $debug_info['errors'][$col] = $e->getMessage();
         }
     }
 

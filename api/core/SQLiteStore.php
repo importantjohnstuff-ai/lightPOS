@@ -84,10 +84,16 @@ class SQLiteStore
         if (!in_array($collection, $this->collections)) {
             throw new Exception("Unknown collection: $collection");
         }
-        $stmt = $this->pdo->prepare("SELECT * FROM $collection WHERE _updatedAt > ?");
-        $stmt->execute([$since]);
-        $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        return array_map([$this, 'hydrate'], $results);
+        try {
+            $stmt = $this->pdo->prepare("SELECT * FROM $collection WHERE _updatedAt > ?");
+            $stmt->execute([$since]);
+            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            return array_map([$this, 'hydrate'], $results);
+        } catch (PDOException $e) {
+            // Table may not exist yet — return empty rather than crashing
+            error_log("SQLiteStore::getChanges('$collection'): " . $e->getMessage());
+            return [];
+        }
     }
 
     public function upsert($collection, $record)
