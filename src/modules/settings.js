@@ -1678,22 +1678,6 @@ async function analyzeSync() {
     ];
 
     try {
-        const serverRes = await fetch(`${API_URL}?since=0&_t=${Date.now()}`, { headers: { 'Cache-Control': 'no-cache' } });
-        if (!serverRes.ok) {
-            const errorText = await serverRes.text();
-            console.error(`Server returned ${serverRes.status}:`, errorText);
-            let errorMsg = `Server returned HTTP ${serverRes.status}.`;
-            try {
-                const errorJson = JSON.parse(errorText);
-                if (errorJson.message) errorMsg += ` ${errorJson.message} (${errorJson.file}:${errorJson.line})`;
-            } catch(_) {
-                if (errorText) errorMsg += ` Response: ${errorText.substring(0, 200)}`;
-            }
-            throw new Error(errorMsg);
-        }
-        const response = await serverRes.json();
-        const serverDeltas = response.deltas || {};
-
         let totalServer = 0;
         let totalLocal = 0;
         let hasDiff = false;
@@ -1752,10 +1736,27 @@ async function analyzeSync() {
             tbody.appendChild(trDetails);
         };
 
-        for (const collection of collections) {
+        // Fetch each collection individually to avoid server memory exhaustion
+        for (let ci = 0; ci < collections.length; ci++) {
+            const collection = collections[ci];
             if (!db[collection]) continue;
 
-            const sData = serverDeltas[collection] || [];
+            // Update progress
+            tbody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-gray-500">Analyzing: ${collection} (${ci + 1}/${collections.length})...</td></tr>`;
+
+            let sData = [];
+            try {
+                const serverRes = await fetch(`${ADMIN_API_URL}?file=${collection}&_t=${Date.now()}`, { headers: { 'Cache-Control': 'no-cache' } });
+                if (serverRes.ok) {
+                    sData = await serverRes.json();
+                    if (!Array.isArray(sData)) sData = [];
+                } else {
+                    console.warn(`Failed to fetch ${collection} from server: HTTP ${serverRes.status}`);
+                }
+            } catch (fetchErr) {
+                console.warn(`Failed to fetch ${collection}:`, fetchErr);
+            }
+
             const lData = await db[collection].toArray();
 
             totalServer += sData.length;
@@ -1779,6 +1780,8 @@ async function analyzeSync() {
             });
 
             if (onlyInServer.length > 0 || onlyInLocal.length > 0 || conflicts.length > 0) {
+                // Clear progress row on first diff found
+                if (!hasDiff) tbody.innerHTML = "";
                 hasDiff = true;
                 const labelName = collection.charAt(0).toUpperCase() + collection.slice(1).replace(/_/g, ' ');
 
@@ -1849,24 +1852,30 @@ async function syncAllDiffs() {
     btn.textContent = "Resolving...";
 
     try {
-        const serverRes = await fetch(`${API_URL}?since=0&_t=${Date.now()}`, { headers: { 'Cache-Control': 'no-cache' } });
-        if (!serverRes.ok) {
-            const errorText = await serverRes.text();
-            console.error(`Server returned ${serverRes.status}:`, errorText);
-            throw new Error(`Server returned HTTP ${serverRes.status}. Check PHP error logs for details.`);
-        }
-        const response = await serverRes.json();
-        const serverDeltas = response.deltas || {};
-
         const collections = [
             'items', 'transactions', 'customers', 'suppliers', 'expenses',
             'shifts', 'returns', 'stock_movements', 'stock_logs',
             'adjustments', 'stockins', 'suspended_transactions', 'users'
         ];
 
-        for (const collection of collections) {
+        for (let ci = 0; ci < collections.length; ci++) {
+            const collection = collections[ci];
             if (!db[collection]) continue;
-            const sData = serverDeltas[collection] || [];
+
+            btn.textContent = `Resolving ${ci + 1}/${collections.length}...`;
+
+            let sData = [];
+            try {
+                const serverRes = await fetch(`${ADMIN_API_URL}?file=${collection}&_t=${Date.now()}`, { headers: { 'Cache-Control': 'no-cache' } });
+                if (serverRes.ok) {
+                    sData = await serverRes.json();
+                    if (!Array.isArray(sData)) sData = [];
+                }
+            } catch (fetchErr) {
+                console.warn(`Failed to fetch ${collection}:`, fetchErr);
+                continue;
+            }
+
             const lData = await db[collection].toArray();
             const idField = db[collection].schema.primKey.name;
 
