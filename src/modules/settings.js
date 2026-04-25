@@ -1736,13 +1736,22 @@ async function analyzeSync() {
             tbody.appendChild(trDetails);
         };
 
+        // Add a progress bar above the table so we don't clear diff rows
+        let progressDiv = document.getElementById("analyze-progress-info");
+        if (!progressDiv) {
+            progressDiv = document.createElement("div");
+            progressDiv.id = "analyze-progress-info";
+            progressDiv.className = "p-3 mb-2 text-center text-blue-800 bg-blue-100 rounded text-sm font-semibold";
+            resultsDiv.insertBefore(progressDiv, resultsDiv.firstChild);
+        }
+
         // Fetch each collection individually to avoid server memory exhaustion
         for (let ci = 0; ci < collections.length; ci++) {
             const collection = collections[ci];
             if (!db[collection]) continue;
 
             // Update progress
-            tbody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-gray-500">Analyzing: ${collection} (${ci + 1}/${collections.length})...</td></tr>`;
+            progressDiv.textContent = `Analyzing: ${collection} (${ci + 1}/${collections.length})...`;
 
             let sData = [];
             try {
@@ -1757,7 +1766,9 @@ async function analyzeSync() {
                 console.warn(`Failed to fetch ${collection}:`, fetchErr);
             }
 
-            const lData = await db[collection].toArray();
+            const rawLocal = await db[collection].toArray();
+            // Ignore locally deleted records, as the server API also omits deleted records
+            const lData = rawLocal.filter(i => !(i._deleted === 1 || i._deleted === true));
 
             totalServer += sData.length;
             totalLocal += lData.length;
@@ -1836,9 +1847,13 @@ async function analyzeSync() {
             statusEl.className = "text-lg font-bold text-red-600";
             if (btnSyncAll) btnSyncAll.classList.remove("hidden");
         }
+        
+        if (progressDiv) progressDiv.remove();
     } catch (e) {
         console.error('Analyze Sync Error:', e);
         tbody.innerHTML = `<tr><td colspan="3" class="p-4 text-center text-red-600">Error: ${e.message}</td></tr>`;
+        const pd = document.getElementById("analyze-progress-info");
+        if (pd) pd.remove();
     } finally {
         btnAnalyze.disabled = false; btnAnalyze.classList.remove("opacity-50");
     }
@@ -1876,7 +1891,8 @@ async function syncAllDiffs() {
                 continue;
             }
 
-            const lData = await db[collection].toArray();
+            const rawLocal = await db[collection].toArray();
+            const lData = rawLocal.filter(i => !(i._deleted === 1 || i._deleted === true));
             const idField = db[collection].schema.primKey.name;
 
             const sMap = new Map(sData.map(i => [i[idField], i]));
