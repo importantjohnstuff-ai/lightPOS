@@ -1682,7 +1682,14 @@ async function analyzeSync() {
         if (!serverRes.ok) {
             const errorText = await serverRes.text();
             console.error(`Server returned ${serverRes.status}:`, errorText);
-            throw new Error(`Server returned HTTP ${serverRes.status}. Check PHP error logs for details.`);
+            let errorMsg = `Server returned HTTP ${serverRes.status}.`;
+            try {
+                const errorJson = JSON.parse(errorText);
+                if (errorJson.message) errorMsg += ` ${errorJson.message} (${errorJson.file}:${errorJson.line})`;
+            } catch(_) {
+                if (errorText) errorMsg += ` Response: ${errorText.substring(0, 200)}`;
+            }
+            throw new Error(errorMsg);
         }
         const response = await serverRes.json();
         const serverDeltas = response.deltas || {};

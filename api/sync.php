@@ -3,12 +3,35 @@
  * Sync Endpoint for the Self-Healing Architecture.
  * Handles Push (mutations) and Pull (deltas).
  */
-require_once __DIR__ . '/core/SQLiteStore.php';
-require_once __DIR__ . '/services/ProcurementService.php';
+
+// DEBUG: Enable error display so fatal errors produce visible output
+ini_set('display_errors', 0); // Don't display raw — we'll capture via shutdown handler
+ini_set('log_errors', 1);
+error_reporting(E_ALL);
 
 header('Content-Type: application/json');
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Pragma: no-cache");
+
+// Global shutdown handler to catch fatal errors and return JSON
+register_shutdown_function(function () {
+    $error = error_get_last();
+    if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        // Clear any partial output
+        if (ob_get_length()) ob_end_clean();
+        http_response_code(500);
+        header('Content-Type: application/json');
+        echo json_encode([
+            'error' => 'PHP Fatal Error',
+            'message' => $error['message'],
+            'file' => basename($error['file']),
+            'line' => $error['line']
+        ]);
+    }
+});
+
+require_once __DIR__ . '/core/SQLiteStore.php';
+require_once __DIR__ . '/services/ProcurementService.php';
 
 $dataDir = __DIR__ . '/../data/';
 $restoreLockFile = $dataDir . 'restore.lock';
