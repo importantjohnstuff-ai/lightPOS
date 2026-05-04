@@ -70,37 +70,52 @@ export const SyncEngine = {
         const since = lastSyncMeta ? lastSyncMeta.value : 0;
         console.log(`SyncEngine: Pulling changes since timestamp: ${since}`);
 
-        const response = await fetch(`${SYNC_URL}?since=${since}`);
-        const text = await response.text();
+        const collections = [
+            'items', 'transactions', 'shifts', 'expenses', 'users',
+            'stock_movements', 'adjustments', 'customers', 'suppliers',
+            'stockins', 'suspended_transactions', 'returns', 'notifications',
+            'stock_logs', 'settings', 'purchase_orders', 'supplier_config',
+            'inventory_metrics', 'spatial_shelves', 'spatial_placements',
+            'discount_codes'
+        ];
 
-        if (!response.ok) {
-            console.error("SyncEngine: Pull failed. Status:", response.status, "Response:", text);
-            throw new Error(`Pull failed: ${response.status} ${text}`);
-        }
+        let maxServerTime = 0;
+        let needsRestore = false;
 
-        let data;
-        try {
-            data = JSON.parse(text);
-        } catch (e) {
-            console.error("SyncEngine: JSON Parse Error. Raw response:", text);
-            throw new Error("Server returned invalid JSON. Check console for details.");
-        }
+        for (const collection of collections) {
+            console.log(`SyncEngine: Pulling collection [${collection}]`);
+            const response = await fetch(`${SYNC_URL}?since=${since}&collection=${collection}`);
+            const text = await response.text();
 
-        if (data.status === 'needs_restore') {
-            console.warn("Server database needs restore. Initiating full upload from client.");
-            await this.performFullRestore();
-            return; // Stop normal pull process
-        }
+            if (!response.ok) {
+                console.error(`SyncEngine: Pull failed for ${collection}. Status:`, response.status, "Response:", text);
+                throw new Error(`Pull failed for ${collection}: ${response.status} ${text}`);
+            }
 
-        const { deltas, serverTime } = data;
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (e) {
+                console.error(`SyncEngine: JSON Parse Error for ${collection}. Raw response:`, text);
+                throw new Error(`Server returned invalid JSON for ${collection}. Check console for details.`);
+            }
 
-        console.log(`SyncEngine: Received serverTime: ${serverTime}`);
-        console.log('SyncEngine: Received deltas from server:', JSON.parse(JSON.stringify(deltas)));
+            if (data.status === 'needs_restore') {
+                needsRestore = true;
+                break;
+            }
 
-        for (const [collection, items] of Object.entries(deltas)) {
-            if (!db[collection] || items.length === 0) continue;
+            const { deltas, serverTime } = data;
+            if (serverTime > maxServerTime) {
+                maxServerTime = serverTime;
+            }
 
+            if (!deltas || !deltas[collection] || deltas[collection].length === 0) continue;
+
+            const items = deltas[collection];
             console.log(`SyncEngine: Processing [${items.length}] items for collection [${collection}]`);
+
+            if (!db[collection]) continue;
 
             try {
                 await db.transaction('rw', [db[collection], db.outbox], async () => {
@@ -143,8 +158,6 @@ export const SyncEngine = {
                             (serverVersion === localVersion && serverUpdated > localUpdated);
 
                         if (shouldUpdate) {
-                            // logging every single item is too noisy for bulk ops
-                            // console.log(`SyncEngine: Queueing update for ${docId}`);
                             itemsToPut.push(serverItem);
                             docIdsToClearOutbox.push(docId);
                         }
@@ -154,16 +167,8 @@ export const SyncEngine = {
                         console.log(`SyncEngine: Bulk updating ${itemsToPut.length} items in [${collection}]`);
                         await db[collection].bulkPut(itemsToPut);
 
-                        // Bulk clear outbox for these items
-                        // We need to find the Primary Keys of the outbox entries that match [collection + docId]
-                        // Since 'outbox' has a compound index [collection+docId], we can use it.
-                        // However, anyOf() with compound keys can be tricky in some Dexie versions.
-                        // Safe fallback: Find them using complex query or simple iteration if index exists.
-
                         try {
                             const outboxKeysToDelete = [];
-                            // Optimization: Fetch all outbox items for this collection (usually few) and filter in memory
-                            // This avoids N queries.
                             const outboxItems = await db.outbox.where('collection').equals(collection).toArray();
 
                             for (const outboxItem of outboxItems) {
@@ -185,7 +190,15 @@ export const SyncEngine = {
             }
         }
 
-        await db.sync_metadata.put({ key: 'last_pull_timestamp', value: serverTime });
+        if (needsRestore) {
+            console.warn("Server database needs restore. Initiating full upload from client.");
+            await this.performFullRestore();
+            return; // Stop normal pull process
+        }
+
+        if (maxServerTime > 0) {
+            await db.sync_metadata.put({ key: 'last_pull_timestamp', value: maxServerTime });
+        }
     },
 
     async performFullRestore() {

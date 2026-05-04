@@ -461,6 +461,10 @@ if ($method === 'GET') {
         'spatial_placements',
         'discount_codes'
     ];
+
+    if (isset($_GET['collection']) && in_array($_GET['collection'], $collections)) {
+        $collections = [$_GET['collection']];
+    }
     $response = [];
     $debug_info = [
         'received_since' => $since,
