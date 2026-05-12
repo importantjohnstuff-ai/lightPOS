@@ -1,13 +1,64 @@
 <?php
+// Start output buffering early to capture any stray PHP warnings/notices
+// that would otherwise corrupt JSON responses (especially during schema init)
+ob_start();
+
 header("Access-Control-Allow-Origin: *");
 header("Content-Type: application/json; charset=UTF-8");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With");
 
-// DEBUG: Enable error display to debug 500 crashes
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+// Log errors to server log instead of outputting them into the response body
+ini_set('display_errors', 0);
+ini_set('display_startup_errors', 0);
+ini_set('log_errors', 1);
 error_reporting(E_ALL);
+
+// Register shutdown function to flush clean output and catch fatal errors
+register_shutdown_function(function () {
+    // Capture any stray output (PHP warnings, notices, etc.)
+    $strayOutput = ob_get_clean();
+    if ($strayOutput !== false && strlen(trim($strayOutput)) > 0) {
+        // Check if the output is valid JSON already
+        json_decode($strayOutput);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            // Clean JSON — send it as-is
+            echo $strayOutput;
+        } else {
+            // Output contains non-JSON content (PHP warnings mixed in)
+            // Try to extract just the JSON portion
+            $jsonStart = strpos($strayOutput, '{');
+            $jsonEnd = strrpos($strayOutput, '}');
+            if ($jsonStart !== false && $jsonEnd !== false) {
+                $jsonCandidate = substr($strayOutput, $jsonStart, $jsonEnd - $jsonStart + 1);
+                json_decode($jsonCandidate);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    // Log the stray non-JSON output for debugging
+                    $strayPart = substr($strayOutput, 0, $jsonStart);
+                    if (trim($strayPart)) {
+                        error_log("Stray PHP output captured (before JSON): " . trim($strayPart));
+                    }
+                    echo $jsonCandidate;
+                    return;
+                }
+            }
+            // Could not extract valid JSON — log the stray output and send an error
+            error_log("Stray PHP output captured (no valid JSON found): " . $strayOutput);
+            http_response_code(500);
+            echo json_encode(["error" => "Server produced invalid output. Check server logs."]);
+        }
+    }
+    // Check for fatal errors
+    $error = error_get_last();
+    if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        error_log("Fatal PHP error: " . $error['message'] . " in " . $error['file'] . ":" . $error['line']);
+        // Only send response if nothing was already sent
+        if (!headers_sent()) {
+            http_response_code(500);
+            echo json_encode(["error" => "Server Error: " . $error['message']]);
+        }
+    }
+});
 
 // Add a special action to clear OPcache for debugging
 if (isset($_GET['action']) && $_GET['action'] === 'clear_opcache') {

@@ -6,29 +6,50 @@ const API_URL = 'api/router.php';
 let currentUserProfile = null;
 
 export async function login(email, password) {
-    try {
-        const response = await fetch(`${API_URL}?action=login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password })
-        });
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY_MS = 1000;
 
-        const text = await response.text();
-        console.log("Server Response:", text); // Debug log
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const response = await fetch(`${API_URL}?action=login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password })
+            });
 
-        const data = JSON.parse(text);
+            const text = await response.text();
+            console.log("Server Response:", text); // Debug log
 
-        if (response.ok && data.success) {
-            currentUserProfile = data.user;
-            console.log("Logged in user profile:", currentUserProfile); // Added for debugging
-            localStorage.setItem('pos_user', JSON.stringify(currentUserProfile));
-            return { success: true, user: currentUserProfile };
-        } else {
-            return { success: false, error: data.error || 'Login failed' };
+            // Safely parse JSON — server may return non-JSON on first load (schema init)
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (parseError) {
+                console.warn(`Login attempt ${attempt}/${MAX_RETRIES}: Server returned non-JSON response (likely initializing). Retrying...`);
+                if (attempt < MAX_RETRIES) {
+                    await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+                    continue;
+                }
+                return { success: false, error: 'Server is still initializing. Please try again in a moment.' };
+            }
+
+            if (response.ok && data.success) {
+                currentUserProfile = data.user;
+                console.log("Logged in user profile:", currentUserProfile);
+                localStorage.setItem('pos_user', JSON.stringify(currentUserProfile));
+                return { success: true, user: currentUserProfile };
+            } else {
+                return { success: false, error: data.error || 'Login failed' };
+            }
+        } catch (error) {
+            console.warn(`Login attempt ${attempt}/${MAX_RETRIES} failed:`, error.message);
+            if (attempt < MAX_RETRIES) {
+                await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+                continue;
+            }
+            console.error("Login Error (all retries exhausted):", error);
+            return { success: false, error: error.message };
         }
-    } catch (error) {
-        console.error("Login Error:", error);
-        return { success: false, error: error.message };
     }
 }
 
