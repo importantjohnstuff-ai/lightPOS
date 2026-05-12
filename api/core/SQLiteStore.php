@@ -5,7 +5,7 @@ require_once __DIR__ . '/../db/Database.php';
 class SQLiteStore
 {
     // Version identifier - update this when making changes to verify deployment
-    const VERSION = '2026-01-19-v4-DEBUG_LOGGING';
+    const VERSION = '2026-01-19-v5-STABILITY_EMULATION';
 
     public $pdo;
     private $collections;
@@ -21,18 +21,21 @@ class SQLiteStore
         ini_set('precision', 14);
 
         $this->pdo = Database::getInstance()->getConnection();
-        // Disable WAL mode to prevent locking issues on some filesystems
-        // Enable WAL mode for better concurrency
-        $this->pdo->exec("PRAGMA journal_mode=WAL;");
-        $this->pdo->exec("PRAGMA busy_timeout = 5000;");
-        // Disable emulated prepares to avoid "General error: 21 bad parameter or other API misuse"
-        // Native SQLite binding correctly handles high-precision numbers and NULL values.
+
+        // ENABLE emulated prepares for maximum stability.
+        // Emulation handles large integers (64-bit) as strings before sending to SQLite,
+        // which avoids 32-bit overflow issues in the PHP-PDO C-bridge on many systems.
         try {
-            $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
-            error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=false (Fix for Error 21)");
+            $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, true);
+            error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=true (Stability Fix)");
         } catch (Exception $e) {
             error_log("SQLiteStore warning: Could not set ATTR_EMULATE_PREPARES: " . $e->getMessage());
         }
+
+        // Enable WAL mode for better concurrency
+        $this->pdo->exec("PRAGMA journal_mode=WAL;");
+        $this->pdo->exec("PRAGMA busy_timeout = 5000;");
+
         $this->collections = [
             'items',
             'transactions',
@@ -207,18 +210,11 @@ class SQLiteStore
                     $paramPos = $i + 1;
                     if (is_null($val)) {
                         $stmtUpdate->bindValue($paramPos, null, PDO::PARAM_NULL);
-                    } elseif (is_bool($val)) {
-                        $stmtUpdate->bindValue($paramPos, $val ? '1' : '0', PDO::PARAM_STR);
-                    } elseif (is_int($val)) {
-                        $stmtUpdate->bindValue($paramPos, $val, PDO::PARAM_INT);
-                    } elseif (is_float($val) && floor($val) == $val) {
-                        // Large timestamps on 32-bit PHP systems are floats. 
-                        // Bind as string to allow SQLite to coerce it safely without float-to-int overflow.
-                        $stmtUpdate->bindValue($paramPos, (string)$val, PDO::PARAM_STR);
-                    } elseif (is_array($val) || is_object($val)) {
-                        $stmtUpdate->bindValue($paramPos, json_encode($val), PDO::PARAM_STR);
                     } else {
-                        $stmtUpdate->bindValue($paramPos, (string)$val, PDO::PARAM_STR);
+                        // Cast everything else to string for absolute stability.
+                        // SQLite's Type Affinity will correctly convert numeric strings back to numbers.
+                        $valToBind = (is_array($val) || is_object($val)) ? json_encode($val) : (string)$val;
+                        $stmtUpdate->bindValue($paramPos, $valToBind, PDO::PARAM_STR);
                     }
                 }
 
@@ -240,16 +236,9 @@ class SQLiteStore
                 $paramPos = $i + 1;
                 if (is_null($val)) {
                     $stmt->bindValue($paramPos, null, PDO::PARAM_NULL);
-                } elseif (is_bool($val)) {
-                    $stmt->bindValue($paramPos, $val ? '1' : '0', PDO::PARAM_STR);
-                } elseif (is_int($val)) {
-                    $stmt->bindValue($paramPos, $val, PDO::PARAM_INT);
-                } elseif (is_float($val) && floor($val) == $val) {
-                    $stmt->bindValue($paramPos, (string)$val, PDO::PARAM_STR);
-                } elseif (is_array($val) || is_object($val)) {
-                    $stmt->bindValue($paramPos, json_encode($val), PDO::PARAM_STR);
                 } else {
-                    $stmt->bindValue($paramPos, (string)$val, PDO::PARAM_STR);
+                    $valToBind = (is_array($val) || is_object($val)) ? json_encode($val) : (string)$val;
+                    $stmt->bindValue($paramPos, $valToBind, PDO::PARAM_STR);
                 }
             }
 
