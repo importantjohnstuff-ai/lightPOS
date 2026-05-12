@@ -5,8 +5,8 @@ ob_start();
 
 ini_set('serialize_precision', -1);
 ini_set('precision', 14);
-ini_set('memory_limit', '512M');
-ini_set('max_execution_time', 120);
+ini_set('memory_limit', '1024M');
+ini_set('max_execution_time', 300);
 
 header("Access-Control-Allow-Origin: *");
 header("Content-Type: application/json; charset=UTF-8");
@@ -205,6 +205,7 @@ $action = $_GET['action'] ?? null;
 $file = $_GET['file'] ?? null;
 $mode = $_GET['mode'] ?? 'overwrite';
 $dryRun = isset($_GET['dry_run']) && $_GET['dry_run'] === 'true';
+$fields = $_GET['fields'] ?? null;
 
 if ($file && !in_array($file, $allowedFiles)) {
     http_response_code(400);
@@ -214,7 +215,22 @@ if ($file && !in_array($file, $allowedFiles)) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     if ($file) {
-        $data = $store->getAll($file);
+        if ($fields) {
+            $cols = explode(',', $fields);
+            // Simple sanitization: only allow alphanumeric and underscores
+            $cols = array_filter($cols, function($c) { return preg_match('/^[a-zA-Z0-9_]+$/', trim($c)); });
+            if (empty($cols)) {
+                http_response_code(400);
+                echo json_encode(["error" => "Invalid fields"]);
+                exit;
+            }
+            $sql = "SELECT " . implode(',', $cols) . " FROM $file WHERE _deleted = 0";
+            $stmt = $store->pdo->prepare($sql);
+            $stmt->execute();
+            $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            $data = $store->getAll($file);
+        }
         // Decode permissions_json for the frontend
         if ($file === 'users') {
             foreach ($data as &$row) {

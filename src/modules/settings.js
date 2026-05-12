@@ -1800,17 +1800,33 @@ async function analyzeSync() {
             const collection = collections[ci];
             if (!db[collection]) continue;
 
+            const idField = db[collection].schema.primKey.name;
+
             // Update progress
             progressDiv.textContent = `Analyzing: ${collection} (${ci + 1}/${collections.length})...`;
 
             let sData = [];
             try {
-                const serverRes = await fetch(`${ADMIN_API_URL}?file=${collection}&_t=${Date.now()}`, { headers: { 'Cache-Control': 'no-cache' } });
+                let url = `${ADMIN_API_URL}?file=${collection}&_t=${Date.now()}`;
+                // Optimization: For large collections, only fetch metadata + preview fields to avoid memory crashes
+                if (collection === 'transactions' || collection === 'items') {
+                    const fields = [idField, '_version', '_updatedAt'];
+                    if (collection === 'transactions') {
+                        fields.push('timestamp', 'total_amount', 'customer_name');
+                    } else if (collection === 'items') {
+                        fields.push('name', 'barcode', 'stock_level');
+                    }
+                    url += `&fields=${fields.join(',')}`;
+                }
+                
+                const serverRes = await fetch(url, { headers: { 'Cache-Control': 'no-cache' } });
                 if (serverRes.ok) {
                     sData = await serverRes.json();
                     if (!Array.isArray(sData)) sData = [];
                 } else {
                     console.warn(`Failed to fetch ${collection} from server: HTTP ${serverRes.status}`);
+                    const errText = await serverRes.text();
+                    console.error("Server Error Details:", errText);
                 }
             } catch (fetchErr) {
                 console.warn(`Failed to fetch ${collection}:`, fetchErr);
