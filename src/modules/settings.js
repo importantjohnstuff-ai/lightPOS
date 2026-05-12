@@ -1839,7 +1839,6 @@ async function analyzeSync() {
             totalServer += sData.length;
             totalLocal += lData.length;
 
-            const idField = db[collection].schema.primKey.name;
             const sMap = new Map(sData.map(i => [i[idField], i]));
             const lMap = new Map(lData.map(i => [i[idField], i]));
 
