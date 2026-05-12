@@ -1674,7 +1674,9 @@ async function analyzeSync() {
     const collections = [
         'items', 'transactions', 'customers', 'suppliers', 'expenses',
         'shifts', 'returns', 'stock_movements', 'stock_logs',
-        'adjustments', 'stockins', 'suspended_transactions', 'users'
+        'adjustments', 'stockins', 'suspended_transactions', 'users',
+        'purchase_orders', 'supplier_config', 'inventory_metrics', 'discount_codes',
+        'spatial_shelves', 'spatial_placements', 'settings'
     ];
 
     try {
@@ -1870,7 +1872,9 @@ async function syncAllDiffs() {
         const collections = [
             'items', 'transactions', 'customers', 'suppliers', 'expenses',
             'shifts', 'returns', 'stock_movements', 'stock_logs',
-            'adjustments', 'stockins', 'suspended_transactions', 'users'
+            'adjustments', 'stockins', 'suspended_transactions', 'users',
+            'purchase_orders', 'supplier_config', 'inventory_metrics', 'discount_codes',
+            'spatial_shelves', 'spatial_placements', 'settings'
         ];
 
         for (let ci = 0; ci < collections.length; ci++) {
@@ -1964,7 +1968,9 @@ async function downloadServerBackup() {
     const files = [
         'sync_metadata', 'items', 'transactions', 'suppliers', 'customers',
         'expenses', 'returns', 'shifts', 'stock_movements', 'stock_logs',
-        'adjustments', 'stockins', 'suspended_transactions', 'notifications', 'users'
+        'adjustments', 'stockins', 'suspended_transactions', 'notifications', 'users',
+        'purchase_orders', 'supplier_config', 'inventory_metrics', 'discount_codes',
+        'spatial_shelves', 'spatial_placements', 'settings'
     ];
 
     const backupData = {};
@@ -2003,13 +2009,9 @@ async function downloadServerBackup() {
 }
 
 async function downloadLocalBackup() {
-    const files = [
-        'sync_metadata', 'items', 'transactions', 'suppliers', 'customers',
-        'expenses', 'returns', 'shifts', 'stock_movements', 'stock_logs',
-        'adjustments', 'stockins', 'suspended_transactions', 'notifications', 'users'
-    ];
-
     const db = await dbPromise;
+    const files = db.tables.map(t => t.name).filter(name => name !== 'outbox');
+
     const backupData = {};
     const btn = document.getElementById("btn-download-backup-local");
     const originalText = btn.innerHTML;
@@ -2018,9 +2020,7 @@ async function downloadLocalBackup() {
 
     try {
         for (const collection of files) {
-            if (db[collection]) {
-                backupData[collection] = await db[collection].toArray();
-            }
+            backupData[collection] = await db[collection].toArray();
         }
 
         const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
@@ -2087,11 +2087,18 @@ async function handleRestoreBackup(e) {
     const syncableCollections = [
         'items', 'transactions', 'customers', 'suppliers', 'expenses',
         'shifts', 'returns', 'stock_movements', 'stock_logs',
-        'adjustments', 'stockins', 'suspended_transactions', 'users'
+        'adjustments', 'stockins', 'suspended_transactions', 'users',
+        'purchase_orders', 'supplier_config', 'inventory_metrics', 'discount_codes',
+        'spatial_shelves', 'spatial_placements', 'settings'
     ];
 
     let businessItemsPlanned = 0;
     let businessItemsRestored = 0;
+    let totalCollections = 0;
+    let totalItems = 0;
+    let details = "";
+
+    const collections = Object.entries(backupData);
 
     for (const [name, data] of collections) {
         if (Array.isArray(data)) {
@@ -2290,7 +2297,9 @@ export async function runDiagnosticExport() {
     const entities = [
         'items', 'transactions', 'suppliers', 'customers',
         'expenses', 'returns', 'shifts', 'stock_movements', 'stock_logs',
-        'adjustments', 'stockins', 'suspended_transactions', 'notifications', 'users'
+        'adjustments', 'stockins', 'suspended_transactions', 'notifications', 'users',
+        'purchase_orders', 'supplier_config', 'inventory_metrics', 'discount_codes',
+        'spatial_shelves', 'spatial_placements', 'settings'
     ];
 
     try {
