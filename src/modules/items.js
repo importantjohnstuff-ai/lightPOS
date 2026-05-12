@@ -518,8 +518,12 @@ export async function loadItemsView() {
         const btn = e.target.closest(".btn-chart-range");
         if (btn) {
             chartDays = parseInt(btn.dataset.days);
-            content.querySelectorAll(".btn-chart-range").forEach(b => b.className = "text-[10px] px-2 py-1 rounded bg-gray-100 hover:bg-gray-200");
-            btn.className = "text-[10px] px-2 py-1 rounded bg-blue-600 text-white";
+            content.querySelectorAll(".btn-chart-range").forEach(b => {
+                b.classList.remove("bg-blue-600", "text-white");
+                b.classList.add("bg-gray-100", "hover:bg-gray-200");
+            });
+            btn.classList.add("bg-blue-600", "text-white");
+            btn.classList.remove("bg-gray-100", "hover:bg-gray-200");
             refreshItemInsights();
         }
     });
@@ -623,6 +627,17 @@ export async function loadItemsView() {
         } catch (error) {
             console.error("Error saving item:", error);
             alert("Failed to save item.");
+        }
+    });
+
+    // Sync Chart Range Buttons with current state
+    content.querySelectorAll(".btn-chart-range").forEach(b => {
+        if (parseInt(b.dataset.days) === chartDays) {
+            b.classList.add("bg-blue-600", "text-white");
+            b.classList.remove("bg-gray-100", "hover:bg-gray-200");
+        } else {
+            b.classList.remove("bg-blue-600", "text-white");
+            b.classList.add("bg-gray-100", "hover:bg-gray-200");
         }
     });
 
