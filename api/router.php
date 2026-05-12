@@ -3,6 +3,9 @@
 // that would otherwise corrupt JSON responses (especially during schema init)
 ob_start();
 
+ini_set('serialize_precision', -1);
+ini_set('precision', 14);
+
 header("Access-Control-Allow-Origin: *");
 header("Content-Type: application/json; charset=UTF-8");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");

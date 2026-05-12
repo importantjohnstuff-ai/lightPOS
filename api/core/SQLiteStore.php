@@ -17,7 +17,8 @@ class SQLiteStore
         error_log("SQLiteStore VERSION: " . self::VERSION);
 
         // Force a safe precision for float-to-string conversion (Fix for Error 21)
-        ini_set('serialize_precision', 14);
+        ini_set('serialize_precision', -1);
+        ini_set('precision', 14);
 
         $this->pdo = Database::getInstance()->getConnection();
         // Disable WAL mode to prevent locking issues on some filesystems
@@ -202,33 +203,22 @@ class SQLiteStore
                 }
                 $updateParams[] = $dbRecord[$idColumn];
 
-                // DEBUG: Log what we're about to bind
-                error_log("SQLiteStore UPDATE Debug - SQL: $sqlUtils");
-                error_log("SQLiteStore UPDATE Debug - Param count: " . count($updateParams));
-
-                // Bind ALL values as PDO::PARAM_STR (except NULL as PARAM_NULL)
-                // Even with emulated prepares, explicit binding ensures consistency.
-                foreach ($updateParams as $i => $val) {
-                    $paramType = gettype($val);
-                    $paramPos = $i + 1;
-
+                $executeParams = [];
+                foreach ($updateParams as $val) {
                     if (is_null($val)) {
-                        $stmtUpdate->bindValue($paramPos, null, PDO::PARAM_NULL);
+                        $executeParams[] = null;
                     } elseif (is_bool($val)) {
-                        $strVal = $val ? '1' : '0';
-                        $stmtUpdate->bindValue($paramPos, $strVal, PDO::PARAM_STR);
+                        $executeParams[] = $val ? '1' : '0';
                     } elseif (is_array($val) || is_object($val)) {
-                        $jsonVal = json_encode($val);
-                        $stmtUpdate->bindValue($paramPos, $jsonVal, PDO::PARAM_STR);
+                        $executeParams[] = json_encode($val);
                     } else {
-                        $strVal = (string) $val;
-                        $stmtUpdate->bindValue($paramPos, $strVal, PDO::PARAM_STR);
+                        $executeParams[] = (string) $val;
                     }
                 }
 
-                error_log("SQLiteStore UPDATE Debug - All binds complete, calling execute");
-                $this->executeWithRetry($stmtUpdate);
-                error_log("SQLiteStore UPDATE Debug - Execute successful");
+                $this->executeWithRetry($stmtUpdate, $executeParams, $updateParams);
+                $stmtUpdate->closeCursor();
+                $stmtUpdate = null;
             }
         } else {
             // INSERT
@@ -240,20 +230,22 @@ class SQLiteStore
 
             $stmt = $this->pdo->prepare($sql);
 
-            // Bind ALL values as PDO::PARAM_STR (except NULL as PARAM_NULL)
-            foreach ($bindParams as $i => $val) {
+            $executeParams = [];
+            foreach ($bindParams as $val) {
                 if (is_null($val)) {
-                    $stmt->bindValue($i + 1, null, PDO::PARAM_NULL);
+                    $executeParams[] = null;
                 } elseif (is_bool($val)) {
-                    $stmt->bindValue($i + 1, $val ? '1' : '0', PDO::PARAM_STR);
+                    $executeParams[] = $val ? '1' : '0';
                 } elseif (is_array($val) || is_object($val)) {
-                    $stmt->bindValue($i + 1, json_encode($val), PDO::PARAM_STR);
+                    $executeParams[] = json_encode($val);
                 } else {
-                    $stmt->bindValue($i + 1, (string) $val, PDO::PARAM_STR);
+                    $executeParams[] = (string) $val;
                 }
             }
 
-            $this->executeWithRetry($stmt, null, $bindParams);
+            $this->executeWithRetry($stmt, $executeParams, $bindParams);
+            $stmt->closeCursor();
+            $stmt = null;
         }
     }
 
