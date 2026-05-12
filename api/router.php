@@ -196,7 +196,7 @@ if (!is_dir($dataDir)) {
 $store = new SQLiteStore();
 // Call the schema check after the store is initialized and PDO is available
 ensureSchema($store->pdo);
-$allowedFiles = ['items', 'users', 'suppliers', 'customers', 'transactions', 'shifts', 'expenses', 'stock_in_history', 'stockins', 'adjustments', 'suspended_transactions', 'returns', 'sync_metadata', 'last_sync', 'stock_movements', 'valuation_history', 'stock_logs', 'notifications', 'settings', 'inventory_metrics', 'supplier_config', 'purchase_orders'];
+$allowedFiles = ['items', 'users', 'suppliers', 'customers', 'transactions', 'shifts', 'expenses', 'stock_in_history', 'stockins', 'adjustments', 'suspended_transactions', 'returns', 'sync_metadata', 'last_sync', 'stock_movements', 'valuation_history', 'stock_logs', 'notifications', 'settings', 'inventory_metrics', 'supplier_config', 'purchase_orders', 'discount_codes', 'spatial_shelves', 'spatial_placements'];
 
 $action = $_GET['action'] ?? null;
 $file = $_GET['file'] ?? null;
