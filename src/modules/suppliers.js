@@ -374,7 +374,11 @@ async function fetchSupplierProducts() {
         startDate.setDate(startDate.getDate() - chartDays);
         const startStr = startDate.toISOString();
 
-        const txs = await db.transactions.where('timestamp').aboveOrEqual(startStr).and(t => !t._deleted && !t.is_voided).toArray();
+        const [txsStr, txsInt] = await Promise.all([
+            db.transactions.where('timestamp').aboveOrEqual(startStr).and(t => !t._deleted && !t.is_voided).toArray(),
+            db.transactions.where('timestamp').aboveOrEqual(startDate.getTime()).and(t => !t._deleted && !t.is_voided).toArray()
+        ]);
+        const txs = [...txsStr, ...txsInt];
 
         supplierProductStats = {};
         supplierProducts.forEach(p => {

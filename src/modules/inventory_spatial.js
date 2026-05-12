@@ -1233,7 +1233,12 @@ async function calculateMetrics() {
 
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const transactions = await db.transactions.where('timestamp').above(thirtyDaysAgo.toISOString()).toArray();
+    
+    const [txsStr, txsInt] = await Promise.all([
+        db.transactions.where('timestamp').above(thirtyDaysAgo.toISOString()).toArray(),
+        db.transactions.where('timestamp').above(thirtyDaysAgo.getTime()).toArray()
+    ]);
+    const transactions = [...txsStr, ...txsInt];
 
     const itemVelocity = new Map();
     transactions.forEach(t => {

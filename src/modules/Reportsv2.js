@@ -340,8 +340,12 @@ async function generateReport(reportId) {
         // Force Sync to ensure other computers' shifts are visible
         await SyncEngine.sync();
 
-        const shifts = await db.shifts.toArray();
-        const transactions = await db.transactions.toArray(); // Needed for sales calc
+        const [shifts, txsStr, txsInt] = await Promise.all([
+            db.shifts.toArray(),
+            db.transactions.where('timestamp').between(startStr, endStr, true, true).toArray(),
+            db.transactions.where('timestamp').between(startDate.getTime(), endDate.getTime(), true, true).toArray()
+        ]);
+        const transactions = [...txsStr, ...txsInt];
 
         generalReportWorker.postMessage({
             type: 'GENERATE_SHIFTS',
@@ -360,7 +364,11 @@ async function generateReport(reportId) {
 
         renderShiftReports(result);
     } else if (reportId === 'fin-summary') {
-        const transactions = await db.transactions.toArray();
+        const [txsStr, txsInt] = await Promise.all([
+            db.transactions.where('timestamp').between(startStr, endStr, true, true).toArray(),
+            db.transactions.where('timestamp').between(startDate.getTime(), endDate.getTime(), true, true).toArray()
+        ]);
+        const transactions = [...txsStr, ...txsInt];
         const items = await db.items.toArray();
 
         generalReportWorker.postMessage({
@@ -2113,9 +2121,12 @@ function openSalesExportPanel() {
         console.log('[Export] DB opened');
 
         // Pre-filter transactions by date at DB level (avoids loading entire history)
-        const transactions = await db.transactions
-            .where('timestamp').between(startStr, endStr, true, true)
-            .toArray();
+        // Note: Query both string and integer ranges to handle mixed formats
+        const [txsStr, txsInt] = await Promise.all([
+            db.transactions.where('timestamp').between(startStr, endStr, true, true).toArray(),
+            db.transactions.where('timestamp').between(new Date(startDate + 'T00:00:00').getTime(), new Date(endDate + 'T23:59:59').getTime(), true, true).toArray()
+        ]);
+        const transactions = [...txsStr, ...txsInt];
         console.log(`[Export] Loaded ${transactions.length} transactions (filtered) in ${(performance.now() - t0).toFixed(0)}ms`);
 
         // Build lightweight cost map instead of sending all item objects
