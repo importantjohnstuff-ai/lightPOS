@@ -984,11 +984,19 @@ async function refreshItemInsights() {
     const startStr = startDate.toISOString();
 
     // 1. Fetch Transactions for this item
-    // Using timestamp index as item_ids is not indexed in the schema
-    const itemSales = await db.transactions
-        .where('timestamp').aboveOrEqual(startStr)
-        .filter(t => !t._deleted && !t.is_voided && t.items.some(it => it.id === item.id))
-        .toArray();
+    // Note: Query both string and integer ranges to handle mixed formats
+    const [salesStr, salesInt] = await Promise.all([
+        db.transactions
+            .where('timestamp').aboveOrEqual(startStr)
+            .filter(t => !t._deleted && !t.is_voided && t.items.some(it => it.id === item.id))
+            .toArray(),
+        db.transactions
+            .where('timestamp').aboveOrEqual(startDate.getTime())
+            .filter(t => !t._deleted && !t.is_voided && t.items.some(it => it.id === item.id))
+            .toArray()
+    ]);
+
+    const itemSales = [...salesStr, ...salesInt];
 
     // 1b. Fetch Total Sold All Time & First Sale Date
     let totalSoldAllTime = 0;
@@ -1089,7 +1097,8 @@ function renderItemSalesChart(transactions, itemId, days) {
     }
 
     transactions.forEach(t => {
-        const day = t.timestamp.split('T')[0];
+        const dateObj = new Date(t.timestamp);
+        const day = dateObj.toISOString().split('T')[0];
         if (dailyData[day] !== undefined) {
             dailyData[day] += t.items.find(i => i.id === itemId)?.qty || 0;
         }
@@ -1134,11 +1143,14 @@ async function openComparisonModal() {
     const startStr = startDate.toISOString();
 
     const db = await dbPromise;
-    const [txs, allMovements, allAdjustments] = await Promise.all([
+    const [txsStr, txsInt, allMovements, allAdjustments] = await Promise.all([
         db.transactions.where('timestamp').aboveOrEqual(startStr).and(t => !t._deleted && !t.is_voided).toArray(),
+        db.transactions.where('timestamp').aboveOrEqual(startDate.getTime()).and(t => !t._deleted && !t.is_voided).toArray(),
         db.stock_movements.toArray(),
         db.adjustments.toArray()
     ]);
+
+    const txs = [...txsStr, ...txsInt];
 
     // Use stored performance tags (from Reports V2)
     const allItemStats = {}; // Kept only if needed for other stats, but derived below logic removed.
@@ -1201,7 +1213,8 @@ async function openComparisonModal() {
             dailyData[d.toISOString().split('T')[0]] = 0;
         }
         itemSales.forEach(t => {
-            const day = t.timestamp.split('T')[0];
+            const dateObj = new Date(t.timestamp);
+            const day = dateObj.toISOString().split('T')[0];
             if (dailyData[day] !== undefined) dailyData[day] += t.items.find(it => it.id === item.id).qty;
         });
         const chart = new Chart(ctx, {
