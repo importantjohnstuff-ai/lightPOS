@@ -1812,7 +1812,7 @@ async function analyzeSync() {
                 if (collection === 'transactions' || collection === 'items') {
                     const fields = [idField, '_version', '_updatedAt'];
                     if (collection === 'transactions') {
-                        fields.push('timestamp', 'total_amount', 'customer_name');
+                        fields.push('timestamp', 'total_amount');
                     } else if (collection === 'items') {
                         fields.push('name', 'barcode', 'stock_level');
                     }
