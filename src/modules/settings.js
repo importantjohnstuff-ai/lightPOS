@@ -15,7 +15,14 @@ const ADMIN_API_URL = 'api/router.php';
 function deepSanitizeNumbers(obj) {
     if (obj === null) return null;
     if (typeof obj === 'number') {
-        return Number.isInteger(obj) ? obj : Number(obj.toFixed(4));
+        if (!Number.isInteger(obj)) {
+            const rounded = Number(obj.toFixed(4));
+            if (obj !== rounded) {
+                // console.debug(`Sanitizing number: ${obj} -> ${rounded}`);
+            }
+            return rounded;
+        }
+        return obj;
     }
     if (typeof obj === 'string') {
         const trimmed = obj.trim();
@@ -23,7 +30,11 @@ function deepSanitizeNumbers(obj) {
             try {
                 const parsed = JSON.parse(obj);
                 const sanitized = deepSanitizeNumbers(parsed);
-                return JSON.stringify(sanitized);
+                const stringified = JSON.stringify(sanitized);
+                if (obj !== stringified) {
+                    // console.debug(`Sanitizing JSON string: ${obj.substring(0, 50)}...`);
+                }
+                return stringified;
             } catch (e) {
                 return obj;
             }
@@ -36,7 +47,9 @@ function deepSanitizeNumbers(obj) {
     if (typeof obj !== 'object') return obj;
     const result = {};
     for (const key in obj) {
-        result[key] = deepSanitizeNumbers(obj[key]);
+        if (Object.prototype.hasOwnProperty.call(obj, key)) {
+            result[key] = deepSanitizeNumbers(obj[key]);
+        }
     }
     return result;
 }

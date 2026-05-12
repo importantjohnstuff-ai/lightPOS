@@ -16,6 +16,9 @@ class SQLiteStore
         // Log version to verify correct file is deployed
         error_log("SQLiteStore VERSION: " . self::VERSION);
 
+        // Force a safe precision for float-to-string conversion (Fix for Error 21)
+        ini_set('serialize_precision', 14);
+
         $this->pdo = Database::getInstance()->getConnection();
         // Disable WAL mode to prevent locking issues on some filesystems
         // Enable WAL mode for better concurrency
@@ -106,6 +109,9 @@ class SQLiteStore
         if (!in_array($collection, $this->collections)) {
             throw new Exception("Unknown collection: $collection");
         }
+
+        // Deep sanitize any floating point numbers to prevent "Error 21: bad parameter"
+        $record = $this->sanitizeFloats($record);
 
         $tableColumns = $this->getTableColumns($collection);
         $jsonColumn = in_array('full_data', $tableColumns) ? 'full_data' : (in_array('json_body', $tableColumns) ? 'json_body' : null);
@@ -249,6 +255,23 @@ class SQLiteStore
 
             $this->executeWithRetry($stmt, null, $bindParams);
         }
+    }
+
+    private function sanitizeFloats($data)
+    {
+        if (is_float($data)) {
+            return round($data, 4);
+        }
+        if (is_array($data)) {
+            foreach ($data as $key => $val) {
+                $data[$key] = $this->sanitizeFloats($val);
+            }
+        } elseif (is_object($data)) {
+            foreach (get_object_vars($data) as $key => $val) {
+                $data->$key = $this->sanitizeFloats($val);
+            }
+        }
+        return $data;
     }
 
     public function getIdColumn($collection)
