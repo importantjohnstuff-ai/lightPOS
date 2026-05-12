@@ -21,11 +21,11 @@ class SQLiteStore
         // Enable WAL mode for better concurrency
         $this->pdo->exec("PRAGMA journal_mode=WAL;");
         $this->pdo->exec("PRAGMA busy_timeout = 5000;");
-        // Enable emulated prepares to avoid "General error: 21 bad parameter or other API misuse"
-        // This forces PDO to handle parameter substitution, preventing native driver binding issues.
+        // Disable emulated prepares to avoid "General error: 21 bad parameter or other API misuse"
+        // Native SQLite binding correctly handles high-precision numbers and NULL values.
         try {
-            $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, true);
-            error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=true (Fix for Error 21)");
+            $this->pdo->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
+            error_log("SQLiteStore initialized with ATTR_EMULATE_PREPARES=false (Fix for Error 21)");
         } catch (Exception $e) {
             error_log("SQLiteStore warning: Could not set ATTR_EMULATE_PREPARES: " . $e->getMessage());
         }
@@ -211,6 +211,8 @@ class SQLiteStore
                     } elseif (is_bool($val)) {
                         $strVal = $val ? '1' : '0';
                         $stmtUpdate->bindValue($paramPos, $strVal, PDO::PARAM_STR);
+                    } elseif (is_int($val)) {
+                        $stmtUpdate->bindValue($paramPos, $val, PDO::PARAM_INT);
                     } elseif (is_array($val) || is_object($val)) {
                         $jsonVal = json_encode($val);
                         $stmtUpdate->bindValue($paramPos, $jsonVal, PDO::PARAM_STR);
@@ -240,6 +242,8 @@ class SQLiteStore
                     $stmt->bindValue($i + 1, null, PDO::PARAM_NULL);
                 } elseif (is_bool($val)) {
                     $stmt->bindValue($i + 1, $val ? '1' : '0', PDO::PARAM_STR);
+                } elseif (is_int($val)) {
+                    $stmt->bindValue($i + 1, $val, PDO::PARAM_INT);
                 } elseif (is_array($val) || is_object($val)) {
                     $stmt->bindValue($i + 1, json_encode($val), PDO::PARAM_STR);
                 } else {

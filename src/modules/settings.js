@@ -1463,9 +1463,9 @@ async function setupMigrationEventListeners() {
 
                         // Fix for "toFixed" errors: Ensure numeric fields are valid numbers
                         if (collection === 'items') {
-                            item.cost_price = parseFloat(item.cost_price) || 0;
-                            item.selling_price = parseFloat(item.selling_price) || 0;
-                            item.stock_level = parseFloat(item.stock_level) || 0;
+                            item.cost_price = Number((parseFloat(item.cost_price) || 0).toFixed(2));
+                            item.selling_price = Number((parseFloat(item.selling_price) || 0).toFixed(2));
+                            item.stock_level = Number((parseFloat(item.stock_level) || 0).toFixed(4));
                         }
 
                         // Fix for Users: Map 'password' to 'password_hash' for SQLite compatibility
@@ -2168,9 +2168,9 @@ async function handleRestoreBackup(e) {
 
                     // Fix for "toFixed" errors: Ensure numeric fields are valid numbers
                     if (fileName === 'items') {
-                        item.cost_price = parseFloat(item.cost_price) || 0;
-                        item.selling_price = parseFloat(item.selling_price) || 0;
-                        item.stock_level = parseFloat(item.stock_level) || 0;
+                        item.cost_price = Number((parseFloat(item.cost_price) || 0).toFixed(2));
+                        item.selling_price = Number((parseFloat(item.selling_price) || 0).toFixed(2));
+                        item.stock_level = Number((parseFloat(item.stock_level) || 0).toFixed(4));
                     }
 
                     // Fix for Users: Map 'password' to 'password_hash' for SQLite compatibility
