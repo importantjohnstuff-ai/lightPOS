@@ -288,12 +288,17 @@ async function generateReport(reportId) {
         const limit = 2000; // Hard limit to prevent hanging
 
         // Fetch Required Data for Worker Synthesis
-        // Optimization: Strict limits and bounds
-        const [transactions, returns, stockMovements] = await Promise.all([
+        // Note: Query both string and integer timestamps to handle mixed formats
+        const [txsStr, txsInt, retStr, retInt, movements] = await Promise.all([
             db.transactions.where('timestamp').between(startStr, endStr, true, true).reverse().limit(limit).toArray(),
+            db.transactions.where('timestamp').between(startDate.getTime(), endDate.getTime(), true, true).reverse().limit(limit).toArray(),
             db.returns.where('timestamp').between(startStr, endStr, true, true).reverse().limit(limit).toArray(),
+            db.returns.where('timestamp').between(startDate.getTime(), endDate.getTime(), true, true).reverse().limit(limit).toArray(),
             db.stock_movements.where('timestamp').between(startStr, endStr, true, true).reverse().limit(limit).toArray()
         ]);
+
+        const transactions = [...txsStr, ...txsInt].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, limit);
+        const returns = [...retStr, ...retInt];
 
         // Dispatch to Worker
         reportWorker.postMessage({
@@ -301,7 +306,7 @@ async function generateReport(reportId) {
             payload: {
                 transactions,
                 returns,
-                filteredMovements: stockMovements, // Worker filters this
+                filteredMovements: movements, 
                 startDate: startStr,
                 endDate: endStr,
                 allItems: await db.items.toArray(), // Needed for names
@@ -376,9 +381,16 @@ async function generateReport(reportId) {
         renderSalesSummary(result);
     }
     else if (reportId === 'prod-perf') {
-        const transactions = await db.transactions.where('timestamp').between(startStr, endStr, true, true).toArray();
+        const [txsStr, txsInt, retStr, retInt] = await Promise.all([
+            db.transactions.where('timestamp').between(startStr, endStr, true, true).toArray(),
+            db.transactions.where('timestamp').between(startDate.getTime(), endDate.getTime(), true, true).toArray(),
+            db.returns.where('timestamp').between(startStr, endStr, true, true).toArray(),
+            db.returns.where('timestamp').between(startDate.getTime(), endDate.getTime(), true, true).toArray()
+        ]);
+
+        const transactions = [...txsStr, ...txsInt];
+        const returns = [...retStr, ...retInt];
         const items = await db.items.toArray();
-        const returns = await db.returns.where('timestamp').between(startStr, endStr, true, true).toArray();
 
         // Reuse reportWorker for aggregation
         reportWorker.postMessage({

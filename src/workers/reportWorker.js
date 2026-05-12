@@ -216,40 +216,8 @@ function generateReportData(payload) {
         return { name: s.name, bought, sold };
     });
 
-    // --- Movement Synthesis (Moved from Main Thread) ---
-    const salesMovements = validTxs.flatMap(t =>
-        (t.items || []).map(item => ({
-            id: `sale-${t.id}-${item.id}`,
-            item_id: item.id,
-            item_name: item.name,
-            timestamp: t.timestamp,
-            type: 'Sale',
-            qty: -item.qty,
-            user: t.user_email,
-            transaction_id: t.id,
-            reason: "POS Sale"
-        }))
-    );
-
-    const returnMovements = returns.filter(r => r.condition === 'Restock').flatMap(r => {
-        return [{
-            id: `return-${r.id}`,
-            item_id: r.item_id,
-            item_name: r.item_name,
-            timestamp: r.timestamp,
-            type: 'Return',
-            qty: r.qty,
-            user: r.processed_by,
-            transaction_id: r.transaction_id,
-            reason: `${r.reason} (${r.condition})`
-        }];
-    });
-
-    const otherMovements = filteredMovements.filter(m => {
-        const type = m.type;
-        return type !== 'Sale' && type !== 'Return' && type !== 'Shrinkage';
-    });
-    const allMovements = [...otherMovements, ...salesMovements, ...returnMovements];
+    // --- Movement Synthesis (REMOVED: Now natively tracked in stock_movements) ---
+    const allMovements = [...filteredMovements];
 
     // Sort and re-assign
     const sortedMovements = allMovements.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
@@ -271,18 +239,7 @@ function generateReportData(payload) {
         defectiveSuppliers: Object.entries(defectiveBySupplier).map(([name, count]) => ({ name, count })),
         vendorPerf,
         itemTxCounts,
-        movements: sortedMovements,
-        hourlySales,
-        paymentStats: Object.entries(paymentStats).map(([method, d]) => ({ method, ...d })),
-        shrinkage: Object.entries(shrinkageStats).map(([reason, qty]) => ({ reason, qty })),
-        returnReasons: Object.entries(reasonStats).map(([reason, count]) => ({ reason, count })),
-        defectiveSuppliers: Object.entries(defectiveBySupplier).map(([name, count]) => ({ name, count })),
-        vendorPerf,
-        // Send back processed lists that were filtered if needed, or rely on main thread having them?
-        // Main thread passed them in, so it has them. 
-        // But we might have augmented them? No, mostly separate stats.
-        // We return the computed stats.
-        itemTxCounts // Return for Affinity
+        movements: sortedMovements
     };
 }
 
