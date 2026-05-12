@@ -9,6 +9,7 @@ let allItems = []; // Cache for item search
 let suppliersList = [];
 let historyCache = [];
 let currentMode = 'in'; // 'in' or 'out'
+let currentHeldId = null; // Track if we're working on a previously held stock-in
 
 // Camera/Mobile State
 let mobileStream = null;
@@ -126,6 +127,15 @@ function render() {
             <div class="grid grid-cols-1 lg:grid-cols-5 gap-8">
                 <!-- Left side: Item selection and cart -->
                 <div class="lg:col-span-3">
+                    <!-- Supplier Selection (moved above Add Item) -->
+                    <div class="bg-white p-4 rounded-lg shadow-md mb-4">
+                        <label for="stockin-supplier" class="block text-sm font-medium text-gray-700 mb-1">Select Supplier</label>
+                        <select id="stockin-supplier" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-2">
+                            <option value="">-- Select Supplier --</option>
+                            <!-- Options populated by JS -->
+                        </select>
+                    </div>
+
                     <div class="bg-white p-6 rounded-lg shadow-md mb-6">
                         <h3 id="card-title-add" class="text-lg font-semibold text-gray-700 mb-4">Add Item to Inventory (Stock In)</h3>
                         <form id="stockin-form" class="flex flex-col sm:flex-row items-start sm:items-end gap-4">
@@ -147,16 +157,18 @@ function render() {
                     </div>
 
                     <div class="bg-white p-6 rounded-lg shadow-md">
-                        <h3 id="card-title-cart" class="text-lg font-semibold text-gray-700 mb-4">Stock In Cart</h3>
+                        <div class="flex items-center justify-between mb-4">
+                            <h3 id="card-title-cart" class="text-lg font-semibold text-gray-700">Stock In Cart</h3>
+                            <div class="flex gap-2">
+                                <button id="btn-hold-stockin" class="text-[10px] bg-orange-500 hover:bg-orange-600 text-white px-2 py-1 rounded font-bold hidden" title="Hold current cart">HOLD</button>
+                                <button id="btn-view-held-stockins" class="text-[10px] bg-yellow-600 hover:bg-yellow-700 text-white px-2 py-1 rounded font-bold" title="View held stock-ins">HELD</button>
+                            </div>
+                        </div>
                         <div id="stock-in-cart-container">
                             <!-- Cart items will be rendered here -->
                         </div>
                         <div id="supplier-section" class="mt-4 border-t pt-4 hidden">
-                            <label for="stockin-supplier" class="block text-sm font-medium text-gray-700">Optional: Set Supplier for items without one</label>
-                            <select id="stockin-supplier" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
-                                <option value="">-- Select Supplier --</option>
-                                <!-- Options populated by JS -->
-                            </select>
+                            <!-- Suggest Selling Price button gets dynamically added here -->
                         </div>
                         <div id="cart-actions" class="mt-4 flex justify-end gap-2 hidden">
                              <button id="clear-cart-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-md shadow-sm">
@@ -214,6 +226,25 @@ function render() {
                 <div class="flex justify-end gap-2">
                     <button id="btn-cancel-suggest" class="text-gray-500 hover:text-gray-700 font-bold py-2 px-4 rounded">Cancel</button>
                     <button id="btn-apply-suggest" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Apply</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Held Stock-Ins Modal -->
+        <div id="modal-held-stockins" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-2xl mx-4">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-bold text-gray-800">Held Stock-Ins</h3>
+                    <div class="flex items-center gap-2">
+                        <button id="btn-delete-all-held" class="text-red-600 hover:text-red-800 text-sm font-bold">Delete All</button>
+                        <button id="btn-close-held" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+                    </div>
+                </div>
+                <div id="held-stockins-list" class="max-h-96 overflow-y-auto">
+                    <div class="text-center p-4 text-gray-500">No held stock-ins.</div>
+                </div>
+                <div class="mt-4 flex justify-end">
+                    <button id="btn-cancel-held" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">Close</button>
                 </div>
             </div>
         </div>
@@ -332,9 +363,15 @@ function attachEventListeners() {
 
     document.getElementById('save-stock-in-btn')?.addEventListener('click', saveStockIn);
     document.getElementById('clear-cart-btn')?.addEventListener('click', clearCart);
-    document.getElementById('save-stock-in-btn')?.addEventListener('click', saveStockIn);
-    document.getElementById('clear-cart-btn')?.addEventListener('click', clearCart);
     document.getElementById('btn-refresh-history')?.addEventListener('click', loadStockInHistory);
+
+    // Hold / Held buttons
+    document.getElementById('btn-hold-stockin')?.addEventListener('click', holdCurrentStockIn);
+    document.getElementById('btn-view-held-stockins')?.addEventListener('click', openHeldStockInsModal);
+    document.getElementById('btn-close-held')?.addEventListener('click', closeHeldModal);
+    document.getElementById('btn-cancel-held')?.addEventListener('click', closeHeldModal);
+    document.getElementById('btn-delete-all-held')?.addEventListener('click', deleteAllHeldStockIns);
+    updateHeldCount();
 
     // Suggest Price Modal Listeners
     document.getElementById('start-suggest-price')?.addEventListener('click', () => {
@@ -581,18 +618,20 @@ function renderStockInCart() {
     const cartContainer = document.getElementById('stock-in-cart-container');
     const cartActions = document.getElementById('cart-actions');
     const supplierSection = document.getElementById('supplier-section');
+    const holdBtn = document.getElementById('btn-hold-stockin');
     if (!cartContainer) return;
 
     if (stockInCart.length === 0) {
         cartContainer.innerHTML = '<p class="text-gray-500">Cart is empty.</p>';
         cartActions.classList.add('hidden');
         supplierSection.classList.add('hidden');
+        if (holdBtn) holdBtn.classList.add('hidden');
         return;
     }
 
     cartActions.classList.remove('hidden');
-    cartActions.classList.remove('hidden');
     supplierSection.classList.remove('hidden');
+    if (holdBtn) holdBtn.classList.remove('hidden');
 
     // Add Suggest Price Button if not exists
     let suggestBtn = document.getElementById('start-suggest-price');
@@ -708,6 +747,7 @@ function updateCartPrice(index, newPrice) {
 function clearCart() {
     if (confirm('Are you sure you want to clear the cart?')) {
         stockInCart = [];
+        currentHeldId = null;
         renderStockInCart();
     }
 }
@@ -790,10 +830,17 @@ async function saveStockIn() {
             document.getElementById('source-po-id').value = '';
         }
 
+        // If this was a held stock-in, remove it from held list
+        if (currentHeldId) {
+            removeHeldStockIn(currentHeldId);
+            currentHeldId = null;
+        }
+
         alert(`Stock-${isOut ? 'out' : 'in'} successful! Data is saved locally and will sync with the server.`);
 
         stockInCart = [];
         renderStockInCart();
+        updateHeldCount();
         await loadStockInHistory();
 
     } catch (error) {
@@ -1210,4 +1257,237 @@ function showMobileNotification(type, msg) {
 
     message.textContent = msg;
     notif.classList.remove("hidden");
+}
+
+/* =============================================
+   Hold / Resume Stock-In Logic
+   Uses suspended_transactions table (synced)
+   with source:'stockin' to differentiate from POS
+   ============================================= */
+
+async function getHeldStockIns() {
+    try {
+        const all = await Repository.getAll('suspended_transactions');
+        return all.filter(entry => entry.source === 'stockin');
+    } catch (e) {
+        console.error('Error fetching held stock-ins:', e);
+        return [];
+    }
+}
+
+async function removeHeldStockIn(id) {
+    try {
+        await Repository.remove('suspended_transactions', id);
+    } catch (e) {
+        console.error('Error removing held stock-in:', e);
+    }
+}
+
+async function holdCurrentStockIn() {
+    if (stockInCart.length === 0) {
+        alert('Cart is empty. Add items before holding.');
+        return;
+    }
+
+    const user = getUserProfile();
+    const supplierId = document.getElementById('stockin-supplier')?.value || '';
+    const supplierName = suppliersList.find(s => s.id === supplierId)?.name || '';
+
+    const heldEntry = {
+        id: currentHeldId || generateUUID(),
+        source: 'stockin', // Differentiates from POS suspended transactions
+        items: JSON.parse(JSON.stringify(stockInCart)),
+        supplier_id: supplierId,
+        supplier_name: supplierName,
+        mode: currentMode,
+        user_email: user?.email || 'Unknown',
+        user_name: user?.name || 'Unknown',
+        timestamp: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        total_items: stockInCart.reduce((sum, i) => sum + i.quantity, 0),
+        total: stockInCart.reduce((sum, i) => sum + (i.quantity * i.cost_price), 0)
+    };
+
+    try {
+        await Repository.upsert('suspended_transactions', heldEntry);
+        SyncEngine.sync(); // Trigger sync so other devices can see it
+
+        // Clear the cart
+        stockInCart = [];
+        currentHeldId = null;
+        renderStockInCart();
+        await updateHeldCount();
+
+        alert(`Stock-${currentMode === 'out' ? 'out' : 'in'} held successfully. ${heldEntry.total_items} item(s) saved.`);
+    } catch (error) {
+        console.error('Error holding stock-in:', error);
+        alert('Failed to hold stock-in. Please try again.');
+    }
+}
+
+async function openHeldStockInsModal() {
+    const container = document.getElementById('held-stockins-list');
+    const modal = document.getElementById('modal-held-stockins');
+    if (!container || !modal) return;
+
+    modal.classList.remove('hidden');
+    container.innerHTML = '<div class="text-center p-4">Loading...</div>';
+
+    const held = await getHeldStockIns();
+
+    if (held.length === 0) {
+        container.innerHTML = '<div class="text-center p-4 text-gray-500">No held stock-ins.</div>';
+        return;
+    }
+
+    // Sort by timestamp ascending (oldest first, like POS)
+    held.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    container.innerHTML = `
+        <table class="w-full text-sm">
+            <thead class="bg-gray-50">
+                <tr class="border-b">
+                    <th class="text-left p-2">Time</th>
+                    <th class="text-center p-2">Type</th>
+                    <th class="text-left p-2">Supplier</th>
+                    <th class="text-left p-2">User</th>
+                    <th class="text-center p-2">Items</th>
+                    <th class="text-center p-2">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${held.map(entry => `
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="p-2 text-xs">${new Date(entry.timestamp).toLocaleString()}</td>
+                        <td class="p-2 text-center">
+                            <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${entry.mode === 'out' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}">
+                                ${entry.mode === 'out' ? 'OUT' : 'IN'}
+                            </span>
+                        </td>
+                        <td class="p-2 text-xs">${entry.supplier_name || '—'}</td>
+                        <td class="p-2 text-xs">${entry.user_name || entry.user_email || 'N/A'}</td>
+                        <td class="p-2 text-center font-bold">${entry.total_items || (Array.isArray(entry.items) ? entry.items.length : 0)}</td>
+                        <td class="p-2 text-center flex justify-center gap-2">
+                            <button class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded btn-resume-held" data-id="${entry.id}">Resume</button>
+                            <button class="bg-red-100 text-red-600 hover:bg-red-200 text-xs px-2 py-1 rounded btn-delete-held" data-id="${entry.id}">Delete</button>
+                        </td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+
+    // Attach Resume handlers
+    container.querySelectorAll('.btn-resume-held').forEach(btn => {
+        btn.onclick = () => resumeHeldStockIn(btn.dataset.id);
+    });
+
+    // Attach Delete handlers
+    container.querySelectorAll('.btn-delete-held').forEach(btn => {
+        btn.onclick = () => deleteHeldStockIn(btn.dataset.id);
+    });
+}
+
+function closeHeldModal() {
+    document.getElementById('modal-held-stockins')?.classList.add('hidden');
+}
+
+async function resumeHeldStockIn(id) {
+    if (stockInCart.length > 0 && !confirm('Current cart is not empty. Overwrite with held stock-in?')) {
+        return;
+    }
+
+    try {
+        const entry = await Repository.get('suspended_transactions', id);
+        if (!entry || entry.source !== 'stockin') {
+            alert('Could not find held stock-in.');
+            return;
+        }
+
+        // Robustly parse items (may be stringified JSON after server sync)
+        let items = entry.items;
+        if (typeof items === 'string') {
+            try { items = JSON.parse(items); } catch (e) { console.warn("Failed to parse items string", e); }
+        }
+        if (!items && entry.items_json) {
+            try { items = typeof entry.items_json === 'string' ? JSON.parse(entry.items_json) : entry.items_json; } catch (e) {}
+        }
+        if (!items && entry.json_body) {
+            try {
+                const body = typeof entry.json_body === 'string' ? JSON.parse(entry.json_body) : entry.json_body;
+                if (body.items) items = body.items;
+            } catch (e) {}
+        }
+
+        // Restore cart
+        stockInCart = Array.isArray(items) ? items : [];
+        currentHeldId = entry.id;
+
+        // Restore mode
+        if (entry.mode && entry.mode !== currentMode) {
+            currentMode = entry.mode;
+            updateUIMode();
+        }
+
+        // Restore supplier
+        const supplierSelect = document.getElementById('stockin-supplier');
+        if (supplierSelect && entry.supplier_id) {
+            supplierSelect.value = entry.supplier_id;
+        }
+
+        // Remove from held list
+        await Repository.remove('suspended_transactions', id);
+        SyncEngine.sync();
+
+        renderStockInCart();
+        closeHeldModal();
+        await updateHeldCount();
+    } catch (error) {
+        console.error('Error resuming held stock-in:', error);
+        alert('Error resuming: ' + error.message);
+    }
+}
+
+async function deleteHeldStockIn(id) {
+    if (!confirm('Are you sure you want to delete this held stock-in?')) return;
+
+    await removeHeldStockIn(id);
+    SyncEngine.sync();
+    await updateHeldCount();
+    await openHeldStockInsModal(); // Refresh the list
+}
+
+async function deleteAllHeldStockIns() {
+    if (!confirm('Are you sure you want to delete ALL held stock-ins?')) return;
+
+    try {
+        const held = await getHeldStockIns();
+        if (held.length > 0) {
+            await Promise.all(held.map(entry => Repository.remove('suspended_transactions', entry.id)));
+            SyncEngine.sync();
+        }
+        await updateHeldCount();
+        await openHeldStockInsModal(); // Refresh
+    } catch (error) {
+        console.error('Error deleting all held stock-ins:', error);
+        alert('Failed to delete held stock-ins.');
+    }
+}
+
+async function updateHeldCount() {
+    const held = await getHeldStockIns();
+    const count = held.length;
+    const btn = document.getElementById('btn-view-held-stockins');
+    if (!btn) return;
+
+    // Remove existing badge
+    const existingBadge = btn.querySelector('.held-badge');
+    if (existingBadge) existingBadge.remove();
+
+    if (count > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'held-badge ml-1 bg-white text-yellow-700 px-1.5 py-0.5 rounded-full font-bold text-[9px]';
+        badge.textContent = count;
+        btn.appendChild(badge);
+    }
 }

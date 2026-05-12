@@ -2828,7 +2828,8 @@ async function openSuspendedModal() {
     document.getElementById("modal-suspended").classList.remove("hidden");
 
     try {
-        const suspended = await Repository.getAll('suspended_transactions'); // Already filters _deleted
+        const allSuspended = await Repository.getAll('suspended_transactions'); // Already filters _deleted
+        const suspended = allSuspended.filter(tx => tx.source !== 'stockin'); // Exclude stock-in held entries
         // Sort by created_at ascending so new transactions go to bottom, resumed ones keep position
         suspended.sort((a, b) => new Date(a.created_at || a.timestamp) - new Date(b.created_at || b.timestamp));
         if (suspended.length === 0) {
@@ -2987,7 +2988,8 @@ async function deleteAllSuspendedTransactions() {
     if (!confirm("Are you sure you want to delete ALL suspended transactions?")) return;
 
     try {
-        const suspended = await Repository.getAll('suspended_transactions');
+        const allSuspended = await Repository.getAll('suspended_transactions');
+        const suspended = allSuspended.filter(tx => tx.source !== 'stockin');
         if (suspended.length > 0) {
             await Promise.all(suspended.map(tx => Repository.remove('suspended_transactions', tx.id)));
             showToast("All suspended transactions deleted.");
@@ -3004,7 +3006,8 @@ async function deleteAllSuspendedTransactions() {
 }
 
 async function updateSuspendedCount() {
-    const list = await Repository.getAll('suspended_transactions'); // Already filters _deleted
+    const allList = await Repository.getAll('suspended_transactions'); // Already filters _deleted
+    const list = allList.filter(tx => tx.source !== 'stockin');
     const count = list.length;
     const btn = document.getElementById("btn-view-suspended");
     if (!btn) return;
