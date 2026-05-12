@@ -5,6 +5,8 @@ ob_start();
 
 ini_set('serialize_precision', -1);
 ini_set('precision', 14);
+ini_set('memory_limit', '512M');
+ini_set('max_execution_time', 120);
 
 header("Access-Control-Allow-Origin: *");
 header("Content-Type: application/json; charset=UTF-8");

@@ -1854,7 +1854,7 @@ async function analyzeSync() {
                             await db.outbox.where('collection').equals(collection).filter(o => ids.includes(o.docId)).delete();
                         });
                         alert(`${onlyInServer.length} items downloaded and synchronized locally.`);
-                        await compareDatabases();
+                        await analyzeSync();
                     });
                 }
 
@@ -1879,7 +1879,7 @@ async function analyzeSync() {
 
                         alert(`${onlyInLocal.length} items queued for upload. Synchronization starting...`);
                         await SyncEngine.sync();
-                        await compareDatabases();
+                        await analyzeSync();
                     });
                 }
 
@@ -1891,7 +1891,7 @@ async function analyzeSync() {
                             await db.outbox.where('collection').equals(collection).filter(o => ids.includes(o.docId)).delete();
                         });
                         alert(`${conflicts.length} conflicts resolved by trusting server data.`);
-                        await compareDatabases();
+                        await analyzeSync();
                     });
                 }
             }

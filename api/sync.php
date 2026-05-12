@@ -6,6 +6,8 @@
 
 ini_set('serialize_precision', -1);
 ini_set('precision', 14);
+ini_set('memory_limit', '512M');
+ini_set('max_execution_time', 120);
 
 // DEBUG: Enable error display so fatal errors produce visible output
 ini_set('display_errors', 0); // Don't display raw — we'll capture via shutdown handler
