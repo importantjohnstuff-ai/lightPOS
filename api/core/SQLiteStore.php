@@ -211,8 +211,6 @@ class SQLiteStore
                     } elseif (is_bool($val)) {
                         $strVal = $val ? '1' : '0';
                         $stmtUpdate->bindValue($paramPos, $strVal, PDO::PARAM_STR);
-                    } elseif (is_int($val)) {
-                        $stmtUpdate->bindValue($paramPos, $val, PDO::PARAM_INT);
                     } elseif (is_array($val) || is_object($val)) {
                         $jsonVal = json_encode($val);
                         $stmtUpdate->bindValue($paramPos, $jsonVal, PDO::PARAM_STR);
@@ -242,8 +240,6 @@ class SQLiteStore
                     $stmt->bindValue($i + 1, null, PDO::PARAM_NULL);
                 } elseif (is_bool($val)) {
                     $stmt->bindValue($i + 1, $val ? '1' : '0', PDO::PARAM_STR);
-                } elseif (is_int($val)) {
-                    $stmt->bindValue($i + 1, $val, PDO::PARAM_INT);
                 } elseif (is_array($val) || is_object($val)) {
                     $stmt->bindValue($i + 1, json_encode($val), PDO::PARAM_STR);
                 } else {

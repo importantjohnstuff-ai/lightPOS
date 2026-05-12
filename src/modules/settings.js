@@ -11,6 +11,27 @@ const API_URL = 'api/sync.php';
 // tasks like full backup and restore, which are not part of the delta sync flow.
 const ADMIN_API_URL = 'api/router.php';
 
+// Helper to recursively round excessive floating point numbers to prevent database errors
+function deepSanitizeNumbers(obj) {
+    if (obj === null || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) {
+        return obj.map(deepSanitizeNumbers);
+    }
+    const result = {};
+    for (const key in obj) {
+        const val = obj[key];
+        if (typeof val === 'number' && !Number.isInteger(val)) {
+            // Round to 4 decimal places if it has fractional parts
+            result[key] = Number(val.toFixed(4));
+        } else if (typeof val === 'object') {
+            result[key] = deepSanitizeNumbers(val);
+        } else {
+            result[key] = val;
+        }
+    }
+    return result;
+}
+
 const DEFAULT_SETTINGS = {
     store: { name: "LightPOS", logo: "", data: "" },
     tax: { rate: 12 },
@@ -1461,12 +1482,9 @@ async function setupMigrationEventListeners() {
                     for (const item of items) {
                         if (!item || typeof item !== 'object' || !item[idField]) continue;
 
-                        // Fix for "toFixed" errors: Ensure numeric fields are valid numbers
-                        if (collection === 'items') {
-                            item.cost_price = Number((parseFloat(item.cost_price) || 0).toFixed(2));
-                            item.selling_price = Number((parseFloat(item.selling_price) || 0).toFixed(2));
-                            item.stock_level = Number((parseFloat(item.stock_level) || 0).toFixed(4));
-                        }
+                        // Deep sanitize to prevent extreme floating-point precision from crashing SQLite
+                        const sanitized = deepSanitizeNumbers(item);
+                        Object.assign(item, sanitized);
 
                         // Fix for Users: Map 'password' to 'password_hash' for SQLite compatibility
                         if (collection === 'users') {
@@ -2166,12 +2184,9 @@ async function handleRestoreBackup(e) {
                 if (item && typeof item === 'object') {
                     item._updatedAt = serverTime;
 
-                    // Fix for "toFixed" errors: Ensure numeric fields are valid numbers
-                    if (fileName === 'items') {
-                        item.cost_price = Number((parseFloat(item.cost_price) || 0).toFixed(2));
-                        item.selling_price = Number((parseFloat(item.selling_price) || 0).toFixed(2));
-                        item.stock_level = Number((parseFloat(item.stock_level) || 0).toFixed(4));
-                    }
+                    // Deep sanitize to prevent extreme floating-point precision from crashing SQLite
+                    const sanitized = deepSanitizeNumbers(item);
+                    Object.assign(item, sanitized);
 
                     // Fix for Users: Map 'password' to 'password_hash' for SQLite compatibility
                     if (fileName === 'users') {
