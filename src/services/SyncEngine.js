@@ -27,6 +27,10 @@ export const SyncEngine = {
                 window.dispatchEvent(new CustomEvent('sync-updated'));
                 console.log("Sync completed.");
             } catch (error) {
+                if (error.name === 'DatabaseClosedError') {
+                    console.warn("SyncEngine: Database is closed (likely reloading/restoring). Aborting sync.");
+                    return;
+                }
                 console.error("SyncEngine: An error occurred during the sync process:", error);
                 handleError(error, 'SyncEngine');
                 window.dispatchEvent(new CustomEvent('sync-failed'));
