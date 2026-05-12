@@ -59,20 +59,25 @@ async function checkAppInitialization() {
         }
 
         // Check Server Data
-        let serverHasData = false;
+        let serverNeedsInit = false;
         try {
-            const response = await fetch('api/sync.php?since=0&limit=1');
+            const response = await fetch('api/sync.php?since=0&collection=users');
             if (response.ok) {
                 const data = await response.json();
-                if (data.deltas && data.deltas.users && data.deltas.users.length > 0) {
-                    serverHasData = true;
+                if (data.status === 'needs_restore') {
+                    serverNeedsInit = true;
+                } else if (data.deltas && data.deltas.users && data.deltas.users.length === 0) {
+                    // if it is initialized but somehow zero users are returned
+                    // we'll assume it doesn't need init because db_initialized is true
                 }
+            } else {
+                console.warn("Server check returned non-OK status. Assuming server has data to prevent accidental wipe.");
             }
         } catch (e) {
             console.warn("Server check failed (Offline?):", e);
         }
 
-        if (serverHasData) {
+        if (!serverNeedsInit) {
             startAppNormalFlow();
         } else {
             // Initialization Mode
