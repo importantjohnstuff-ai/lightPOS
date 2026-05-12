@@ -1849,32 +1849,49 @@ async function analyzeSync() {
                 if (onlyInServer.length > 0) {
                     renderRow(`${labelName}: Missing in Local`, onlyInServer, "Download", "bg-blue-500", async () => {
                         await db.transaction('rw', [db[collection], db.outbox], async () => {
-                            for (const item of onlyInServer) {
-                                await db[collection].put(item);
-                                await db.outbox.where({ collection: collection, docId: item[idField] }).delete();
-                            }
+                            await db[collection].bulkPut(onlyInServer);
+                            const ids = onlyInServer.map(i => i[idField]);
+                            await db.outbox.where('collection').equals(collection).filter(o => ids.includes(o.docId)).delete();
                         });
+                        alert(`${onlyInServer.length} items downloaded and synchronized locally.`);
+                        await compareDatabases();
                     });
                 }
 
                 if (onlyInLocal.length > 0) {
                     renderRow(`${labelName}: Missing in Server`, onlyInLocal, "Upload", "bg-green-500", async () => {
-                        for (const item of onlyInLocal) {
-                            const toUpload = { ...item, _updatedAt: Date.now(), _version: (item._version || 0) + 1 };
-                            await Repository.upsert(collection, toUpload);
-                        }
+                        const toUpload = onlyInLocal.map(item => ({
+                            ...item,
+                            _updatedAt: Date.now(),
+                            _version: (item._version || 0) + 1
+                        }));
+
+                        await db.transaction('rw', [db[collection], db.outbox], async () => {
+                            await db[collection].bulkPut(toUpload);
+                            const outboxEntries = toUpload.map(item => ({
+                                collection: collection,
+                                docId: item[idField],
+                                type: 'upsert',
+                                payload: item
+                            }));
+                            await db.outbox.bulkPut(outboxEntries);
+                        });
+
+                        alert(`${onlyInLocal.length} items queued for upload. Synchronization starting...`);
                         await SyncEngine.sync();
+                        await compareDatabases();
                     });
                 }
 
                 if (conflicts.length > 0) {
                     renderRow(`${labelName}: Conflicts`, conflicts, "Trust Server", "bg-orange-500", async () => {
                         await db.transaction('rw', [db[collection], db.outbox], async () => {
-                            for (const item of conflicts) {
-                                await db[collection].put(item);
-                                await db.outbox.where({ collection: collection, docId: item[idField] }).delete();
-                            }
+                            await db[collection].bulkPut(conflicts);
+                            const ids = conflicts.map(i => i[idField]);
+                            await db.outbox.where('collection').equals(collection).filter(o => ids.includes(o.docId)).delete();
                         });
+                        alert(`${conflicts.length} conflicts resolved by trusting server data.`);
+                        await compareDatabases();
                     });
                 }
             }

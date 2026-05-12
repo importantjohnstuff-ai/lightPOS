@@ -48,22 +48,30 @@ export const SyncEngine = {
     async push() {
         const db = await dbPromise;
         const outboxItems = await db.outbox.toArray();
-        console.log("SyncEngine: Outbox items to push:", outboxItems.map(i => ({ id: i.id, collection: i.collection, docId: i.docId, payloadKeys: Object.keys(i.payload) })));
         if (outboxItems.length === 0) return;
 
-        const response = await fetch(SYNC_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ outbox: outboxItems })
-        });
+        console.log(`SyncEngine: Total outbox items to push: ${outboxItems.length}`);
 
-        if (response.ok) {
-            const ids = outboxItems.map(i => i.id);
-            await db.outbox.bulkDelete(ids);
-        } else {
-            const errorText = await response.text();
-            console.error("SyncEngine: Push failed. Status:", response.status, "Response:", errorText);
-            throw new Error(`Push failed: ${response.status} ${errorText}`);
+        const CHUNK_SIZE = 200;
+        for (let i = 0; i < outboxItems.length; i += CHUNK_SIZE) {
+            const chunk = outboxItems.slice(i, i + CHUNK_SIZE);
+            console.log(`SyncEngine: Pushing chunk ${i / CHUNK_SIZE + 1} (${chunk.length} items)...`);
+
+            const response = await fetch(SYNC_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ outbox: chunk })
+            });
+
+            if (response.ok) {
+                const ids = chunk.map(item => item.id);
+                await db.outbox.bulkDelete(ids);
+                console.log(`SyncEngine: Chunk ${i / CHUNK_SIZE + 1} pushed successfully.`);
+            } else {
+                const errorText = await response.text();
+                console.error("SyncEngine: Push failed for chunk. Status:", response.status, "Response:", errorText);
+                throw new Error(`Push failed: ${response.status} ${errorText}`);
+            }
         }
     },
 
