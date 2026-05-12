@@ -79,8 +79,6 @@ require_once __DIR__ . '/core/SQLiteStore.php';
 // --- START Schema Initialization Logic ---
 function ensureSchema($pdo)
 {
-    // Disable WAL mode to prevent locking issues on some filesystems
-    $pdo->exec("PRAGMA journal_mode=DELETE;");
     $pdo->exec("PRAGMA busy_timeout = 5000;");
 
     // Check if the 'settings' table exists

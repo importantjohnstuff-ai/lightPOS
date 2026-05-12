@@ -97,8 +97,12 @@ export const SyncEngine = {
                 const text = await response.text();
 
                 if (!response.ok) {
+                    if (response.status === 500 && text.includes('database is locked')) {
+                        console.warn(`SyncEngine: Server database is temporarily locked for ${collection}. Will retry next interval.`);
+                        return; // Gracefully exit this pull cycle
+                    }
                     console.error(`SyncEngine: Pull failed for ${collection} (offset: ${offset}). Status:`, response.status, "Response:", text);
-                    throw new Error(`Pull failed for ${collection}: ${response.status} ${text}`);
+                    return; // Gracefully exit this pull cycle instead of throwing
                 }
 
                 let data;
@@ -106,7 +110,7 @@ export const SyncEngine = {
                     data = JSON.parse(text);
                 } catch (e) {
                     console.error(`SyncEngine: JSON Parse Error for ${collection}. Raw response:`, text);
-                    throw new Error(`Server returned invalid JSON for ${collection}. Check console for details.`);
+                    return; // Gracefully exit this pull cycle
                 }
 
                 if (data.status === 'needs_restore') {
