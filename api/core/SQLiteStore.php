@@ -203,20 +203,26 @@ class SQLiteStore
                 }
                 $updateParams[] = $dbRecord[$idColumn];
 
-                $executeParams = [];
-                foreach ($updateParams as $val) {
+                foreach ($updateParams as $i => $val) {
+                    $paramPos = $i + 1;
                     if (is_null($val)) {
-                        $executeParams[] = null;
+                        $stmtUpdate->bindValue($paramPos, null, PDO::PARAM_NULL);
                     } elseif (is_bool($val)) {
-                        $executeParams[] = $val ? '1' : '0';
+                        $stmtUpdate->bindValue($paramPos, $val ? '1' : '0', PDO::PARAM_STR);
+                    } elseif (is_int($val)) {
+                        $stmtUpdate->bindValue($paramPos, $val, PDO::PARAM_INT);
+                    } elseif (is_float($val) && floor($val) == $val) {
+                        // Large timestamps on 32-bit PHP systems are floats. 
+                        // Bind as string to allow SQLite to coerce it safely without float-to-int overflow.
+                        $stmtUpdate->bindValue($paramPos, (string)$val, PDO::PARAM_STR);
                     } elseif (is_array($val) || is_object($val)) {
-                        $executeParams[] = json_encode($val);
+                        $stmtUpdate->bindValue($paramPos, json_encode($val), PDO::PARAM_STR);
                     } else {
-                        $executeParams[] = (string) $val;
+                        $stmtUpdate->bindValue($paramPos, (string)$val, PDO::PARAM_STR);
                     }
                 }
 
-                $this->executeWithRetry($stmtUpdate, $executeParams, $updateParams);
+                $this->executeWithRetry($stmtUpdate, null, $updateParams);
                 $stmtUpdate->closeCursor();
                 $stmtUpdate = null;
             }
@@ -230,20 +236,24 @@ class SQLiteStore
 
             $stmt = $this->pdo->prepare($sql);
 
-            $executeParams = [];
-            foreach ($bindParams as $val) {
+            foreach ($bindParams as $i => $val) {
+                $paramPos = $i + 1;
                 if (is_null($val)) {
-                    $executeParams[] = null;
+                    $stmt->bindValue($paramPos, null, PDO::PARAM_NULL);
                 } elseif (is_bool($val)) {
-                    $executeParams[] = $val ? '1' : '0';
+                    $stmt->bindValue($paramPos, $val ? '1' : '0', PDO::PARAM_STR);
+                } elseif (is_int($val)) {
+                    $stmt->bindValue($paramPos, $val, PDO::PARAM_INT);
+                } elseif (is_float($val) && floor($val) == $val) {
+                    $stmt->bindValue($paramPos, (string)$val, PDO::PARAM_STR);
                 } elseif (is_array($val) || is_object($val)) {
-                    $executeParams[] = json_encode($val);
+                    $stmt->bindValue($paramPos, json_encode($val), PDO::PARAM_STR);
                 } else {
-                    $executeParams[] = (string) $val;
+                    $stmt->bindValue($paramPos, (string)$val, PDO::PARAM_STR);
                 }
             }
 
-            $this->executeWithRetry($stmt, $executeParams, $bindParams);
+            $this->executeWithRetry($stmt, null, $bindParams);
             $stmt->closeCursor();
             $stmt = null;
         }
