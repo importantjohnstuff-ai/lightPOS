@@ -148,7 +148,7 @@ function render() {
                             </div>
                             <div class="w-full sm:w-auto">
                                 <label for="item-quantity" class="block text-sm font-medium text-gray-700">Quantity</label>
-                                <input type="number" id="item-quantity" min="1" value="1" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-2">
+                                <input type="number" id="item-quantity" min="0" value="1" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm py-2">
                             </div>
                             <button type="submit" id="btn-add-to-cart" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md shadow-sm">
                                 Add to Cart (+)
@@ -263,7 +263,7 @@ function render() {
                  <!-- Qty Input -->
                  <div class="flex flex-col items-center bg-gray-700 rounded-xl px-2 py-1 shrink-0 border border-gray-600">
                      <span class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Qty</span>
-                     <input type="number" id="mobile-qty-input" value="1" min="1" class="w-10 text-center bg-transparent text-white font-bold text-xl border-none focus:ring-0 p-0 leading-none">
+                     <input type="number" id="mobile-qty-input" value="1" min="0" class="w-10 text-center bg-transparent text-white font-bold text-xl border-none focus:ring-0 p-0 leading-none">
                 </div>
             </div>
 
@@ -492,7 +492,6 @@ function addToCart(item, quantity) {
             id: item.id,
             name: item.name,
             quantity: quantity,
-            quantity: quantity,
             cost_price: item.cost_price || 0,
             original_cost_price: item.cost_price || 0, // Track original cost
             selling_price: item.selling_price || 0,
@@ -594,8 +593,8 @@ async function handleAddItemToCart(e) {
     const quantityInput = document.getElementById('item-quantity');
     const quantity = parseInt(quantityInput.value, 10);
 
-    if (!itemId || !quantity || quantity <= 0) {
-        alert('Please select an item and enter a valid quantity.');
+    if (!itemId || isNaN(quantity) || quantity < 0) {
+        alert('Please select an item and enter a valid quantity (0 or more).');
         return;
     }
 
@@ -660,7 +659,7 @@ function renderStockInCart() {
             <td class="p-2 text-center">
                 <div class="flex items-center justify-center gap-1">
                     <span class="text-xs font-bold ${isOut ? 'text-red-600' : 'text-green-600'}">${isOut ? '-' : '+'}</span>
-                    <input type="number" min="1" class="w-16 border rounded text-center py-1 cart-qty-input" data-index="${index}" value="${item.quantity}">
+                    <input type="number" min="0" class="w-16 border rounded text-center py-1 cart-qty-input" data-index="${index}" value="${item.quantity}">
                 </div>
             </td>
             <td class="p-2 text-right">
@@ -716,7 +715,7 @@ function removeFromCart(itemId) {
 }
 
 function updateCartQty(index, newQty) {
-    if (isNaN(newQty) || newQty < 1) {
+    if (isNaN(newQty) || newQty < 0) {
         renderStockInCart();
         return;
     }
