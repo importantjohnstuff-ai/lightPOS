@@ -13,21 +13,30 @@ const ADMIN_API_URL = 'api/router.php';
 
 // Helper to recursively round excessive floating point numbers to prevent database errors
 function deepSanitizeNumbers(obj) {
-    if (obj === null || typeof obj !== 'object') return obj;
+    if (obj === null) return null;
+    if (typeof obj === 'number') {
+        return Number.isInteger(obj) ? obj : Number(obj.toFixed(4));
+    }
+    if (typeof obj === 'string') {
+        const trimmed = obj.trim();
+        if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+            try {
+                const parsed = JSON.parse(obj);
+                const sanitized = deepSanitizeNumbers(parsed);
+                return JSON.stringify(sanitized);
+            } catch (e) {
+                return obj;
+            }
+        }
+        return obj;
+    }
     if (Array.isArray(obj)) {
         return obj.map(deepSanitizeNumbers);
     }
+    if (typeof obj !== 'object') return obj;
     const result = {};
     for (const key in obj) {
-        const val = obj[key];
-        if (typeof val === 'number' && !Number.isInteger(val)) {
-            // Round to 4 decimal places if it has fractional parts
-            result[key] = Number(val.toFixed(4));
-        } else if (typeof val === 'object') {
-            result[key] = deepSanitizeNumbers(val);
-        } else {
-            result[key] = val;
-        }
+        result[key] = deepSanitizeNumbers(obj[key]);
     }
     return result;
 }
@@ -1486,6 +1495,14 @@ async function setupMigrationEventListeners() {
                         const sanitized = deepSanitizeNumbers(item);
                         Object.assign(item, sanitized);
 
+                        // Ensure timestamps are integers (fix for ISO strings in backups)
+                        if (collection === 'transactions' && typeof item.timestamp === 'string') {
+                            const d = new Date(item.timestamp);
+                            if (!isNaN(d.getTime())) {
+                                item.timestamp = d.getTime();
+                            }
+                        }
+
                         // Fix for Users: Map 'password' to 'password_hash' for SQLite compatibility
                         if (collection === 'users') {
                             if (item.password && !item.password_hash) {
@@ -2187,6 +2204,14 @@ async function handleRestoreBackup(e) {
                     // Deep sanitize to prevent extreme floating-point precision from crashing SQLite
                     const sanitized = deepSanitizeNumbers(item);
                     Object.assign(item, sanitized);
+
+                    // Ensure timestamps are integers (fix for ISO strings in backups)
+                    if (fileName === 'transactions' && typeof item.timestamp === 'string') {
+                        const d = new Date(item.timestamp);
+                        if (!isNaN(d.getTime())) {
+                            item.timestamp = d.getTime();
+                        }
+                    }
 
                     // Fix for Users: Map 'password' to 'password_hash' for SQLite compatibility
                     if (fileName === 'users') {
