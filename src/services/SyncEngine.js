@@ -84,110 +84,127 @@ export const SyncEngine = {
 
         for (const collection of collections) {
             console.log(`SyncEngine: Pulling collection [${collection}]`);
-            const response = await fetch(`${SYNC_URL}?since=${since}&collection=${collection}`);
-            const text = await response.text();
+            const limit = 500;
+            let offset = 0;
+            let hasMore = true;
 
-            if (!response.ok) {
-                console.error(`SyncEngine: Pull failed for ${collection}. Status:`, response.status, "Response:", text);
-                throw new Error(`Pull failed for ${collection}: ${response.status} ${text}`);
-            }
+            while (hasMore) {
+                const response = await fetch(`${SYNC_URL}?since=${since}&collection=${collection}&limit=${limit}&offset=${offset}`);
+                const text = await response.text();
 
-            let data;
-            try {
-                data = JSON.parse(text);
-            } catch (e) {
-                console.error(`SyncEngine: JSON Parse Error for ${collection}. Raw response:`, text);
-                throw new Error(`Server returned invalid JSON for ${collection}. Check console for details.`);
-            }
+                if (!response.ok) {
+                    console.error(`SyncEngine: Pull failed for ${collection} (offset: ${offset}). Status:`, response.status, "Response:", text);
+                    throw new Error(`Pull failed for ${collection}: ${response.status} ${text}`);
+                }
 
-            if (data.status === 'needs_restore') {
-                needsRestore = true;
-                break;
-            }
+                let data;
+                try {
+                    data = JSON.parse(text);
+                } catch (e) {
+                    console.error(`SyncEngine: JSON Parse Error for ${collection}. Raw response:`, text);
+                    throw new Error(`Server returned invalid JSON for ${collection}. Check console for details.`);
+                }
 
-            const { deltas, serverTime } = data;
-            if (serverTime > maxServerTime) {
-                maxServerTime = serverTime;
-            }
+                if (data.status === 'needs_restore') {
+                    needsRestore = true;
+                    hasMore = false;
+                    break;
+                }
 
-            if (!deltas || !deltas[collection] || deltas[collection].length === 0) continue;
+                const { deltas, serverTime } = data;
+                if (serverTime > maxServerTime) {
+                    maxServerTime = serverTime;
+                }
 
-            const items = deltas[collection];
-            console.log(`SyncEngine: Processing [${items.length}] items for collection [${collection}]`);
+                if (!deltas || !deltas[collection] || deltas[collection].length === 0) {
+                    hasMore = false;
+                    break;
+                }
 
-            if (!db[collection]) continue;
+                const items = deltas[collection];
+                console.log(`SyncEngine: Processing [${items.length}] items for collection [${collection}] (offset: ${offset})`);
 
-            try {
-                await db.transaction('rw', [db[collection], db.outbox], async () => {
-                    const idField = db[collection].schema.primKey.name;
-                    // Prepare IDs for bulk fetch
-                    const serverItemsMap = new Map();
-                    const idsToFetch = [];
+                if (items.length < limit) {
+                    hasMore = false;
+                } else {
+                    offset += limit;
+                }
 
-                    for (const item of items) {
-                        const docId = item[idField];
-                        if (docId !== undefined && docId !== null) {
-                            idsToFetch.push(docId);
-                            serverItemsMap.set(docId, item);
+                if (!db[collection]) continue;
+
+                try {
+                    await db.transaction('rw', [db[collection], db.outbox], async () => {
+                        const idField = db[collection].schema.primKey.name;
+                        // Prepare IDs for bulk fetch
+                        const serverItemsMap = new Map();
+                        const idsToFetch = [];
+
+                        for (const item of items) {
+                            const docId = item[idField];
+                            if (docId !== undefined && docId !== null) {
+                                idsToFetch.push(docId);
+                                serverItemsMap.set(docId, item);
+                            }
                         }
-                    }
 
-                    // Bulk Get existing local items
-                    const localItems = await db[collection].bulkGet(idsToFetch);
+                        // Bulk Get existing local items
+                        const localItems = await db[collection].bulkGet(idsToFetch);
 
-                    const itemsToPut = [];
-                    const docIdsToClearOutbox = [];
+                        const itemsToPut = [];
+                        const docIdsToClearOutbox = [];
 
-                    for (let i = 0; i < idsToFetch.length; i++) {
-                        const docId = idsToFetch[i];
-                        const serverItem = serverItemsMap.get(docId);
-                        const localItem = localItems[i]; // Corresponding local item (or undefined)
+                        for (let i = 0; i < idsToFetch.length; i++) {
+                            const docId = idsToFetch[i];
+                            const serverItem = serverItemsMap.get(docId);
+                            const localItem = localItems[i]; // Corresponding local item (or undefined)
 
-                        const localVersion = localItem?._version || 0;
-                        const serverVersion = serverItem._version || 0;
-                        const localUpdated = localItem?._updatedAt || 0;
-                        const serverUpdated = serverItem._updatedAt || 0;
+                            const localVersion = localItem?._version || 0;
+                            const serverVersion = serverItem._version || 0;
+                            const localUpdated = localItem?._updatedAt || 0;
+                            const serverUpdated = serverItem._updatedAt || 0;
 
-                        // Conflict Resolution:
-                        // Update if:
-                        // 1. Local doesn't exist
-                        // 2. Server version is strictly higher
-                        // 3. Versions match but Server is newer (Clock Drift / LWW tie-breaker)
-                        const shouldUpdate = !localItem ||
-                            serverVersion > localVersion ||
-                            (serverVersion === localVersion && serverUpdated > localUpdated);
+                            // Conflict Resolution:
+                            // Update if:
+                            // 1. Local doesn't exist
+                            // 2. Server version is strictly higher
+                            // 3. Versions match but Server is newer (Clock Drift / LWW tie-breaker)
+                            const shouldUpdate = !localItem ||
+                                serverVersion > localVersion ||
+                                (serverVersion === localVersion && serverUpdated > localUpdated);
 
-                        if (shouldUpdate) {
-                            itemsToPut.push(serverItem);
-                            docIdsToClearOutbox.push(docId);
+                            if (shouldUpdate) {
+                                itemsToPut.push(serverItem);
+                                docIdsToClearOutbox.push(docId);
+                            }
                         }
-                    }
 
-                    if (itemsToPut.length > 0) {
-                        console.log(`SyncEngine: Bulk updating ${itemsToPut.length} items in [${collection}]`);
-                        await db[collection].bulkPut(itemsToPut);
+                        if (itemsToPut.length > 0) {
+                            console.log(`SyncEngine: Bulk updating ${itemsToPut.length} items in [${collection}]`);
+                            await db[collection].bulkPut(itemsToPut);
 
-                        try {
-                            const outboxKeysToDelete = [];
-                            const outboxItems = await db.outbox.where('collection').equals(collection).toArray();
+                            try {
+                                const outboxKeysToDelete = [];
+                                const outboxItems = await db.outbox.where('collection').equals(collection).toArray();
 
-                            for (const outboxItem of outboxItems) {
-                                if (docIdsToClearOutbox.includes(outboxItem.docId)) {
-                                    outboxKeysToDelete.push(outboxItem.id);
+                                for (const outboxItem of outboxItems) {
+                                    if (docIdsToClearOutbox.includes(outboxItem.docId)) {
+                                        outboxKeysToDelete.push(outboxItem.id);
+                                    }
                                 }
-                            }
 
-                            if (outboxKeysToDelete.length > 0) {
-                                await db.outbox.bulkDelete(outboxKeysToDelete);
+                                if (outboxKeysToDelete.length > 0) {
+                                    await db.outbox.bulkDelete(outboxKeysToDelete);
+                                }
+                            } catch (e) {
+                                console.warn("Soft error clearing outbox:", e);
                             }
-                        } catch (e) {
-                            console.warn("Soft error clearing outbox:", e);
                         }
-                    }
-                });
-            } catch (error) {
-                console.error(`SyncEngine: FAILED to process collection [${collection}]. Transaction rolled back.`, error);
+                    });
+                } catch (error) {
+                    console.error(`SyncEngine: FAILED to process collection [${collection}]. Transaction rolled back.`, error);
+                }
             }
+            if (needsRestore) break;
         }
 
         if (needsRestore) {

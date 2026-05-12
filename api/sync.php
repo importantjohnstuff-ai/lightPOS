@@ -438,6 +438,9 @@ if ($method === 'GET') {
 
     // PULL: Return deltas based on timestamp
     $since = isset($_GET['since']) ? (int) $_GET['since'] : 0;
+    $limit = isset($_GET['limit']) ? (int) $_GET['limit'] : null;
+    $offset = isset($_GET['offset']) ? (int) $_GET['offset'] : 0;
+
     $collections = [
         'items',
         'transactions',
@@ -468,13 +471,15 @@ if ($method === 'GET') {
     $response = [];
     $debug_info = [
         'received_since' => $since,
+        'received_limit' => $limit,
+        'received_offset' => $offset,
         'queries' => []
     ];
 
     foreach ($collections as $col) {
-        $debug_info['queries'][$col] = "SELECT * FROM $col WHERE _updatedAt > $since";
+        $debug_info['queries'][$col] = "SELECT * FROM $col WHERE _updatedAt > $since" . ($limit !== null ? " LIMIT $limit OFFSET $offset" : "");
         try {
-            $deltas = $store->getChanges($col, $since);
+            $deltas = $store->getChanges($col, $since, $limit, $offset);
             if (!empty($deltas)) {
                 $response[$col] = $deltas;
             }

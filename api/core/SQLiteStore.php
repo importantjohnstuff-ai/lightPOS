@@ -79,14 +79,19 @@ class SQLiteStore
         return array_map([$this, 'hydrate'], $results);
     }
 
-    public function getChanges($collection, $since)
+    public function getChanges($collection, $since, $limit = null, $offset = 0)
     {
         if (!in_array($collection, $this->collections)) {
             throw new Exception("Unknown collection: $collection");
         }
         try {
-            $stmt = $this->pdo->prepare("SELECT * FROM $collection WHERE _updatedAt > ?");
-            $stmt->execute([$since]);
+            $sql = "SELECT * FROM $collection WHERE _updatedAt > ? ORDER BY _updatedAt ASC";
+            $params = [$since];
+            if ($limit !== null) {
+                $sql .= " LIMIT " . (int)$limit . " OFFSET " . (int)$offset;
+            }
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
             $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
             return array_map([$this, 'hydrate'], $results);
         } catch (PDOException $e) {
