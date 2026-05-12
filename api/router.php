@@ -289,29 +289,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             };
 
             try {
+                $failedRows = [];
                 $store->beginTransaction();
+                
                 if ($mode === 'append') {
-                    $currentData = $store->getAll($file);
                     if (is_array($input)) {
                         foreach ($input as $record) {
-                            $processRecord($record);
-                            $store->upsert($file, $record);
+                            try {
+                                $processRecord($record);
+                                $store->upsert($file, $record);
+                            } catch (Exception $e) {
+                                error_log("Failed to insert record in $file: " . $e->getMessage());
+                                $record['_import_error'] = $e->getMessage();
+                                $failedRows[] = $record;
+                            }
                         }
                     }
                 } else {
                     $store->wipe($file);
                     foreach ($input as $record) {
-                        $processRecord($record);
-                        $store->upsert($file, $record);
+                        try {
+                            $processRecord($record);
+                            $store->upsert($file, $record);
+                        } catch (Exception $e) {
+                            error_log("Failed to insert record in $file: " . $e->getMessage());
+                            $record['_import_error'] = $e->getMessage();
+                            $failedRows[] = $record;
+                        }
                     }
                 }
                 $store->commit();
+                
+                if (!empty($failedRows)) {
+                    // Return 207 Multi-Status to indicate some rows failed
+                    http_response_code(207);
+                    echo json_encode([
+                        "success" => true, 
+                        "partial" => true, 
+                        "message" => "Import completed with " . count($failedRows) . " failed records.",
+                        "failedRows" => $failedRows
+                    ]);
+                    exit;
+                }
             } catch (Exception $e) {
                 if ($store->inTransaction()) {
                     $store->rollBack();
                 }
                 http_response_code(500);
-                echo json_encode(["error" => "Import failed: " . $e->getMessage()]);
+                echo json_encode(["error" => "Import fundamentally failed: " . $e->getMessage()]);
                 exit;
             }
         }

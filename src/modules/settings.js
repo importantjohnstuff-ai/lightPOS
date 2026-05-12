@@ -2201,6 +2201,7 @@ async function handleRestoreBackup(e) {
         const totalItemsToRestore = totalItems;
 
         let itemsRestoredSoFar = 0;
+        let allFailedRows = [];
         const CHUNK_SIZE = 200; // Reduced chunk size to ensure reliability
 
         // Upload collection by collection to avoid hitting server POST size limits (e.g. 76MB)
@@ -2262,11 +2263,31 @@ async function handleRestoreBackup(e) {
                     body: JSON.stringify(chunk)
                 });
 
-                if (!response.ok) {
+                if (response.status === 207) {
+                    const result = await response.json();
+                    if (result.failedRows) {
+                        allFailedRows.push(...result.failedRows.map(row => ({ ...row, _collection: fileName })));
+                    }
+                } else if (!response.ok) {
                     const errText = await response.text();
                     throw new Error(`Failed to restore ${fileName} (chunk ${i}): ${errText}`);
                 }
             }
+        }
+
+        // Trigger download of failed rows if any
+        if (allFailedRows.length > 0) {
+            const blob = new Blob([JSON.stringify(allFailedRows, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `failed_imports_${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            alert(`Restore partially complete.\n\n${allFailedRows.length} extremely large records were skipped due to database limits.\nA file containing these skipped records has been downloaded to your computer.`);
         }
 
         // Ensure the server knows it is initialized, even if the backup file missed this key

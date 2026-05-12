@@ -5,7 +5,7 @@ require_once __DIR__ . '/../db/Database.php';
 class SQLiteStore
 {
     // Version identifier - update this when making changes to verify deployment
-    const VERSION = '2026-01-19-v5-STABILITY_EMULATION';
+    const VERSION = '2026-01-19-v6-FINAL_FALLBACK_READY';
 
     public $pdo;
     private $collections;
