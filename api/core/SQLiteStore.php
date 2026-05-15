@@ -124,13 +124,19 @@ class SQLiteStore
         $jsonData = [];
 
         // Special handling for nested JSON objects from old format
+        // Only convert to _json columns if the table actually has them,
+        // otherwise let them flow naturally into json_body as arrays.
         if (isset($record['items']) && is_array($record['items'])) {
-            $record['items_json'] = json_encode($record['items']);
-            unset($record['items']);
+            if (in_array('items_json', $tableColumns)) {
+                $record['items_json'] = json_encode($record['items']);
+                unset($record['items']);
+            }
         }
         if (isset($record['permissions']) && is_array($record['permissions'])) {
-            $record['permissions_json'] = json_encode($record['permissions']);
-            unset($record['permissions']);
+            if (in_array('permissions_json', $tableColumns)) {
+                $record['permissions_json'] = json_encode($record['permissions']);
+                unset($record['permissions']);
+            }
         }
 
         // Hotfix for sync_metadata value being an array
@@ -394,6 +400,21 @@ class SQLiteStore
         // Remove the original JSON string columns
         foreach ($jsonKeysToRemove as $key) {
             unset($row[$key]);
+        }
+
+        // Second pass: decode any _json string values that were merged from json_body/full_data
+        // This handles legacy records where items were double-encoded as items_json inside json_body
+        foreach ($row as $key => $value) {
+            if (is_string($value) && str_ends_with($key, '_json')) {
+                $decoded = json_decode($value, true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    $newKey = substr($key, 0, -5); // e.g., 'items_json' -> 'items'
+                    if (!isset($row[$newKey])) {
+                        $row[$newKey] = $decoded;
+                        unset($row[$key]);
+                    }
+                }
+            }
         }
 
         return $row;
