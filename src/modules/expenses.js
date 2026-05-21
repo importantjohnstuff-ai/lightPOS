@@ -101,7 +101,7 @@ export async function loadExpensesView() {
                     </div>
                     <div class="mb-4">
                         <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Amount (PHP)</label>
-                        <input type="number" step="0.01" id="exp-amount" class="w-full border rounded-lg py-2 px-3 text-lg font-bold focus:ring-2 focus:ring-red-500 outline-none" placeholder="0.00" required>
+                        <input type="number" step="0.01" id="exp-amount" class="w-full border rounded-lg py-2 px-3 text-lg font-bold focus:ring-2 focus:ring-red-500 outline-none no-spinner" placeholder="0.00" required onwheel="this.blur()">
                     </div>
                     <div class="grid grid-cols-2 gap-4">
                         <div class="mb-4">

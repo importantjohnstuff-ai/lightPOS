@@ -399,6 +399,13 @@ function attachEventListeners() {
         }
     });
 
+    // Prevent scroll wheel from changing values on price/cost inputs
+    cartContainer.addEventListener('wheel', (e) => {
+        if (e.target.tagName === 'INPUT' && e.target.type === 'number') {
+            e.target.blur();
+        }
+    }, { passive: true });
+
     cartContainer.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
             const target = e.target;
@@ -406,7 +413,16 @@ function attachEventListeners() {
 
             const isQty = target.classList.contains('cart-qty-input');
             const isCost = target.classList.contains('cart-cost-input');
-            const selector = isQty ? '.cart-qty-input' : (isCost ? '.cart-cost-input' : '.cart-price-input');
+            const isPrice = target.classList.contains('cart-price-input');
+
+            // For price/cost inputs, block ArrowUp/ArrowDown from incrementing values
+            if (isCost || isPrice) {
+                e.preventDefault();
+                return;
+            }
+
+            // For qty inputs, allow navigating between rows
+            const selector = '.cart-qty-input';
             const inputs = Array.from(cartContainer.querySelectorAll(selector));
             const index = inputs.indexOf(target);
 
@@ -665,13 +681,13 @@ function renderStockInCart() {
             <td class="p-2 text-right">
                 <div class="flex items-center justify-end">
                     <span class="mr-1 text-gray-400">₱</span>
-                    <input type="number" step="0.01" min="0" class="w-24 border rounded text-right py-1 cart-price-input ${item.is_price_active ? 'text-gray-900 font-bold' : 'text-gray-400'}" data-index="${index}" value="${(item.selling_price || 0).toFixed(2)}">
+                    <input type="number" step="0.01" min="0" class="w-24 border rounded text-right py-1 cart-price-input no-spinner ${item.is_price_active ? 'text-gray-900 font-bold' : 'text-gray-400'}" data-index="${index}" value="${(item.selling_price || 0).toFixed(2)}">
                 </div>
             </td>
             <td class="p-2 text-right">
                 <div class="flex items-center justify-end">
                     <span class="mr-1 text-gray-400">₱</span>
-                    <input type="number" step="0.01" min="0" class="w-24 border rounded text-right py-1 cart-cost-input" data-index="${index}" value="${item.cost_price.toFixed(2)}">
+                    <input type="number" step="0.01" min="0" class="w-24 border rounded text-right py-1 cart-cost-input no-spinner" data-index="${index}" value="${item.cost_price.toFixed(2)}">
                 </div>
             </td>
             <td class="p-2 text-right font-medium">₱${subtotal.toFixed(2)}</td>
@@ -933,11 +949,41 @@ async function showStockInDetails(id) {
     const entry = historyCache.find(e => e.id === id);
     if (!entry) return;
 
-    // Fallback for missing items (e.g. lost during sync)
+    // --- Robust normalization of the items field ---
+    // Handle various formats that may exist due to sync encoding issues:
+    // 1. entry.items is already a proper array (ideal case)
+    // 2. entry.items is a JSON string that needs parsing
+    // 3. entry.items_json exists instead of entry.items (legacy double-encoding)
+    // 4. entry.items is missing entirely (fall back to stock_movements)
+
+    // Case 3: items_json exists but items doesn't
+    if ((!entry.items || (Array.isArray(entry.items) && entry.items.length === 0)) && entry.items_json) {
+        try {
+            const parsed = typeof entry.items_json === 'string' ? JSON.parse(entry.items_json) : entry.items_json;
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                entry.items = parsed;
+            }
+        } catch (e) {
+            console.warn("Failed to parse items_json:", e);
+        }
+    }
+
+    // Case 2: items is a JSON string
+    if (typeof entry.items === 'string') {
+        try {
+            const parsed = JSON.parse(entry.items);
+            if (Array.isArray(parsed)) {
+                entry.items = parsed;
+            }
+        } catch (e) {
+            console.warn("Failed to parse items string:", e);
+            entry.items = [];
+        }
+    }
+
+    // Case 4: Fallback to stock_movements if items is still missing
     if (!entry.items || !Array.isArray(entry.items) || entry.items.length === 0) {
         try {
-            // Attempt to find movements with the same timestamp
-            // Note: This relies on timestamp uniqueness.
             const movements = await Repository.query('stock_movements', {
                 where: { timestamp: entry.timestamp }
             });
@@ -947,8 +993,8 @@ async function showStockInDetails(id) {
                     id: m.item_id,
                     name: m.item_name || 'Unknown Item',
                     quantity: Math.abs(m.qty),
-                    cost_price: 0, // Cost is not preserved in movements
-                    qty: Math.abs(m.qty) // Backwards compatibility
+                    cost_price: 0,
+                    qty: Math.abs(m.qty)
                 }));
             }
         } catch (e) {
@@ -962,6 +1008,14 @@ async function showStockInDetails(id) {
         modal.id = 'stockin-details-modal';
         modal.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50';
         document.body.appendChild(modal);
+    }
+
+    // DEBUG: Log the entry data to diagnose zero values
+    console.log('[StockIn Details] Entry:', JSON.stringify(entry, null, 2));
+    console.log('[StockIn Details] items type:', typeof entry.items, 'isArray:', Array.isArray(entry.items));
+    if (Array.isArray(entry.items) && entry.items.length > 0) {
+        console.log('[StockIn Details] First item:', JSON.stringify(entry.items[0]));
+        console.log('[StockIn Details] First item keys:', Object.keys(entry.items[0]));
     }
 
     const itemRows = (entry.items || []).map(item => {
