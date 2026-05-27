@@ -16,8 +16,12 @@ class Database
             $this->pdo->exec("PRAGMA journal_mode=WAL;");
             $this->pdo->exec("PRAGMA busy_timeout = 5000;");
         } catch (PDOException $e) {
-            // Handle connection error
-            die("Database connection failed: " . $e->getMessage());
+            // Handle connection error — return JSON so the shutdown handler doesn't corrupt output
+            error_log("Database connection failed: " . $e->getMessage());
+            http_response_code(500);
+            header('Content-Type: application/json; charset=UTF-8');
+            echo json_encode(["error" => "Database connection failed: " . $e->getMessage()]);
+            exit;
         }
     }
 

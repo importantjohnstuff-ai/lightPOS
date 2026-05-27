@@ -193,7 +193,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 // Ensure data directory exists before initializing SQLiteStore
 $dataDir = __DIR__ . '/../data';
 if (!is_dir($dataDir)) {
-    mkdir($dataDir, 0777, true);
+    @mkdir($dataDir, 0777, true);
+}
+
+// Ensure data directory is writable
+if (!is_dir($dataDir) || !is_writable($dataDir)) {
+    http_response_code(500);
+    echo json_encode(["error" => "Server Data Directory is not writable. Please check permissions. Path: " . realpath(__DIR__ . '/..')]);
+    exit;
 }
 
 $store = new SQLiteStore();

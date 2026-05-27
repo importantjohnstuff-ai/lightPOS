@@ -43,7 +43,7 @@ $restoreLockFile = $dataDir . 'restore.lock';
 
 // Ensure data directory exists
 if (!is_dir($dataDir)) {
-    mkdir($dataDir, 0777, true);
+    @mkdir($dataDir, 0777, true);
 }
 
 // Ensure data directory is writable
