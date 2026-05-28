@@ -546,10 +546,10 @@ function showSyncProgressOverlay(percent, collection, rowsProcessed, totalRows) 
     const pctText = document.getElementById('sync-progress-text');
     const details = document.getElementById('sync-progress-details');
 
-    if (bar) bar.style.width = \`${percent}%\`;
-    if (colText) colText.textContent = \`Syncing \${collection}...\`;
-    if (pctText) pctText.textContent = \`\${percent}%\`;
-    if (details) details.textContent = \`\${rowsProcessed.toLocaleString()} / \${totalRows.toLocaleString()} records\`;
+    if (bar) bar.style.width = `${percent}%`;
+    if (colText) colText.textContent = `Syncing ${collection}...`;
+    if (pctText) pctText.textContent = `${percent}%`;
+    if (details) details.textContent = `${rowsProcessed.toLocaleString()} / ${totalRows.toLocaleString()} records`;
 }
 
 function hideSyncProgressOverlay() {
