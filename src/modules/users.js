@@ -2,6 +2,7 @@ import { checkPermission, getUserProfile, updateLocalProfile } from "../auth.js"
 import { renderSidebar } from "../layout.js";
 import { dbRepository as Repository } from "../db.js";
 import { SyncEngine } from "../services/SyncEngine.js";
+import { isServerReachable } from "../services/ServerReachability.js";
 
 export const MODULES = ['pos', 'customers', 'shifts', 'items', 'suppliers', 'purchase_orders', 'stockin', 'stock-count', 'expenses', 'reports', 'users', 'migrate', 'returns', 'settings'];
 
@@ -183,7 +184,7 @@ async function fetchAndRenderUsers(filter = "all") {
     const tbody = document.getElementById("users-table-body");
     const canWrite = checkPermission("users", "write");
     try {
-        if (navigator.onLine) {
+        if (await isServerReachable()) {
             await SyncEngine.sync();
         }
 
@@ -428,7 +429,7 @@ async function handleUserSubmit(e) {
         console.log("User saved locally. Outbox queued. Local record:", saved);
 
         // Trigger background sync, but don't block the UI
-        if (navigator.onLine) {
+        if (await isServerReachable()) {
             SyncEngine.sync().then(() => console.log("Background sync triggered after user save")).catch(e => console.warn("Background sync failed after user save:", e));
         }
 

@@ -1,4 +1,5 @@
 import { getUserProfile, updateLocalProfile } from "../auth.js";
+import { isServerReachable } from "../services/ServerReachability.js";
 
 const API_URL = 'api/router.php';
 
@@ -85,8 +86,8 @@ export function loadProfileView() {
 
 async function handleUpdateProfile(e) {
     e.preventDefault();
-    if (!navigator.onLine) {
-        showProfileMessage(document.getElementById("profile-update-message"), "You must be online to update your profile.", true);
+    if (!await isServerReachable()) {
+        showProfileMessage(document.getElementById("profile-update-message"), "Server is unreachable. Please check your connection.", true);
         return;
     }
 
@@ -132,8 +133,8 @@ async function handleUpdateProfile(e) {
 
 async function handleChangePassword(e) {
     e.preventDefault();
-    if (!navigator.onLine) {
-        showProfileMessage(document.getElementById("password-message"), "You must be online to change your password.", true);
+    if (!await isServerReachable()) {
+        showProfileMessage(document.getElementById("password-message"), "Server is unreachable. Please check your connection.", true);
         return;
     }
     

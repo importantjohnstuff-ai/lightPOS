@@ -3,6 +3,7 @@ import { checkPermission, logout, getUserProfile } from "./auth.js";
 import { checkActiveShift } from "./modules/shift.js";
 import { getRecentNotifications, markAllAsRead, toggleNotificationRead, getUnreadCount } from "./services/notification-service.js";
 import { SyncEngine } from "./services/SyncEngine.js";
+import { isServerReachable, getLastKnownReachability } from "./services/ServerReachability.js";
 
 export function renderSidebar() {
     renderHeader();
@@ -222,7 +223,7 @@ export async function renderHeader() {
 
     headerActions.innerHTML = `
         <div class="flex items-center gap-2 mr-4 cursor-pointer group border-r border-blue-600 pr-4 select-none active:opacity-80 active:scale-95 transition-all touch-manipulation" id="btn-manual-sync" title="Click to sync now">
-            <div id="sync-indicator-dot" class="w-2 h-2 rounded-full ${navigator.onLine ? 'bg-green-500' : 'bg-red-500'}"></div>
+            <div id="sync-indicator-dot" class="w-2 h-2 rounded-full bg-gray-400"></div>
             <div class="flex flex-col">
                 <span class="text-[9px] text-blue-200 uppercase font-bold leading-none">Sync Status</span>
                 <span id="last-sync-label" class="text-[10px] text-white font-medium leading-tight">Loading...</span>
@@ -314,17 +315,29 @@ window.addEventListener('sync-failed', () => {
 });
 
 window.addEventListener('sync-updated', updateSyncUI);
-window.addEventListener('online', () => {
+
+// Listen for actual server reachability changes instead of browser online/offline
+// (browser events only detect WAN, not LAN server reachability)
+window.addEventListener('server-connectivity-change', (e) => {
     const dot = document.getElementById("sync-indicator-dot");
     if (dot) {
-        dot.classList.remove("bg-red-500");
-        dot.classList.add("bg-green-500");
+        if (e.detail.reachable) {
+            dot.classList.remove("bg-red-500", "bg-gray-400");
+            dot.classList.add("bg-green-500");
+        } else {
+            dot.classList.remove("bg-green-500", "bg-gray-400");
+            dot.classList.add("bg-red-500");
+        }
     }
+});
+window.addEventListener('online', () => {
+    // Browser went online — trigger a server reachability check
+    isServerReachable(true);
 });
 window.addEventListener('offline', () => {
     const dot = document.getElementById("sync-indicator-dot");
     if (dot) {
-        dot.classList.remove("bg-green-500");
+        dot.classList.remove("bg-green-500", "bg-gray-400");
         dot.classList.add("bg-red-500");
     }
 });
@@ -336,8 +349,8 @@ function updateSyncUI() {
     const icon = document.getElementById("sync-icon-svg");
     const dot = document.getElementById("sync-indicator-dot");
     if (icon) icon.classList.remove("animate-spin");
-    if (dot && navigator.onLine) {
-        dot.classList.remove("bg-yellow-500", "bg-red-500");
+    if (dot) {
+        dot.classList.remove("bg-yellow-500", "bg-red-500", "bg-gray-400");
         dot.classList.add("bg-green-500");
     }
 

@@ -2,6 +2,7 @@ import { testDbSchemaUpgrade } from '../modules/db_schema.test.js';
 import { dbPromise } from '../db.js';
 import { dbRepository as Repository } from '../db.js';
 import { SyncEngine } from './SyncEngine.js';
+import { isServerReachable } from './ServerReachability.js';
 import { testSettingsMismatchDetection } from '../modules/settings.test.js';
 import { testPushWithData, testPullAndApplyDeltas } from './SyncEngine.test.js';
 
@@ -130,7 +131,7 @@ export const TestRunner = {
             if (inOutbox.collection !== col.name) throw new Error(`Outbox item has wrong collection. Expected ${col.name}, got ${inOutbox.collection}`);
             
             // 2. Trigger sync (assuming online for this test environment)
-            if (navigator.onLine) {
+            if (await isServerReachable()) {
                 // Mock the sync to prevent actual network call
                 SyncEngine.sync = async () => {
                     await db.outbox.where('docId').equals(id).delete();

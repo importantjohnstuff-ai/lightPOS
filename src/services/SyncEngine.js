@@ -1,5 +1,6 @@
 import { dbPromise } from "../db.js";
 import { handleError } from "../utils.js";
+import { isServerReachable } from "./ServerReachability.js";
 
 const SYNC_URL = 'api/sync.php';
 
@@ -10,7 +11,10 @@ const SYNC_URL = 'api/sync.php';
 export const SyncEngine = {
     async sync() {
         const db = await dbPromise;
-        if (!navigator.onLine) return;
+        // Don't rely on navigator.onLine — it only checks for WAN/internet connectivity,
+        // not LAN reachability. Instead, check actual server reachability.
+        const reachable = await isServerReachable();
+        if (!reachable) return;
 
         const performSync = async () => {
             window.dispatchEvent(new CustomEvent('sync-started'));

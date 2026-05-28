@@ -14,7 +14,7 @@ const loginError = document.getElementById("login-error");
 const mainContent = document.getElementById("main-content");
 const btnGoogleLogin = document.getElementById("btn-google-login");
 
-function showApp(user) {
+async function showApp(user) {
     console.log("User authenticated:", user.email);
     loginView.classList.add("hidden");
     appContainer.classList.remove("hidden");
@@ -22,7 +22,15 @@ function showApp(user) {
     // Initialize App Shell
     renderSidebar();
     initRouter();
-    SyncEngine.sync();
+
+    // Await initial sync so data hydrates from server before modules render.
+    // This is critical when accessing from a new origin (e.g., IP change via DHCP)
+    // where the local IndexedDB is empty.
+    try {
+        await SyncEngine.sync();
+    } catch (e) {
+        console.warn("Initial sync failed (server may be unreachable):", e);
+    }
 }
 
 function showLogin() {

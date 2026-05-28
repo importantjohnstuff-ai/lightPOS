@@ -1,5 +1,6 @@
 import { dbRepository as Repository } from "./db.js";
 import { SyncEngine } from "./services/SyncEngine.js";
+import { isServerReachable } from "./services/ServerReachability.js";
 
 const API_URL = 'api/router.php';
 
@@ -107,7 +108,7 @@ export async function verifyManagerPassword(password) {
     if (now < lockoutUntil) return false;
 
     try {
-        if (navigator.onLine) {
+        if (await isServerReachable()) {
             await SyncEngine.sync();
         }
 

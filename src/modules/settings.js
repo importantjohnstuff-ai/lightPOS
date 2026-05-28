@@ -5,6 +5,7 @@ import { generateUUID } from "../utils.js";
 import { dbRepository as Repository } from "../db.js";
 import { SyncEngine } from "../services/SyncEngine.js";
 import { addNotification } from "../services/notification-service.js";
+import { isServerReachable } from "../services/ServerReachability.js";
 
 const API_URL = 'api/sync.php';
 // The router.php endpoint is a simple file-based store used for administrative
@@ -1069,7 +1070,7 @@ function displayTestRunnerModal(tests) {
 
 async function loadSettings() {
     try {
-        if (navigator.onLine) await SyncEngine.sync();
+        if (await isServerReachable()) await SyncEngine.sync();
 
         const localData = await Repository.get('settings', 'global');
         let settings = localData;
@@ -2413,7 +2414,7 @@ export async function runDiagnosticExport() {
             timestamp: new Date().toISOString(),
             environment: {
                 userAgent: navigator.userAgent,
-                online: navigator.onLine,
+                online: await isServerReachable(),
                 localStorage: {
                     last_sync_timestamp: localStorage.getItem('last_sync_timestamp')
                 }
