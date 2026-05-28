@@ -1,6 +1,6 @@
 <?php
-require_once __DIR__ . '/../../api/SQLiteStore.php';
-require_once __DIR__ . '/../../api/ProcurementService.php';
+require_once __DIR__ . '/../../api/core/SQLiteStore.php';
+require_once __DIR__ . '/../../api/services/ProcurementService.php';
 
 function assertEq($actual, $expected, $msg) {
     if ($actual !== $expected) {
@@ -33,7 +33,7 @@ try {
     }
     
     // Ensure PO tables exist
-    $schemaPath = __DIR__ . '/../../api/schema_po.sql';
+    $schemaPath = __DIR__ . '/../../api/schema/schema_po.sql';
     if (file_exists($schemaPath)) $pdo->exec(file_get_contents($schemaPath));
 
     // 1. Setup Data
@@ -93,7 +93,7 @@ try {
     assertEq($targetPO['status'], 'draft', "Status match");
     
     // Verify items in PO
-    $poItems = json_decode($targetPO['items_json'], true);
+    $poItems = $targetPO['items'];
     assertEq($poItems[0]['item_id'], $itemId, "Item ID match");
     assertEq($poItems[0]['qty'], 5, "Qty match");
 

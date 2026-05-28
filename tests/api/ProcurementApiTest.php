@@ -6,7 +6,7 @@
  * Usage: php tests/api/ProcurementApiTest.php
  */
 
-$baseUrl = 'http://localhost/lightPOS/api/procurement.php';
+$baseUrl = 'http://127.0.0.1:8000/api/procurement.php';
 $localFile = __DIR__ . '/../../api/procurement.php';
 
 if (!file_exists($localFile)) {

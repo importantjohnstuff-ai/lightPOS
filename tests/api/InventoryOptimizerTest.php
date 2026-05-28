@@ -8,7 +8,7 @@
  * Usage: php tests/api/InventoryOptimizerTest.php
  */
 
-require_once __DIR__ . '/../../api/InventoryOptimizer.php';
+require_once __DIR__ . '/../../api/services/InventoryOptimizer.php';
 
 echo "Running InventoryOptimizerTest...\n";
 
@@ -17,13 +17,14 @@ try {
     $pdo = new PDO('sqlite::memory:');
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // 2. Create Schema (Items, Transactions, SupplierConfig, Metrics)
+    // 2. Create Schema (Items, Transactions, SupplierConfig, Settings, Metrics)
     $pdo->exec("CREATE TABLE items (id TEXT PRIMARY KEY, cost_price REAL, selling_price REAL, supplier_id TEXT, _deleted INTEGER DEFAULT 0)");
     $pdo->exec("CREATE TABLE transactions (id TEXT PRIMARY KEY, items_json TEXT, json_body TEXT, timestamp TEXT, is_voided INTEGER DEFAULT 0, _deleted INTEGER DEFAULT 0)");
     $pdo->exec("CREATE TABLE supplier_config (supplier_id TEXT PRIMARY KEY, delivery_cadence TEXT, lead_time_days INTEGER, _deleted INTEGER DEFAULT 0)");
+    $pdo->exec("CREATE TABLE settings (id TEXT PRIMARY KEY, json_body TEXT, _version INTEGER, _updatedAt INTEGER, _deleted INTEGER DEFAULT 0)");
     
     // Load the actual PO schema for the metrics table
-    $schemaPo = file_get_contents(__DIR__ . '/../../api/schema_po.sql');
+    $schemaPo = file_get_contents(__DIR__ . '/../../api/schema/schema_po.sql');
     $pdo->exec($schemaPo);
 
     // 3. Seed Data

@@ -312,9 +312,22 @@ window.addEventListener('sync-failed', () => {
         dot.classList.add("bg-red-500");
     }
     if (label) label.textContent = "Sync Failed";
+    hideSyncProgressOverlay();
 });
 
-window.addEventListener('sync-updated', updateSyncUI);
+window.addEventListener('sync-updated', () => {
+    hideSyncProgressOverlay();
+    updateSyncUI();
+});
+
+window.addEventListener('sync-progress', (e) => {
+    const { collection, percent, rowsProcessed, totalRows } = e.detail;
+    // Show overlay if it is first sync or we have significant changes
+    const isFirstSync = !localStorage.getItem('last_sync_timestamp');
+    if (isFirstSync || totalRows > 100) {
+        showSyncProgressOverlay(percent, collection, rowsProcessed, totalRows);
+    }
+});
 
 // Listen for actual server reachability changes instead of browser online/offline
 // (browser events only detect WAN, not LAN server reachability)
@@ -493,4 +506,60 @@ async function updateSidebarSyncWarning() {
     const isStale = await checkSyncFreshness();
     if (isStale) dot.classList.remove("hidden");
     else dot.classList.add("hidden");
+}
+
+let syncOverlay = null;
+
+function showSyncProgressOverlay(percent, collection, rowsProcessed, totalRows) {
+    if (!syncOverlay) {
+        syncOverlay = document.createElement('div');
+        syncOverlay.id = 'sync-progress-overlay';
+        syncOverlay.className = 'fixed inset-0 bg-gray-900 bg-opacity-70 flex items-center justify-center z-[99999] backdrop-blur-sm transition-opacity duration-300';
+        syncOverlay.innerHTML = `
+            <div class="bg-white rounded-2xl p-8 max-w-sm w-full mx-4 shadow-2xl border border-gray-100 transform scale-100 transition-transform duration-300 flex flex-col items-center">
+                <div class="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mb-6 shadow-inner animate-pulse">
+                    <svg class="w-8 h-8 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                </div>
+                <h3 class="text-lg font-bold text-gray-900 mb-2">Syncing Data</h3>
+                <p class="text-xs text-gray-500 text-center mb-6">Optimizing and downloading records for offline use.</p>
+                
+                <div class="w-full bg-gray-100 rounded-full h-2.5 mb-2 overflow-hidden shadow-inner">
+                    <div id="sync-progress-bar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300 ease-out" style="width: 0%"></div>
+                </div>
+                
+                <div class="flex justify-between w-full text-xs text-gray-500 font-medium mb-1">
+                    <span id="sync-progress-collection">Initializing...</span>
+                    <span id="sync-progress-text">0%</span>
+                </div>
+                <div id="sync-progress-details" class="text-[10px] text-gray-400 font-normal">
+                    0 / 0 records
+                </div>
+            </div>
+        `;
+        document.body.appendChild(syncOverlay);
+    }
+
+    const bar = document.getElementById('sync-progress-bar');
+    const colText = document.getElementById('sync-progress-collection');
+    const pctText = document.getElementById('sync-progress-text');
+    const details = document.getElementById('sync-progress-details');
+
+    if (bar) bar.style.width = \`${percent}%\`;
+    if (colText) colText.textContent = \`Syncing \${collection}...\`;
+    if (pctText) pctText.textContent = \`\${percent}%\`;
+    if (details) details.textContent = \`\${rowsProcessed.toLocaleString()} / \${totalRows.toLocaleString()} records\`;
+}
+
+function hideSyncProgressOverlay() {
+    if (syncOverlay) {
+        syncOverlay.classList.add('opacity-0');
+        setTimeout(() => {
+            if (syncOverlay) {
+                syncOverlay.remove();
+                syncOverlay = null;
+            }
+        }, 300);
+    }
 }

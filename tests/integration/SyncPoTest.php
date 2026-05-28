@@ -1,5 +1,5 @@
 <?php
-require_once __DIR__ . '/../../api/SQLiteStore.php';
+require_once __DIR__ . '/../../api/core/SQLiteStore.php';
 
 function assertEq($actual, $expected, $msg) {
     if ($actual !== $expected) {

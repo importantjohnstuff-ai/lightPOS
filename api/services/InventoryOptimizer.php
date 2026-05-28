@@ -192,7 +192,7 @@ class InventoryOptimizer
                 $safetyStock = ceil($this->serviceLevelZ * $m['std_dev'] * sqrt($riskPeriod));
 
                 // ROP
-                $rop = ceil(($m['velocity'] * $leadTime) + $safetyStock);
+                $rop = ceil(($m['velocity'] * $riskPeriod) + $safetyStock);
 
                 // EOQ
                 $eoq = 0;
@@ -229,6 +229,7 @@ class InventoryOptimizer
 
             return [
                 'success' => true,
+                'processed' => $processed,
                 'items_processed' => $processed,
                 'metrics_updated' => $processed
             ];

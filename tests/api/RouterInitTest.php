@@ -9,7 +9,7 @@
  */
 
 $dbPath = __DIR__ . '/../../data/database.sqlite';
-$apiUrl = 'http://localhost/lightPOS/api/router.php';
+$apiUrl = 'http://127.0.0.1:8000/api/router.php';
 
 // Trigger the API to ensure schema initialization runs
 $ch = curl_init($apiUrl);

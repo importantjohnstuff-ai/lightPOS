@@ -6,7 +6,7 @@ use PHPUnit\Framework\TestCase;
 
 class ApiTest extends TestCase
 {
-    private string $baseUrl = 'http://localhost/lightPOS/api/router.php';
+    private string $baseUrl = 'http://127.0.0.1:8000/api/router.php';
 
     private function makeRequest(string $method, array $params = [], ?array $data = null): array
     {

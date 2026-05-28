@@ -9,6 +9,10 @@ ini_set('precision', 14);
 ini_set('memory_limit', '1024M');
 ini_set('max_execution_time', 300);
 
+if (!ob_start("ob_gzhandler")) {
+    ob_start();
+}
+
 // DEBUG: Enable error display so fatal errors produce visible output
 ini_set('display_errors', 0); // Don't display raw — we'll capture via shutdown handler
 ini_set('log_errors', 1);
@@ -164,6 +168,11 @@ function ensurePoSchema($pdo)
     if (!in_array('is_voided', $columns)) {
         $pdo->exec("ALTER TABLE transactions ADD COLUMN is_voided INTEGER DEFAULT 0");
     }
+
+    // Ensure PO indexes exist on _updatedAt for performance
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_inventory_metrics_updatedAt ON inventory_metrics(_updatedAt)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_supplier_config_updatedAt ON supplier_config(_updatedAt)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_purchase_orders_updatedAt ON purchase_orders(_updatedAt)");
 }
 ensurePoSchema($store->pdo);
 
@@ -470,7 +479,36 @@ if ($method === 'GET') {
         'discount_codes'
     ];
 
-    if (isset($_GET['collection']) && in_array($_GET['collection'], $collections)) {
+    // Counts Mode: Return changes count for each collection since timestamp
+    if (isset($_GET['action']) && $_GET['action'] === 'counts') {
+        $counts = [];
+        foreach ($collections as $col) {
+            try {
+                $stmt = $store->pdo->prepare("SELECT COUNT(*) FROM $col WHERE _updatedAt > ?");
+                $stmt->execute([$since]);
+                $counts[$col] = (int)$stmt->fetchColumn();
+                $stmt->closeCursor();
+            } catch (Exception $e) {
+                $counts[$col] = 0;
+            }
+        }
+        echo json_encode([
+            'counts' => $counts,
+            'serverTime' => round(microtime(true) * 1000)
+        ]);
+        exit;
+    }
+
+    if (isset($_GET['collections'])) {
+        $requested = explode(',', $_GET['collections']);
+        $filtered = [];
+        foreach ($requested as $col) {
+            if (in_array($col, $collections)) {
+                $filtered[] = $col;
+            }
+        }
+        $collections = $filtered;
+    } elseif (isset($_GET['collection']) && in_array($_GET['collection'], $collections)) {
         $collections = [$_GET['collection']];
     }
     $response = [];

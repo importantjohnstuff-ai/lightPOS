@@ -6,7 +6,7 @@
  * Usage: php tests/api/ProcurementServiceTest.php
  */
 
-require_once __DIR__ . '/../../api/ProcurementService.php';
+require_once __DIR__ . '/../../api/services/ProcurementService.php';
 
 echo "Running ProcurementServiceTest...\n";
 
@@ -21,7 +21,7 @@ try {
     $pdo->exec("CREATE TABLE purchase_orders (id TEXT PRIMARY KEY, supplier_id TEXT, status TEXT, items_json TEXT, total_amount REAL, created_at TEXT, _version INTEGER, _updatedAt INTEGER, _deleted INTEGER DEFAULT 0)");
     
     // Load PO schema for metrics
-    $schemaPo = file_get_contents(__DIR__ . '/../../api/schema_po.sql');
+    $schemaPo = file_get_contents(__DIR__ . '/../../api/schema/schema_po.sql');
     $pdo->exec($schemaPo);
 
     // 2. Seed Data

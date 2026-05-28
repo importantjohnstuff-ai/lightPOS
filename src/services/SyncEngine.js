@@ -79,11 +79,100 @@ export const SyncEngine = {
         }
     },
 
+    async applyDeltas(collection, items, isFirstSync = false) {
+        const db = await dbPromise;
+        if (!db[collection]) return;
+
+        try {
+            // Check if collection is empty locally to activate fast-path
+            const localCount = await db[collection].count();
+            const isFirstSyncFastPath = isFirstSync || (localCount === 0);
+
+            await db.transaction('rw', [db[collection], db.outbox], async () => {
+                const idField = db[collection].schema.primKey.name;
+
+                if (isFirstSyncFastPath) {
+                    console.log(`SyncEngine: Fast-path bulk putting ${items.length} items in [${collection}]`);
+                    await db[collection].bulkPut(items);
+                    return;
+                }
+
+                // Prepare IDs for bulk fetch
+                const serverItemsMap = new Map();
+                const idsToFetch = [];
+
+                for (const item of items) {
+                    const docId = item[idField];
+                    if (docId !== undefined && docId !== null) {
+                        idsToFetch.push(docId);
+                        serverItemsMap.set(docId, item);
+                    }
+                }
+
+                // Bulk Get existing local items
+                const localItems = await db[collection].bulkGet(idsToFetch);
+
+                const itemsToPut = [];
+                const docIdsToClearOutbox = [];
+
+                for (let i = 0; i < idsToFetch.length; i++) {
+                    const docId = idsToFetch[i];
+                    const serverItem = serverItemsMap.get(docId);
+                    const localItem = localItems[i]; // Corresponding local item (or undefined)
+
+                    const localVersion = localItem?._version || 0;
+                    const serverVersion = serverItem._version || 0;
+                    const localUpdated = localItem?._updatedAt || 0;
+                    const serverUpdated = serverItem._updatedAt || 0;
+
+                    // Conflict Resolution:
+                    // Update if:
+                    // 1. Local doesn't exist
+                    // 2. Server version is strictly higher
+                    // 3. Versions match but Server is newer (Clock Drift / LWW tie-breaker)
+                    const shouldUpdate = !localItem ||
+                        serverVersion > localVersion ||
+                        (serverVersion === localVersion && serverUpdated > localUpdated);
+
+                    if (shouldUpdate) {
+                        itemsToPut.push(serverItem);
+                        docIdsToClearOutbox.push(docId);
+                    }
+                }
+
+                if (itemsToPut.length > 0) {
+                    console.log(`SyncEngine: Bulk updating ${itemsToPut.length} items in [${collection}]`);
+                    await db[collection].bulkPut(itemsToPut);
+
+                    try {
+                        const outboxKeysToDelete = [];
+                        const outboxItems = await db.outbox.where('collection').equals(collection).toArray();
+
+                        for (const outboxItem of outboxItems) {
+                            if (docIdsToClearOutbox.includes(outboxItem.docId)) {
+                                outboxKeysToDelete.push(outboxItem.id);
+                            }
+                        }
+
+                        if (outboxKeysToDelete.length > 0) {
+                            await db.outbox.bulkDelete(outboxKeysToDelete);
+                        }
+                    } catch (e) {
+                        console.warn("Soft error clearing outbox:", e);
+                    }
+                }
+            });
+        } catch (error) {
+            console.error(`SyncEngine: FAILED to process collection [${collection}]. Transaction rolled back.`, error);
+        }
+    },
+
     async pull() {
         const db = await dbPromise;
         console.log("SyncEngine: --- pull() method was entered ---");
         const lastSyncMeta = await db.sync_metadata.get('last_pull_timestamp');
         const since = lastSyncMeta ? lastSyncMeta.value : 0;
+        const isFirstSync = (since === 0);
         console.log(`SyncEngine: Pulling changes since timestamp: ${since}`);
 
         const collections = [
@@ -98,139 +187,160 @@ export const SyncEngine = {
         let maxServerTime = 0;
         let needsRestore = false;
 
-        for (const collection of collections) {
-            console.log(`SyncEngine: Pulling collection [${collection}]`);
-            const limit = 500;
-            let offset = 0;
-            let hasMore = true;
-
-            while (hasMore) {
-                const response = await fetch(`${SYNC_URL}?since=${since}&collection=${collection}&limit=${limit}&offset=${offset}`);
-                const text = await response.text();
-
-                if (!response.ok) {
-                    if (response.status === 500 && text.includes('database is locked')) {
-                        console.warn(`SyncEngine: Server database is temporarily locked for ${collection}. Will retry next interval.`);
-                        return; // Gracefully exit this pull cycle
-                    }
-                    console.error(`SyncEngine: Pull failed for ${collection} (offset: ${offset}). Status:`, response.status, "Response:", text);
-                    return; // Gracefully exit this pull cycle instead of throwing
-                }
-
-                let data;
-                try {
-                    data = JSON.parse(text);
-                } catch (e) {
-                    console.error(`SyncEngine: JSON Parse Error for ${collection}. Raw response:`, text);
-                    return; // Gracefully exit this pull cycle
-                }
-
-                if (data.status === 'needs_restore') {
+        // 1. Fetch change counts from the server
+        console.log("SyncEngine: Fetching change counts...");
+        let counts = {};
+        try {
+            const countsResponse = await fetch(`${SYNC_URL}?action=counts&since=${since}`);
+            if (!countsResponse.ok) {
+                console.error("SyncEngine: Failed to fetch change counts. Falling back to serial pull.");
+            } else {
+                const countsData = await countsResponse.json();
+                if (countsData.status === 'needs_restore') {
                     needsRestore = true;
-                    hasMore = false;
-                    break;
-                }
-
-                const { deltas, serverTime } = data;
-                if (serverTime > maxServerTime) {
-                    maxServerTime = serverTime;
-                }
-
-                if (!deltas || !deltas[collection] || deltas[collection].length === 0) {
-                    hasMore = false;
-                    break;
-                }
-
-                const items = deltas[collection];
-                console.log(`SyncEngine: Processing [${items.length}] items for collection [${collection}] (offset: ${offset})`);
-
-                if (items.length < limit) {
-                    hasMore = false;
                 } else {
-                    offset += limit;
-                }
-
-                if (!db[collection]) continue;
-
-                try {
-                    await db.transaction('rw', [db[collection], db.outbox], async () => {
-                        const idField = db[collection].schema.primKey.name;
-                        // Prepare IDs for bulk fetch
-                        const serverItemsMap = new Map();
-                        const idsToFetch = [];
-
-                        for (const item of items) {
-                            const docId = item[idField];
-                            if (docId !== undefined && docId !== null) {
-                                idsToFetch.push(docId);
-                                serverItemsMap.set(docId, item);
-                            }
-                        }
-
-                        // Bulk Get existing local items
-                        const localItems = await db[collection].bulkGet(idsToFetch);
-
-                        const itemsToPut = [];
-                        const docIdsToClearOutbox = [];
-
-                        for (let i = 0; i < idsToFetch.length; i++) {
-                            const docId = idsToFetch[i];
-                            const serverItem = serverItemsMap.get(docId);
-                            const localItem = localItems[i]; // Corresponding local item (or undefined)
-
-                            const localVersion = localItem?._version || 0;
-                            const serverVersion = serverItem._version || 0;
-                            const localUpdated = localItem?._updatedAt || 0;
-                            const serverUpdated = serverItem._updatedAt || 0;
-
-                            // Conflict Resolution:
-                            // Update if:
-                            // 1. Local doesn't exist
-                            // 2. Server version is strictly higher
-                            // 3. Versions match but Server is newer (Clock Drift / LWW tie-breaker)
-                            const shouldUpdate = !localItem ||
-                                serverVersion > localVersion ||
-                                (serverVersion === localVersion && serverUpdated > localUpdated);
-
-                            if (shouldUpdate) {
-                                itemsToPut.push(serverItem);
-                                docIdsToClearOutbox.push(docId);
-                            }
-                        }
-
-                        if (itemsToPut.length > 0) {
-                            console.log(`SyncEngine: Bulk updating ${itemsToPut.length} items in [${collection}]`);
-                            await db[collection].bulkPut(itemsToPut);
-
-                            try {
-                                const outboxKeysToDelete = [];
-                                const outboxItems = await db.outbox.where('collection').equals(collection).toArray();
-
-                                for (const outboxItem of outboxItems) {
-                                    if (docIdsToClearOutbox.includes(outboxItem.docId)) {
-                                        outboxKeysToDelete.push(outboxItem.id);
-                                    }
-                                }
-
-                                if (outboxKeysToDelete.length > 0) {
-                                    await db.outbox.bulkDelete(outboxKeysToDelete);
-                                }
-                            } catch (e) {
-                                console.warn("Soft error clearing outbox:", e);
-                            }
-                        }
-                    });
-                } catch (error) {
-                    console.error(`SyncEngine: FAILED to process collection [${collection}]. Transaction rolled back.`, error);
+                    counts = countsData.counts || {};
+                    maxServerTime = countsData.serverTime || 0;
                 }
             }
-            if (needsRestore) break;
+        } catch (error) {
+            console.error("SyncEngine: Error getting counts, falling back:", error);
         }
 
         if (needsRestore) {
             console.warn("Server database needs restore. Initiating full upload from client.");
             await this.performFullRestore();
-            return; // Stop normal pull process
+            return;
+        }
+
+        // Filter collections that actually have updates
+        const activeCollections = collections.filter(col => (counts[col] !== undefined ? counts[col] > 0 : true));
+        if (activeCollections.length === 0) {
+            console.log("SyncEngine: No changes to pull.");
+            if (maxServerTime > 0) {
+                await db.sync_metadata.put({ key: 'last_pull_timestamp', value: maxServerTime });
+            }
+            return;
+        }
+
+        // Calculate total rows for progress tracking
+        const totalRows = activeCollections.reduce((sum, col) => sum + (counts[col] || 0), 0);
+        let rowsProcessed = 0;
+
+        const reportProgress = (collection, fetchedRows) => {
+            rowsProcessed += fetchedRows;
+            const percent = totalRows > 0 ? Math.min(100, Math.round((rowsProcessed / totalRows) * 100)) : 100;
+            window.dispatchEvent(new CustomEvent('sync-progress', {
+                detail: {
+                    phase: 'pulling',
+                    collection,
+                    percent,
+                    rowsProcessed,
+                    totalRows
+                }
+            }));
+        };
+
+        // Group into small collections (less than 500 updates) and large collections
+        const limit = 500;
+        const smallCols = activeCollections.filter(col => (counts[col] !== undefined && counts[col] < limit));
+        const largeCols = activeCollections.filter(col => (counts[col] !== undefined && counts[col] >= limit));
+
+        console.log(`SyncEngine: Small collections in bulk: [${smallCols.join(', ')}]`);
+        console.log(`SyncEngine: Large collections paginated: [${largeCols.join(', ')}]`);
+
+        // Fetch small collections in one bulk request
+        if (smallCols.length > 0) {
+            try {
+                const response = await fetch(`${SYNC_URL}?since=${since}&collections=${smallCols.join(',')}`);
+                if (!response.ok) {
+                    throw new Error(`Status ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.status === 'needs_restore') {
+                    await this.performFullRestore();
+                    return;
+                }
+                if (data.serverTime > maxServerTime) {
+                    maxServerTime = data.serverTime;
+                }
+                const deltas = data.deltas || {};
+                for (const col of smallCols) {
+                    const items = deltas[col] || [];
+                    if (items.length > 0) {
+                        await this.applyDeltas(col, items, isFirstSync);
+                    }
+                    reportProgress(col, counts[col] || items.length);
+                }
+            } catch (error) {
+                console.error("SyncEngine: Failed to fetch small collections in bulk, falling back to serial:", error);
+                largeCols.push(...smallCols);
+            }
+        }
+
+        // Fetch large collections with concurrency control (max 3 concurrent)
+        if (largeCols.length > 0) {
+            const pullTasks = largeCols.map(collection => async () => {
+                let offset = 0;
+                let hasMore = true;
+
+                while (hasMore) {
+                    const response = await fetch(`${SYNC_URL}?since=${since}&collection=${collection}&limit=${limit}&offset=${offset}`);
+                    if (!response.ok) {
+                        const text = await response.text();
+                        if (response.status === 500 && text.includes('database is locked')) {
+                            console.warn(`SyncEngine: Server database is temporarily locked for ${collection}. Will retry next interval.`);
+                            return;
+                        }
+                        console.error(`SyncEngine: Pull failed for ${collection}. Status:`, response.status, "Response:", text);
+                        return;
+                    }
+
+                    const data = await response.json();
+                    if (data.status === 'needs_restore') {
+                        needsRestore = true;
+                        break;
+                    }
+
+                    if (data.serverTime > maxServerTime) {
+                        maxServerTime = data.serverTime;
+                    }
+
+                    const items = data.deltas?.[collection] || [];
+                    if (items.length > 0) {
+                        await this.applyDeltas(collection, items, isFirstSync);
+                        reportProgress(collection, items.length);
+                    }
+
+                    if (items.length < limit) {
+                        hasMore = false;
+                    } else {
+                        offset += limit;
+                    }
+                }
+            });
+
+            // Run tasks with limited concurrency (max 3)
+            const executeTasks = async (tasks, limitCount) => {
+                const executing = new Set();
+                for (const task of tasks) {
+                    if (needsRestore) break;
+                    const p = task().then(() => executing.delete(p));
+                    executing.add(p);
+                    if (executing.size >= limitCount) {
+                        await Promise.race(executing);
+                    }
+                }
+                await Promise.all(executing);
+            };
+
+            await executeTasks(pullTasks, 3);
+        }
+
+        if (needsRestore) {
+            console.warn("Server database needs restore. Initiating full upload from client.");
+            await this.performFullRestore();
+            return;
         }
 
         if (maxServerTime > 0) {
