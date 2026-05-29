@@ -251,6 +251,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         $usersData = $store->getAll('users');
         $settingsData = $store->getAll('settings');
         echo json_encode(["users" => $usersData, "settings" => $settingsData]);
+    } elseif ($action === 'get_counts') {
+        $counts = [];
+        foreach ($allowedFiles as $col) {
+            try {
+                $stmt = $store->pdo->query("SELECT COUNT(*) FROM $col");
+                $counts[$col] = $stmt ? (int)$stmt->fetchColumn() : 0;
+            } catch (Exception $e) {
+                $counts[$col] = 0;
+            }
+        }
+        echo json_encode($counts);
     } elseif ($action === 'fix_admin') {
         $defaultAdmin = [
             "email" => "admin@lightpos.com",
@@ -284,11 +295,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $input = json_decode(file_get_contents("php://input"), true);
+    $rawInput = file_get_contents("php://input");
+    $input = json_decode($rawInput, true);
 
     if ($file && !is_array($input)) {
         http_response_code(400);
-        echo json_encode(["error" => "Invalid payload or empty body received."]);
+        $contentLength = isset($_SERVER['CONTENT_LENGTH']) ? (int)$_SERVER['CONTENT_LENGTH'] : 0;
+        $actualLength = strlen($rawInput);
+        $jsonError = json_last_error_msg();
+        
+        $errorMsg = "Invalid payload received.";
+        if ($contentLength > 0 && $actualLength === 0) {
+            $errorMsg = "Payload was empty. This usually means the request size ($contentLength bytes) exceeded PHP's post_max_size or memory limits.";
+        } elseif ($jsonError && $jsonError !== 'No error') {
+            $errorMsg = "JSON decoding failed: " . $jsonError . ". Input length: $actualLength bytes, Content-Length header: $contentLength.";
+        }
+        
+        error_log("Restore error on collection '$file': $errorMsg");
+        echo json_encode(["error" => $errorMsg]);
         exit;
     }
 

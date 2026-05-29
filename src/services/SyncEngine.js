@@ -9,6 +9,7 @@ const SYNC_URL = 'api/sync.php';
  * Uses Web Locks to prevent concurrent sync operations.
  */
 export const SyncEngine = {
+    isSyncing: false,
     async sync() {
         const db = await dbPromise;
         // Don't rely on navigator.onLine — it only checks for WAN/internet connectivity,
@@ -16,10 +17,27 @@ export const SyncEngine = {
         const reachable = await isServerReachable();
         if (!reachable) return;
 
+        // Tab-local check
+        if (this.isSyncing) {
+            console.log("SyncEngine: Sync already in progress in this tab. Skipping.");
+            return;
+        }
+
+        const tabId = Math.random().toString(36).substring(2);
+
         const performSync = async () => {
+            this.isSyncing = true;
             window.dispatchEvent(new CustomEvent('sync-started'));
             console.log("Sync started...");
-            console.log('SyncEngine: db object before db.open():', db); // ADDED LOG
+            
+            // Create a keep-alive for localStorage lock if Web Locks is not available
+            let lockInterval = null;
+            if (!navigator.locks) {
+                lockInterval = setInterval(() => {
+                    localStorage.setItem('sync_lock_localStorage', JSON.stringify({ tabId, timestamp: Date.now() }));
+                }, 5000);
+            }
+
             try {
                 // await db.open(); // Not needed for SQLite
                 console.log("SyncEngine: --- Pushing changes... ---");
@@ -38,6 +56,22 @@ export const SyncEngine = {
                 console.error("SyncEngine: An error occurred during the sync process:", error);
                 handleError(error, 'SyncEngine');
                 window.dispatchEvent(new CustomEvent('sync-failed'));
+            } finally {
+                this.isSyncing = false;
+                if (lockInterval) {
+                    clearInterval(lockInterval);
+                }
+                if (!navigator.locks) {
+                    const currentLock = localStorage.getItem('sync_lock_localStorage');
+                    if (currentLock) {
+                        try {
+                            const lockObj = JSON.parse(currentLock);
+                            if (lockObj.tabId === tabId) {
+                                localStorage.removeItem('sync_lock_localStorage');
+                            }
+                        } catch (e) {}
+                    }
+                }
             }
         };
 
@@ -45,6 +79,23 @@ export const SyncEngine = {
         if (navigator.locks) {
             return await navigator.locks.request('sync_lock', performSync);
         } else {
+            // LocalStorage cross-tab fallback
+            const now = Date.now();
+            const existingLock = localStorage.getItem('sync_lock_localStorage');
+            if (existingLock) {
+                try {
+                    const lockObj = JSON.parse(existingLock);
+                    // Lock is active and not expired (expire after 2 minutes)
+                    if (lockObj.tabId !== tabId && (now - lockObj.timestamp) < 120000) {
+                        console.warn("SyncEngine: Sync lock held by another tab:", lockObj.tabId);
+                        return;
+                    }
+                } catch (e) {
+                    // JSON parsing error, ignore and override
+                }
+            }
+            // Acquire lock
+            localStorage.setItem('sync_lock_localStorage', JSON.stringify({ tabId, timestamp: now }));
             return await performSync();
         }
     },
@@ -84,14 +135,10 @@ export const SyncEngine = {
         if (!db[collection]) return;
 
         try {
-            // Check if collection is empty locally to activate fast-path
-            const localCount = await db[collection].count();
-            const isFirstSyncFastPath = isFirstSync || (localCount === 0);
-
             await db.transaction('rw', [db[collection], db.outbox], async () => {
                 const idField = db[collection].schema.primKey.name;
 
-                if (isFirstSyncFastPath) {
+                if (isFirstSync) {
                     console.log(`SyncEngine: Fast-path bulk putting ${items.length} items in [${collection}]`);
                     await db[collection].bulkPut(items);
                     return;
@@ -241,8 +288,8 @@ export const SyncEngine = {
             }));
         };
 
-        // Group into small collections (less than 500 updates) and large collections
-        const limit = 500;
+        // Group into small collections (less than 2000 updates) and large collections
+        const limit = 2000;
         const smallCols = activeCollections.filter(col => (counts[col] !== undefined && counts[col] < limit));
         const largeCols = activeCollections.filter(col => (counts[col] !== undefined && counts[col] >= limit));
 
@@ -268,7 +315,9 @@ export const SyncEngine = {
                 for (const col of smallCols) {
                     const items = deltas[col] || [];
                     if (items.length > 0) {
-                        await this.applyDeltas(col, items, isFirstSync);
+                        const localCount = await db[col].count();
+                        const isCollectionEmpty = (localCount === 0);
+                        await this.applyDeltas(col, items, isFirstSync || isCollectionEmpty);
                     }
                     reportProgress(col, counts[col] || items.length);
                 }
@@ -284,16 +333,15 @@ export const SyncEngine = {
                 let offset = 0;
                 let hasMore = true;
 
+                const localCount = await db[collection].count();
+                const isCollectionEmpty = (localCount === 0);
+
                 while (hasMore) {
                     const response = await fetch(`${SYNC_URL}?since=${since}&collection=${collection}&limit=${limit}&offset=${offset}`);
                     if (!response.ok) {
                         const text = await response.text();
-                        if (response.status === 500 && text.includes('database is locked')) {
-                            console.warn(`SyncEngine: Server database is temporarily locked for ${collection}. Will retry next interval.`);
-                            return;
-                        }
                         console.error(`SyncEngine: Pull failed for ${collection}. Status:`, response.status, "Response:", text);
-                        return;
+                        throw new Error(`Pull failed for ${collection}. Status: ${response.status}. Response: ${text}`);
                     }
 
                     const data = await response.json();
@@ -308,7 +356,7 @@ export const SyncEngine = {
 
                     const items = data.deltas?.[collection] || [];
                     if (items.length > 0) {
-                        await this.applyDeltas(collection, items, isFirstSync);
+                        await this.applyDeltas(collection, items, isFirstSync || isCollectionEmpty);
                         reportProgress(collection, items.length);
                     }
 
@@ -320,21 +368,15 @@ export const SyncEngine = {
                 }
             });
 
-            // Run tasks with limited concurrency (max 3)
-            const executeTasks = async (tasks, limitCount) => {
-                const executing = new Set();
+            // Run tasks sequentially to prevent Dexie's zone-tracking corruption with parallel async tasks
+            const executeTasks = async (tasks) => {
                 for (const task of tasks) {
                     if (needsRestore) break;
-                    const p = task().then(() => executing.delete(p));
-                    executing.add(p);
-                    if (executing.size >= limitCount) {
-                        await Promise.race(executing);
-                    }
+                    await task();
                 }
-                await Promise.all(executing);
             };
 
-            await executeTasks(pullTasks, 3);
+            await executeTasks(pullTasks);
         }
 
         if (needsRestore) {
@@ -374,8 +416,8 @@ export const SyncEngine = {
 
             window.dispatchEvent(new CustomEvent('restore-finished'));
 
-            // Trigger a new sync to align everything
-            this.sync();
+            // Trigger a new sync to align everything after locks are released
+            setTimeout(() => this.sync(), 500);
 
         } catch (error) {
             handleError(error, 'FullRestore');

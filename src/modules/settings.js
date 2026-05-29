@@ -703,6 +703,16 @@ export async function loadSettingsView() {
                     </div>
 
                     <div class="bg-white p-6 rounded-lg shadow-sm border">
+                        <h3 class="text-lg font-bold text-gray-700 mb-2">Sync Lock Management</h3>
+                        <p class="text-sm text-gray-600 mb-4">If synchronization gets stuck or displays errors about another tab holding the lock, you can check the status and manually release it.</p>
+                        <div class="flex gap-4">
+                            <button type="button" id="btn-clear-sync-lock" class="bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 px-6 rounded focus:outline-none shadow transition">
+                                🔓 Clear Sync Lock
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-lg shadow-sm border">
                         <h3 class="text-lg font-bold text-gray-700 mb-4">Database Synchronization</h3>
                         <p class="text-sm text-gray-600 mb-4">Compare your local offline database (IndexedDB) with the server database (JSON) to identify discrepancies.</p>
                         
@@ -1348,6 +1358,7 @@ async function setupMigrationEventListeners() {
 
     document.getElementById("btn-analyze-sync").addEventListener("click", analyzeSync);
     document.getElementById("btn-sync-all-diffs")?.addEventListener("click", syncAllDiffs);
+    document.getElementById("btn-clear-sync-lock")?.addEventListener("click", handleClearSyncLock);
 
     document.getElementById("btn-download-backup-server").addEventListener("click", downloadServerBackup);
     document.getElementById("btn-download-backup-local").addEventListener("click", downloadLocalBackup);
@@ -1700,6 +1711,70 @@ async function processImport(items) {
 
     progressBar.style.width = "100%";
     progressText.textContent = "Import Complete!";
+}
+
+async function handleClearSyncLock() {
+    let cause = "No active lock was found. The sync engine appears to be idle.";
+    let hasLock = false;
+    let details = [];
+
+    // 1. Check if syncing is active in the current tab
+    if (SyncEngine.isSyncing) {
+        details.push("• A synchronization process is currently active or stuck in this browser tab.");
+        hasLock = true;
+    }
+
+    // 2. Check localStorage cross-tab fallback lock
+    const localLockStr = localStorage.getItem('sync_lock_localStorage');
+    if (localLockStr) {
+        try {
+            const lockObj = JSON.parse(localLockStr);
+            const now = Date.now();
+            const ageSeconds = Math.round((now - lockObj.timestamp) / 1000);
+            
+            // Check if active (less than 2 minutes old)
+            if (ageSeconds < 120) {
+                details.push(`• A cross-tab sync lock is held in local storage by tab "${lockObj.tabId}" (acquired ${ageSeconds} seconds ago).`);
+                hasLock = true;
+            } else {
+                details.push(`• An expired cross-tab sync lock from tab "${lockObj.tabId}" was found in local storage (acquired ${ageSeconds} seconds ago).`);
+            }
+        } catch (e) {
+            details.push("• An unparseable cross-tab sync lock was found in local storage.");
+            hasLock = true;
+        }
+    }
+
+    // 3. Check Web Locks API if available
+    if (navigator.locks && navigator.locks.query) {
+        try {
+            const lockState = await navigator.locks.query();
+            const heldLock = lockState.held?.find(l => l.name === 'sync_lock');
+            const pendingLocks = lockState.pending?.filter(l => l.name === 'sync_lock') || [];
+
+            if (heldLock) {
+                details.push(`• A browser-level Web Lock ('sync_lock') is actively held by client/tab ID "${heldLock.clientId}".`);
+                hasLock = true;
+                if (pendingLocks.length > 0) {
+                    details.push(`• There are ${pendingLocks.length} other tab(s) waiting in queue for this Web Lock.`);
+                }
+            }
+        } catch (err) {
+            console.error("Error querying Web Locks:", err);
+        }
+    }
+
+    if (details.length > 0) {
+        cause = details.join("\n\n");
+    }
+
+    const confirmMessage = `Sync Lock Status & Cause:\n----------------------------------------\n${cause}\n----------------------------------------\n\nAre you sure you want to clear the sync lock?\n\nThis will:\n1. Reset the sync status in this tab.\n2. Clear the local storage fallback lock.\n\n⚠️ Note: Active Web Locks held by other tabs cannot be forced. If another tab is currently syncing, close that tab to release the lock.`;
+
+    if (confirm(confirmMessage)) {
+        SyncEngine.isSyncing = false;
+        localStorage.removeItem('sync_lock_localStorage');
+        alert("Sync lock cleared successfully. You can now try syncing again.");
+    }
 }
 
 async function analyzeSync() {
@@ -2235,7 +2310,6 @@ async function handleRestoreBackup(e) {
 
         let itemsRestoredSoFar = 0;
         let allFailedRows = [];
-        const CHUNK_SIZE = 200; // Reduced chunk size to ensure reliability
 
         // Upload collection by collection to avoid hitting server POST size limits (e.g. 76MB)
         for (const [fileName, data] of collections) {
@@ -2243,68 +2317,135 @@ async function handleRestoreBackup(e) {
 
             const isSyncable = syncableCollections.includes(fileName);
 
-            // Update timestamps to ensure the sync engine sees this as "new" data
-            data.forEach(item => {
-                if (item && typeof item === 'object') {
-                    item._updatedAt = serverTime;
+            // Process and sanitize items in batches yielding to the event loop to keep the browser responsive
+            const BATCH_SIZE = 1000;
+            for (let idx = 0; idx < data.length; idx += BATCH_SIZE) {
+                const end = Math.min(idx + BATCH_SIZE, data.length);
+                for (let k = idx; k < end; k++) {
+                    const item = data[k];
+                    if (item && typeof item === 'object') {
+                        item._updatedAt = serverTime;
 
-                    // Deep sanitize to prevent extreme floating-point precision from crashing SQLite
-                    const sanitized = deepSanitizeNumbers(item);
-                    Object.assign(item, sanitized);
+                        // Deep sanitize to prevent extreme floating-point precision from crashing SQLite
+                        const sanitized = deepSanitizeNumbers(item);
+                        Object.assign(item, sanitized);
 
-                    // Ensure timestamps are integers (fix for ISO strings in backups)
-                    if (fileName === 'transactions' && typeof item.timestamp === 'string') {
-                        const d = new Date(item.timestamp);
-                        if (!isNaN(d.getTime())) {
-                            item.timestamp = d.getTime();
+                        // Ensure timestamps are integers (fix for ISO strings in backups)
+                        if (fileName === 'transactions' && typeof item.timestamp === 'string') {
+                            const d = new Date(item.timestamp);
+                            if (!isNaN(d.getTime())) {
+                                item.timestamp = d.getTime();
+                            }
                         }
-                    }
 
-                    // Fix for Users: Map 'password' to 'password_hash' for SQLite compatibility
-                    if (fileName === 'users') {
-                        if (item.password && !item.password_hash) {
-                            item.password_hash = item.password;
-                            delete item.password;
+                        // Fix for Users: Map 'password' to 'password_hash' for SQLite compatibility
+                        if (fileName === 'users') {
+                            if (item.password && !item.password_hash) {
+                                item.password_hash = item.password;
+                                delete item.password;
+                            }
                         }
                     }
                 }
-            });
+                if (progressText) {
+                    progressText.textContent = `Sanitizing ${fileName}: ${end}/${data.length}...`;
+                }
+                await new Promise(resolve => setTimeout(resolve, 0));
+            }
 
             const totalItems = data.length;
             if (totalItems === 0) {
-                await fetch(`${ADMIN_API_URL}?file=${fileName}&mode=overwrite${isDryRun ? '&dry_run=true' : ''}`, { method: 'POST', body: JSON.stringify([]) });
+                await fetch(`${ADMIN_API_URL}?file=${fileName}&mode=overwrite${isDryRun ? '&dry_run=true' : ''}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify([])
+                });
                 continue;
             }
 
-            for (let i = 0; i < totalItems; i += CHUNK_SIZE) {
-                const chunk = data.slice(i, i + CHUNK_SIZE);
-                const mode = (i === 0) ? 'overwrite' : 'append';
+            // Estimate the JSON size of the first few records to determine adaptive chunk size
+            let sampleSize = 0;
+            const samples = data.slice(0, 5);
+            samples.forEach(s => { sampleSize += JSON.stringify(s).length; });
+            const avgRecordSize = samples.length > 0 ? (sampleSize / samples.length) : 500;
+            // Target payload of ~1.5MB to be well below the PHP post_max_size and memory limits
+            const TARGET_CHUNK_BYTES = 1.5 * 1024 * 1024;
+            let adaptiveChunkSize = Math.max(10, Math.min(500, Math.floor(TARGET_CHUNK_BYTES / Math.max(50, avgRecordSize))));
 
+            let i = 0;
+            while (i < totalItems) {
+                const chunk = data.slice(i, i + adaptiveChunkSize);
+                const mode = (i === 0) ? 'overwrite' : 'append';
                 const currentChunkSize = chunk.length;
+
+                let attempt = 0;
+                const maxAttempts = 3;
+                let success = false;
+                let responseText = "";
+                let responseStatus = 0;
+                let parsedResult = null;
+
+                while (attempt < maxAttempts && !success) {
+                    attempt++;
+                    try {
+                        const response = await fetch(`${ADMIN_API_URL}?file=${fileName}&mode=${mode}${isDryRun ? '&dry_run=true' : ''}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(chunk)
+                        });
+
+                        responseStatus = response.status;
+                        responseText = await response.text();
+
+                        if (response.ok) {
+                            success = true;
+                            if (response.status === 207) {
+                                try {
+                                    parsedResult = JSON.parse(responseText);
+                                } catch (e) {}
+                            }
+                        } else {
+                            console.warn(`Attempt ${attempt} failed for ${fileName} chunk starting at ${i}. Status: ${response.status}. Msg: ${responseText}`);
+                            if (attempt < maxAttempts) {
+                                await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+                            }
+                        }
+                    } catch (fetchErr) {
+                        console.warn(`Attempt ${attempt} error for ${fileName} chunk starting at ${i}:`, fetchErr);
+                        responseText = fetchErr.message;
+                        if (attempt < maxAttempts) {
+                            await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+                        }
+                    }
+                }
+
+                if (!success) {
+                    if (adaptiveChunkSize > 10) {
+                        const newChunkSize = Math.max(10, Math.floor(adaptiveChunkSize / 2));
+                        console.log(`Adaptive chunk size reduced from ${adaptiveChunkSize} to ${newChunkSize} for ${fileName} due to failure. Retrying...`);
+                        adaptiveChunkSize = newChunkSize;
+                        continue;
+                    } else {
+                        throw new Error(`Failed to restore ${fileName} (chunk starting at index ${i}) after multiple retries. Server status: ${responseStatus}. Response: ${responseText}`);
+                    }
+                }
+
+                if (parsedResult && parsedResult.failedRows) {
+                    allFailedRows.push(...parsedResult.failedRows.map(row => ({ ...row, _collection: fileName })));
+                }
+
                 itemsRestoredSoFar += currentChunkSize;
                 if (isSyncable) businessItemsRestored += currentChunkSize;
 
                 const percent = totalItemsToRestore > 0 ? Math.round((itemsRestoredSoFar / totalItemsToRestore) * 100) : 100;
 
                 if (progressBar) progressBar.style.width = `${percent}%`;
-                if (progressText) progressText.textContent = `${isDryRun ? 'Simulating' : 'Restoring'} ${fileName}... (${Math.round((i + currentChunkSize) / totalItems * 100)}%) - Total: ${percent}%`;
+                if (progressText) {
+                    progressText.textContent = `${isDryRun ? 'Simulating' : 'Restoring'} ${fileName}... (${Math.min(100, Math.round((i + currentChunkSize) / totalItems * 100))}%) - Total: ${percent}%`;
+                }
                 btn.innerHTML = `⌛ ${percent}%`;
 
-                const response = await fetch(`${ADMIN_API_URL}?file=${fileName}&mode=${mode}${isDryRun ? '&dry_run=true' : ''}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(chunk)
-                });
-
-                if (response.status === 207) {
-                    const result = await response.json();
-                    if (result.failedRows) {
-                        allFailedRows.push(...result.failedRows.map(row => ({ ...row, _collection: fileName })));
-                    }
-                } else if (!response.ok) {
-                    const errText = await response.text();
-                    throw new Error(`Failed to restore ${fileName} (chunk ${i}): ${errText}`);
-                }
+                i += currentChunkSize;
             }
         }
 
@@ -2330,6 +2471,37 @@ async function handleRestoreBackup(e) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify([{ key: 'db_initialized', value: '1', _version: 1, _updatedAt: Date.now() }])
             });
+
+            // Perform server-side count verification to confirm backup was successfully applied
+            if (progressText) progressText.textContent = "Verifying restored data on server...";
+            const countsResponse = await fetch(`${ADMIN_API_URL}?action=get_counts`);
+            if (!countsResponse.ok) {
+                throw new Error("Failed to retrieve server table counts for verification.");
+            }
+            const serverCounts = await countsResponse.json();
+
+            const verificationMismatches = [];
+            for (const [fileName, data] of collections) {
+                if (!Array.isArray(data)) continue;
+                // Do not verify sync_metadata as it has dynamic entries
+                if (fileName === 'sync_metadata') continue;
+
+                let expectedCount = data.length - allFailedRows.filter(row => row._collection === fileName).length;
+                let actualCount = serverCounts[fileName] !== undefined ? serverCounts[fileName] : 0;
+
+                // Edge case: if users table was empty in backup, the server auto-seeds the default admin user
+                if (fileName === 'users' && expectedCount === 0 && actualCount === 1) {
+                    actualCount = 0; // treat as matching expected 0
+                }
+
+                if (actualCount !== expectedCount) {
+                    verificationMismatches.push(`${fileName}: expected ${expectedCount} records, server has ${actualCount}`);
+                }
+            }
+
+            if (verificationMismatches.length > 0) {
+                throw new Error("Server data verification failed:\n" + verificationMismatches.join('\n'));
+            }
         }
 
         const completionMessage = `Restore processing complete!

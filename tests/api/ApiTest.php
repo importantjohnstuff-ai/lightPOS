@@ -6,7 +6,7 @@ use PHPUnit\Framework\TestCase;
 
 class ApiTest extends TestCase
 {
-    private string $baseUrl = 'http://127.0.0.1:8000/api/router.php';
+    private string $baseUrl = 'http://127.0.0.1:8001/api/router.php';
 
     private function makeRequest(string $method, array $params = [], ?array $data = null): array
     {
@@ -72,11 +72,22 @@ class ApiTest extends TestCase
     {
         $loginData = [
             'email' => 'admin@lightpos.com',
-            'password' => 'admin' 
+            'password' => 'admin123' 
         ];
         $res = $this->makeRequest('POST', ['action' => 'login'], $loginData);
         
         $this->assertEquals(200, $res['code']);
         $this->assertTrue($res['data']['success'] ?? false);
+    }
+
+    public function testGetCountsAction(): void
+    {
+        $res = $this->makeRequest('GET', ['action' => 'get_counts']);
+        $this->assertEquals(200, $res['code']);
+        $this->assertIsArray($res['data']);
+        $this->assertArrayHasKey('items', $res['data']);
+        $this->assertArrayHasKey('users', $res['data']);
+        $this->assertIsInt($res['data']['items']);
+        $this->assertIsInt($res['data']['users']);
     }
 }
