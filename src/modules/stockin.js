@@ -906,31 +906,52 @@ async function loadStockInHistory() {
                         <tr class="border-b bg-gray-50">
                             <th class="text-left p-2 font-semibold">Date</th>
                             <th class="text-center p-2 font-semibold">Type</th>
-                            <th class="text-left p-2 font-semibold">User</th>
+                            <th class="text-left p-2 font-semibold">Supplier</th>
                             <th class="text-center p-2 font-semibold">Items</th>
+                            <th class="text-right p-2 font-semibold">Total Amount</th>
                             <th class="text-right p-2 font-semibold">Action</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200">
-                        ${recentHistory.map(entry => `
-                            <tr>
-                                <td class="p-2 whitespace-nowrap text-xs">${new Date(entry.timestamp).toLocaleString()}</td>
-                                <td class="p-2 text-center">
-                                    <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${entry.type === 'out' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}">
-                                        ${entry.type === 'out' ? 'OUT' : 'IN'}
-                                    </span>
-                                </td>
-                                <td class="p-2">${entry.username || 'N/A'}</td>
-                                <td class="p-2 text-center">
-                                    ${entry.item_count || (entry.items ? entry.items.reduce((sum, i) => sum + (i.quantity || i.qty || 0), 0) : 0)}
-                                </td>
-                                <td class="p-2 text-right">
-                                    <button class="text-blue-600 hover:text-blue-800 view-details-btn font-medium" data-id="${entry.id}">
-                                        View
-                                    </button>
-                                </td>
-                            </tr>
-                        `).join('')}
+                        ${recentHistory.map(entry => {
+                            const supplier = suppliersList.find(s => s.id === entry.supplier_id_override);
+                            const supplierName = supplier ? supplier.name : '—';
+                            
+                            let totalAmount = 0;
+                            let itemsArr = entry.items;
+                            if (typeof itemsArr === 'string') {
+                                try { itemsArr = JSON.parse(itemsArr); } catch (e) {}
+                            }
+                            if ((!itemsArr || !Array.isArray(itemsArr) || itemsArr.length === 0) && entry.items_json) {
+                                try {
+                                    itemsArr = typeof entry.items_json === 'string' ? JSON.parse(entry.items_json) : entry.items_json;
+                                } catch (e) {}
+                            }
+                            if (Array.isArray(itemsArr)) {
+                                totalAmount = itemsArr.reduce((sum, item) => sum + ((item.quantity || item.qty || 0) * (item.cost_price || 0)), 0);
+                            }
+
+                            return `
+                                <tr>
+                                    <td class="p-2 whitespace-nowrap text-xs">${new Date(entry.timestamp).toLocaleString()}</td>
+                                    <td class="p-2 text-center">
+                                        <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase ${entry.type === 'out' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}">
+                                            ${entry.type === 'out' ? 'OUT' : 'IN'}
+                                        </span>
+                                    </td>
+                                    <td class="p-2 text-xs">${supplierName}</td>
+                                    <td class="p-2 text-center">
+                                        ${entry.item_count || (entry.items ? entry.items.reduce((sum, i) => sum + (i.quantity || i.qty || 0), 0) : 0)}
+                                    </td>
+                                    <td class="p-2 text-right font-medium text-gray-900">₱${totalAmount.toFixed(2)}</td>
+                                    <td class="p-2 text-right">
+                                        <button class="text-blue-600 hover:text-blue-800 view-details-btn font-medium" data-id="${entry.id}">
+                                            View
+                                        </button>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
                     </tbody>
                 </table>
             </div>
