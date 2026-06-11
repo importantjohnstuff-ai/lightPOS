@@ -511,6 +511,10 @@ async function selectShift(shift) {
                 <button id="btn-detail-history" class="bg-gray-50 text-gray-700 hover:bg-gray-100 border border-gray-200 py-2 rounded font-bold text-sm transition">View History</button>
                 <button id="btn-detail-transactions" class="bg-teal-50 text-teal-700 hover:bg-teal-100 border border-teal-200 py-2 rounded font-bold text-sm transition">Transactions</button>
                 ${shift.status === 'open' ? `<button id="btn-detail-xreport" class="bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 py-2 rounded font-bold text-sm transition">X-Report</button>` : ''}
+                ${isClosed && canAdjust ? `<button id="btn-detail-edit-shift" class="bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 py-2 rounded font-bold text-sm transition flex items-center justify-center gap-1 col-span-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+                    Edit Shift
+                </button>` : ''}
             </div>
         </div>
     `;
@@ -526,6 +530,7 @@ async function selectShift(shift) {
     document.getElementById("btn-detail-history")?.addEventListener("click", () => showShiftHistoryModal(shift.adjustments || []));
     document.getElementById("btn-detail-transactions")?.addEventListener("click", () => showShiftTransactions(shift));
     document.getElementById("btn-detail-xreport")?.addEventListener("click", () => showXReport());
+    document.getElementById("btn-detail-edit-shift")?.addEventListener("click", () => openEditShiftModal(shift));
 
     // Row Click Listeners
     document.getElementById("row-detail-cash-count")?.addEventListener("click", () => showCashBreakdownModal(shift));
@@ -690,6 +695,431 @@ function showOpenShiftModal(onSuccess) {
     } else {
         modal.classList.remove("hidden");
     }
+}
+
+export async function openEditShiftModal(shift) {
+    if (!checkPermission("shifts", "write")) {
+        alert("You do not have permission to edit shifts.");
+        return;
+    }
+
+    if (!(await requestManagerApproval())) return;
+
+    let modal = document.getElementById("modal-close-shift");
+    if (modal) modal.remove();
+    let pickModal = document.getElementById("modal-pick-expense");
+    if (pickModal) pickModal.remove();
+
+    const modalDiv = document.createElement("div");
+    modalDiv.id = "modal-close-shift";
+    modalDiv.className = "fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50";
+    modalDiv.innerHTML = `
+        <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-5xl h-[85vh] flex flex-col">
+            <div class="flex justify-between items-center mb-6 border-b pb-4">
+                <div>
+                    <h3 class="text-2xl font-bold text-gray-800">Edit Shift Details</h3>
+                    <p class="text-sm text-gray-500">Modify cash count and verify turnover for this shift.</p>
+                </div>
+                <button id="btn-cancel-close-shift-x" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
+            </div>
+
+            <div class="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
+                <!-- Column 1: Cash Counter (4 cols) -->
+                <div class="lg:col-span-4 flex flex-col h-full overflow-hidden border-r pr-4">
+                    <div class="flex justify-between items-center mb-2">
+                        <h4 class="font-bold text-gray-700 uppercase text-xs tracking-wider">Cash Denominations</h4>
+                        <span class="text-xs text-gray-400">Enter count</span>
+                    </div>
+                    
+                    <div class="flex-1 overflow-y-auto bg-gray-50 rounded-lg border p-4">
+                        <div class="grid grid-cols-3 gap-2 mb-3 font-bold text-xs text-gray-500 uppercase border-b pb-2">
+                            <div>Denom</div>
+                            <div class="text-center">Count</div>
+                            <div class="text-right">Total</div>
+                        </div>
+                        <div class="space-y-2" id="cash-counter-grid">
+                            <!-- Denominations injected here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Column 2: Inputs (4 cols) -->
+                <div class="lg:col-span-4 flex flex-col h-full overflow-y-auto border-r pr-4 space-y-4">
+                    <!-- Other Cash -->
+                    <div class="bg-gray-50 p-4 rounded-lg border">
+                        <h4 class="font-bold text-gray-700 mb-3 uppercase text-xs tracking-wider border-b pb-1">Other Cash</h4>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 mb-1">Precounted Bills</label>
+                                <input type="number" id="precounted-bills" min="0" step="0.01" class="w-full border rounded p-2 text-right focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm" placeholder="0.00">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-gray-500 mb-1">Precounted Coins</label>
+                                <input type="number" id="precounted-coins" min="0" step="0.01" class="w-full border rounded p-2 text-right focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm" placeholder="0.00">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Cashout -->
+                    <div class="bg-gray-50 p-4 rounded-lg border">
+                        <h4 class="font-bold text-gray-700 mb-3 uppercase text-xs tracking-wider border-b pb-1">Remittance (Cashout)</h4>
+                        <div class="flex items-center gap-2">
+                            <label class="text-sm text-gray-600 flex-1">Total Remitted:</label>
+                            <input type="number" id="shift-cashout" min="0" step="0.01" class="w-32 border rounded p-2 text-right bg-gray-100 font-bold text-gray-700 cursor-not-allowed text-sm" readonly placeholder="0.00">
+                        </div>
+                    </div>
+
+                    <!-- Expenses -->
+                    <div class="flex-1 flex flex-col bg-gray-50 p-4 rounded-lg border min-h-[150px]">
+                        <div class="flex justify-between items-center mb-2 border-b pb-1">
+                            <h4 class="font-bold text-gray-700 uppercase text-xs tracking-wider">Expense Receipts</h4>
+                            <div class="flex gap-1">
+                                <button id="btn-pick-shift-receipt" class="text-[10px] bg-purple-100 text-purple-600 px-2 py-1 rounded font-bold hover:bg-purple-200 transition uppercase tracking-wide">Pick Exp</button>
+                                <button id="btn-add-shift-receipt" class="text-[10px] bg-blue-100 text-blue-600 px-2 py-1 rounded font-bold hover:bg-blue-200 transition uppercase tracking-wide">+ Add</button>
+                            </div>
+                        </div>
+                        <div class="flex-1 overflow-y-auto max-h-40 space-y-2 pr-2" id="shift-receipts-list">
+                            <!-- Receipts injected here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Column 3: Summary (4 cols) -->
+                <div class="lg:col-span-4 flex flex-col h-full overflow-y-auto pl-2">
+                    <h4 class="font-bold text-gray-700 uppercase text-xs tracking-wider mb-4 border-b pb-2">Shift Summary</h4>
+                    
+                    <!-- Totals Breakdown -->
+                    <div class="space-y-3">
+                        <div class="flex justify-between items-center p-3 bg-blue-50 rounded border border-blue-100">
+                            <span class="text-xs font-bold text-blue-500 uppercase">Physical Cash</span>
+                            <span id="summary-physical-total" class="font-mono font-bold text-blue-700">₱0.00</span>
+                        </div>
+                        
+                        <div class="flex justify-between items-center p-3 bg-gray-50 rounded border border-gray-200">
+                            <span class="text-xs font-bold text-gray-500 uppercase">Precounted</span>
+                            <span id="summary-precounted-total" class="font-mono font-bold text-gray-700">₱0.00</span>
+                        </div>
+
+                        <div class="flex justify-between items-center p-3 bg-purple-50 rounded border border-purple-100">
+                            <span class="text-xs font-bold text-purple-500 uppercase">Remittance</span>
+                            <span id="summary-remittance-total" class="font-mono font-bold text-purple-700">₱0.00</span>
+                        </div>
+
+                        <div class="flex justify-between items-center p-3 bg-red-50 rounded border border-red-100">
+                            <span class="text-xs font-bold text-red-500 uppercase">Expenses</span>
+                            <span id="summary-expenses-total" class="font-mono font-bold text-red-700">₱0.00</span>
+                        </div>
+                    </div>
+
+                    <!-- Final Summary -->
+                    <div class="mt-auto pt-6">
+                        <div class="flex justify-between items-end mb-1">
+                            <span class="text-gray-600 font-medium">Total Turnover</span>
+                            <span id="shift-total-turnover" class="text-4xl font-bold text-gray-800 leading-none">₱0.00</span>
+                        </div>
+                        <p class="text-[10px] text-gray-400 text-right mb-6">Sum of Physical + Precounted + Remittance + Expenses</p>
+                        
+                        <div class="grid grid-cols-2 gap-4">
+                            <button id="btn-cancel-close-shift" class="w-full bg-white border border-gray-300 text-gray-700 font-bold py-3 rounded-lg hover:bg-gray-50 transition">Cancel</button>
+                            <button id="btn-confirm-close-shift" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg shadow-lg transition transform hover:scale-105">Save Changes</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modalDiv);
+
+    const pickDiv = document.createElement("div");
+    pickDiv.id = "modal-pick-expense";
+    pickDiv.className = "fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-[60]";
+    pickDiv.innerHTML = `
+        <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-lg h-[60vh] flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-gray-800">Pick Shift's Expenses</h3>
+                <button id="btn-close-pick-expense" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+            </div>
+            <div class="mb-2">
+                 <input type="text" id="pick-expense-search" placeholder="Search expenses..." class="w-full p-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+            </div>
+            <div class="flex-1 overflow-y-auto border rounded bg-gray-50 p-2" id="pick-expense-list">
+                <div class="text-center text-gray-400 italic mt-4">Loading...</div>
+            </div>
+            <div class="mt-4 flex justify-end gap-2">
+                <button id="btn-cancel-pick-expense" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                <button id="btn-confirm-pick-expense" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded shadow">Add Selected</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(pickDiv);
+
+    const grid = document.getElementById("cash-counter-grid");
+    const receiptsList = document.getElementById("shift-receipts-list");
+
+    document.getElementById("precounted-bills").value = shift.precounted_bills !== undefined ? shift.precounted_bills : "";
+    document.getElementById("precounted-coins").value = shift.precounted_coins !== undefined ? shift.precounted_coins : "";
+
+    const totalRemittance = (shift.remittances || []).reduce((sum, r) => sum + (r.amount || 0), 0);
+    document.getElementById("shift-cashout").value = totalRemittance.toFixed(2);
+
+    const denoms = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.01];
+    const labels = ["1000", "500", "200", "100", "50", "20", "10", "5", "1", "Cents"];
+    const cashBreakdown = shift.cash_breakdown || {};
+
+    grid.innerHTML = denoms.map((d, i) => `
+        <div class="grid grid-cols-3 gap-4 items-center py-2 border-b border-gray-200 last:border-0 hover:bg-white transition px-2 rounded">
+            <label class="text-sm font-bold text-gray-600">${labels[i]}</label>
+            <input type="number" min="0" step="1" 
+                class="w-full border rounded p-2 text-sm text-center denom-input focus:ring-2 focus:ring-blue-500 outline-none font-mono" 
+                data-denom="${d}" 
+                value="${cashBreakdown[d] !== undefined ? cashBreakdown[d] : ''}"
+                placeholder="0"
+                ${i === 0 ? 'id="first-denom-input"' : ''}>
+            <div class="text-right text-sm font-mono text-gray-800 font-bold denom-subtotal">₱0.00</div>
+        </div>
+    `).join('');
+
+    const updateTotals = () => {
+        let cashTotal = 0;
+        grid.querySelectorAll(".denom-input").forEach(input => {
+            const denom = parseFloat(input.dataset.denom);
+            const count = parseInt(input.value) || 0;
+            const subtotal = denom * count;
+            cashTotal += subtotal;
+            input.nextElementSibling.textContent = `₱${subtotal.toFixed(2)}`;
+        });
+
+        document.getElementById("summary-physical-total").textContent = `₱${cashTotal.toFixed(2)}`;
+
+        const preBills = parseFloat(document.getElementById("precounted-bills").value) || 0;
+        const preCoins = parseFloat(document.getElementById("precounted-coins").value) || 0;
+        const precountedTotal = preBills + preCoins;
+        document.getElementById("summary-precounted-total").textContent = `₱${precountedTotal.toFixed(2)}`;
+
+        let receiptTotal = 0;
+        receiptsList.querySelectorAll(".receipt-row").forEach(row => {
+            const amt = parseFloat(row.querySelector(".receipt-amount").value) || 0;
+            receiptTotal += amt;
+        });
+        document.getElementById("summary-expenses-total").textContent = `₱${receiptTotal.toFixed(2)}`;
+
+        const cashout = parseFloat(document.getElementById("shift-cashout").value) || 0;
+        document.getElementById("summary-remittance-total").textContent = `₱${cashout.toFixed(2)}`;
+
+        const grandTotal = cashTotal + precountedTotal + receiptTotal + cashout;
+        document.getElementById("shift-total-turnover").textContent = `₱${grandTotal.toFixed(2)}`;
+
+        modalDiv.dataset.cashTotal = (cashTotal + precountedTotal);
+        modalDiv.dataset.cashout = cashout;
+        modalDiv.dataset.grandTotal = grandTotal;
+    };
+
+    const addReceiptRow = (desc = "", amount = "") => {
+        const row = document.createElement("div");
+        row.className = "flex gap-2 receipt-row";
+        row.innerHTML = `
+            <input type="text" placeholder="Description" class="flex-1 border rounded p-1 text-xs receipt-desc outline-none focus:ring-1 focus:ring-blue-500" value="${desc}">
+            <input type="number" placeholder="Amount" class="w-24 border rounded p-1 text-xs text-right receipt-amount outline-none focus:ring-1 focus:ring-blue-500" step="0.01" value="${amount}">
+            <button class="text-red-500 hover:text-red-700 btn-remove-receipt">&times;</button>
+        `;
+        row.querySelector(".btn-remove-receipt").onclick = () => {
+            row.remove();
+            updateTotals();
+        };
+        row.querySelector(".receipt-amount").oninput = updateTotals;
+        receiptsList.appendChild(row);
+        return row;
+    };
+
+    const receipts = shift.closing_receipts || [];
+    receipts.forEach(r => {
+        addReceiptRow(r.description, r.amount);
+    });
+
+    document.getElementById("btn-add-shift-receipt").onclick = () => {
+        const row = addReceiptRow();
+        row.querySelector(".receipt-desc").focus();
+    };
+
+    document.getElementById("precounted-bills").addEventListener("input", updateTotals);
+    document.getElementById("precounted-coins").addEventListener("input", updateTotals);
+
+    grid.querySelectorAll(".denom-input").forEach(input => {
+        input.addEventListener("input", updateTotals);
+        input.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                const nextInput = input.closest('.grid-cols-3')?.nextElementSibling?.querySelector('.denom-input');
+                if (nextInput) nextInput.focus();
+                else document.getElementById("btn-confirm-close-shift").focus();
+            }
+        });
+    });
+
+    const cleanupModals = () => {
+        modalDiv.remove();
+        pickDiv.remove();
+    };
+
+    document.getElementById("btn-cancel-close-shift").onclick = cleanupModals;
+    document.getElementById("btn-cancel-close-shift-x").onclick = cleanupModals;
+
+    const pickModalEl = document.getElementById("modal-pick-expense");
+    const pickList = document.getElementById("pick-expense-list");
+    const pickSearch = document.getElementById("pick-expense-search");
+
+    document.getElementById("btn-pick-shift-receipt").onclick = async () => {
+        pickModalEl.classList.remove("hidden");
+        pickList.innerHTML = '<div class="text-center text-gray-500 p-4">Loading expenses...</div>';
+
+        let todayExpenses = [];
+        let selectedOrderedIds = [];
+
+        try {
+            const allExpenses = await Repository.getAll('expenses');
+            const shiftDateStr = new Date(shift.start_time).toISOString().split('T')[0];
+
+            todayExpenses = allExpenses.filter(e => e.date === shiftDateStr);
+            todayExpenses.sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+
+            const renderExpenses = (filterText = "") => {
+                const term = filterText.toLowerCase();
+                const filtered = todayExpenses.filter(e =>
+                    e.description.toLowerCase().includes(term) ||
+                    (e.supplier_name && e.supplier_name.toLowerCase().includes(term))
+                );
+
+                pickList.innerHTML = "";
+                if (filtered.length === 0) {
+                    pickList.innerHTML = `<div class="text-center text-gray-400 p-2 text-sm">No matching expenses found for ${shiftDateStr}.</div>`;
+                    return;
+                }
+
+                filtered.forEach(exp => {
+                    const div = document.createElement("div");
+                    div.className = "flex items-center gap-2 p-2 border-b last:border-0 hover:bg-purple-50 cursor-pointer select-none";
+                    const isChecked = selectedOrderedIds.includes(exp.id);
+
+                    div.innerHTML = `
+                        <input type="checkbox" class="form-checkbox h-4 w-4 text-purple-600 cursor-pointer exp-checkbox" 
+                            data-id="${exp.id}"
+                            data-desc="${exp.description}" 
+                            data-amt="${exp.amount}" 
+                            data-supplier="${exp.supplier_name || ''}"
+                            ${isChecked ? 'checked' : ''}>
+                        <div class="flex-1 text-sm">
+                            <div class="font-bold text-gray-700">${exp.description}</div>
+                            <div class="text-[10px] text-gray-500">${exp.supplier_name || 'No Supplier'}</div>
+                        </div>
+                        <div class="font-bold text-gray-800">₱${exp.amount.toFixed(2)}</div>
+                    `;
+
+                    const cb = div.querySelector("input[type='checkbox']");
+                    div.addEventListener("click", (e) => {
+                        if (e.target !== cb) {
+                            cb.click();
+                        }
+                    });
+
+                    cb.addEventListener("change", (e) => {
+                        if (e.target.checked) {
+                            if (!selectedOrderedIds.includes(exp.id)) {
+                                selectedOrderedIds.push(exp.id);
+                            }
+                        } else {
+                            selectedOrderedIds = selectedOrderedIds.filter(id => id !== exp.id);
+                        }
+                    });
+
+                    pickList.appendChild(div);
+                });
+            };
+
+            renderExpenses();
+            pickSearch.oninput = (e) => renderExpenses(e.target.value);
+            pickSearch.value = "";
+            pickSearch.focus();
+
+        } catch (err) {
+            console.error(err);
+            pickList.innerHTML = '<div class="text-center text-red-500 p-2">Error loading expenses.</div>';
+        }
+
+        const closePickModal = () => pickModalEl.classList.add("hidden");
+        document.getElementById("btn-close-pick-expense").onclick = closePickModal;
+        document.getElementById("btn-cancel-pick-expense").onclick = closePickModal;
+
+        document.getElementById("btn-confirm-pick-expense").onclick = () => {
+            selectedOrderedIds.forEach(id => {
+                const exp = todayExpenses.find(e => e.id === id);
+                if (exp) {
+                    const supplier = exp.supplier_name;
+                    const finalDesc = supplier ? `${exp.description} (${supplier})` : exp.description;
+                    addReceiptRow(finalDesc, exp.amount);
+                }
+            });
+            updateTotals();
+            closePickModal();
+        };
+    };
+
+    document.getElementById("btn-confirm-close-shift").addEventListener("click", async () => {
+        const cashTotal = parseFloat(modalDiv.dataset.cashTotal) || 0;
+        const cashout = parseFloat(modalDiv.dataset.cashout) || 0;
+        const grandTotal = parseFloat(modalDiv.dataset.grandTotal) || 0;
+
+        const receipts = [];
+        receiptsList.querySelectorAll(".receipt-row").forEach(row => {
+            const desc = row.querySelector(".receipt-desc").value.trim();
+            const amt = parseFloat(row.querySelector(".receipt-amount").value) || 0;
+            if (desc && amt > 0) receipts.push({ description: desc, amount: amt });
+        });
+
+        try {
+            const targetShift = await Repository.get('shifts', shift.id);
+            if (targetShift) {
+                targetShift.closing_cash = cashTotal;
+                targetShift.precounted_bills = parseFloat(document.getElementById("precounted-bills").value) || 0;
+                targetShift.precounted_coins = parseFloat(document.getElementById("precounted-coins").value) || 0;
+                targetShift.cashout = cashout;
+                targetShift.closing_receipts = receipts;
+                targetShift.total_closing_amount = grandTotal;
+
+                const cashBreakdown = {};
+                grid.querySelectorAll(".denom-input").forEach(input => {
+                    const denom = input.dataset.denom;
+                    const count = parseInt(input.value) || 0;
+                    if (count > 0) cashBreakdown[denom] = count;
+                });
+                targetShift.cash_breakdown = cashBreakdown;
+
+                targetShift._version = (targetShift._version || 0) + 1;
+                targetShift._updatedAt = Date.now();
+
+                const financials = await getShiftFinancials(targetShift);
+                targetShift.expected_cash = financials.gross_accountability;
+                targetShift.variance = grandTotal - financials.gross_accountability;
+
+                await Repository.upsert('shifts', targetShift);
+                cleanupModals();
+
+                try {
+                    await SyncEngine.sync();
+                } catch (syncErr) {
+                    console.warn("Sync failed (saved locally):", syncErr);
+                }
+
+                alert("Shift updated successfully.");
+                selectShift(targetShift);
+                await fetchShifts();
+            }
+        } catch (error) {
+            console.error("Error saving shift edit:", error);
+            alert("Failed to save changes.");
+        }
+    });
+
+    updateTotals();
 }
 
 export function showCloseShiftModal(onSuccess) {
