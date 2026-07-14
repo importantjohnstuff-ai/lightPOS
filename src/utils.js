@@ -100,3 +100,71 @@ export function showToast(message, type = 'info') {
         setTimeout(() => toast.remove(), 500);
     }, 5000);
 }
+
+let isLoggingError = false;
+
+/**
+ * Initializes global uncaught error listeners and overrides console.error to log local reports.
+ */
+export function initGlobalErrorHandlers() {
+    // 1. Overriding console.error
+    const originalConsoleError = console.error;
+    console.error = function(...args) {
+        originalConsoleError.apply(console, args);
+
+        if (isLoggingError) return;
+
+        try {
+            isLoggingError = true;
+            const message = args.map(arg => {
+                if (arg instanceof Error) {
+                    return `${arg.message}\nStack: ${arg.stack || 'N/A'}`;
+                }
+                if (arg && typeof arg === 'object') {
+                    try {
+                        return JSON.stringify(arg);
+                    } catch (e) {
+                        return '[Unserializable Object]';
+                    }
+                }
+                return String(arg);
+            }).join(' ');
+
+            logErrorToLocal(`[Console Error] ${message}`);
+        } catch (e) {
+            originalConsoleError("Failed to log console.error locally:", e);
+        } finally {
+            isLoggingError = false;
+        }
+    };
+
+    // 2. Uncaught Runtime Errors
+    window.addEventListener('error', (event) => {
+        const error = event.error;
+        let message = '';
+        if (error instanceof Error) {
+            message = `Uncaught Exception: ${error.message}\nStack: ${error.stack || 'N/A'}`;
+        } else {
+            message = `Uncaught Exception: ${event.message || 'Unknown error'} at ${event.filename || 'unknown'}:${event.lineno || 0}:${event.colno || 0}`;
+        }
+        logErrorToLocal(message);
+    });
+
+    // 3. Unhandled Promise Rejections
+    window.addEventListener('unhandledrejection', (event) => {
+        const reason = event.reason;
+        let message = '';
+        if (reason instanceof Error) {
+            message = `Unhandled Rejection: ${reason.message}\nStack: ${reason.stack || 'N/A'}`;
+        } else if (reason && typeof reason === 'object') {
+            try {
+                message = `Unhandled Rejection: ${JSON.stringify(reason)}`;
+            } catch (e) {
+                message = `Unhandled Rejection: [Unserializable Object]`;
+            }
+        } else {
+            message = `Unhandled Rejection: ${String(reason)}`;
+        }
+        logErrorToLocal(message);
+    });
+}

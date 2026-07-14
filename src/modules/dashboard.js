@@ -1,6 +1,7 @@
 import { dbPromise } from "../db.js";
 import { getUserProfile } from "../auth.js";
 import { checkActiveShift, calculateExpectedCash } from "./shift.js";
+import { handleError } from "../utils.js";
 
 export async function loadDashboardView() {
     const user = getUserProfile();
@@ -476,7 +477,7 @@ async function refreshDashboard() {
         }
 
     } catch (error) {
-        console.error("Dashboard refresh error:", error);
+        handleError(error, "Dashboard");
     }
 }
 

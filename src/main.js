@@ -5,6 +5,10 @@ import { SyncEngine } from "./services/SyncEngine.js";
 import { dbPromise } from "./db.js";
 import { dbRepository as Repository } from "./db.js";
 import { ROLES } from "./modules/users.js";
+import { initGlobalErrorHandlers } from "./utils.js";
+
+// Initialize global error handlers as early as possible
+initGlobalErrorHandlers();
 
 // DOM Elements
 const loginView = document.getElementById("login-view");
