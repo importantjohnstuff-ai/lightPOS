@@ -6,7 +6,7 @@
  * Usage: php tests/api/SchemaTest.php
  */
 
-$schemaPath = __DIR__ . '/../../api/schema_po.sql';
+$schemaPath = __DIR__ . '/../../api/schema/schema_po.sql';
 
 echo "Running SchemaTest...\n";
 

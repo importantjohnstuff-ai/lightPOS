@@ -1,6 +1,6 @@
 import { dbPromise, dbRepository as Repository } from '../db.js';
 import { SyncEngine } from '../services/SyncEngine.js';
-import { generateUUID } from '../utils.js';
+import { generateUUID, handleError } from '../utils.js';
 import { getUserProfile } from '../auth.js';
 
 let procurementData = null; // Module-level cache for persistence
@@ -1505,39 +1505,46 @@ window.confirmReceivePO = async () => {
 };
 
 window.printPO = async (poId) => {
-    const po = await Repository.get('purchase_orders', poId);
-    if (!po) return;
+    try {
+        const po = await Repository.get('purchase_orders', poId);
+        if (!po) return;
 
-    const suppliers = await Repository.getAll('suppliers');
-    const supplier = suppliers.find(s => s.id === po.supplier_id);
-    const supplierName = supplier ? supplier.name : po.supplier_id;
-    const date = new Date(po.created_at).toLocaleDateString();
+        const suppliers = await Repository.getAll('suppliers');
+        const supplier = suppliers.find(s => s.id === po.supplier_id);
+        const supplierName = supplier ? supplier.name : po.supplier_id;
+        const date = new Date(po.created_at).toLocaleDateString();
 
-    const itemsHtml = (po.items || []).map(i => `
-        <tr>
-            <td style="padding:5px; border-bottom:1px solid #ddd;">${i.name}</td>
-            <td style="padding:5px; border-bottom:1px solid #ddd; text-align:right;">${i.qty}</td>
-            <td style="padding:5px; border-bottom:1px solid #ddd; text-align:right;">${(i.cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-            <td style="padding:5px; border-bottom:1px solid #ddd; text-align:right;">${(i.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-        </tr>
-    `).join('');
+        const itemsHtml = (po.items || []).map(i => `
+            <tr>
+                <td style="padding:5px; border-bottom:1px solid #ddd;">${i.name}</td>
+                <td style="padding:5px; border-bottom:1px solid #ddd; text-align:right;">${i.qty}</td>
+                <td style="padding:5px; border-bottom:1px solid #ddd; text-align:right;">${(i.cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                <td style="padding:5px; border-bottom:1px solid #ddd; text-align:right;">${(i.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+            </tr>
+        `).join('');
 
-    const printWindow = window.open('', '_blank');
-    printWindow.document.write(`
-        <html>
-        <head><title>Purchase Order ${po.id}</title></head>
-        <body style="font-family: sans-serif; padding: 20px;">
-            <h1>Purchase Order</h1>
-            <p><strong>PO ID:</strong> ${po.id}<br><strong>Supplier:</strong> ${supplierName}<br><strong>Date:</strong> ${date}<br><strong>Status:</strong> ${po.status}</p>
-            <table style="width:100%; border-collapse: collapse; margin-top: 20px;">
-                <thead><tr style="background:#eee; text-align:left;"><th>Item</th><th style="text-align:right">Qty</th><th style="text-align:right">Cost</th><th style="text-align:right">Total</th></tr></thead>
-                <tbody>${itemsHtml}</tbody>
-                <tfoot><tr><td colspan="3" style="text-align:right; font-weight:bold; padding-top:10px;">Total:</td><td style="text-align:right; font-weight:bold; padding-top:10px;">${(po.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr></tfoot>
-            </table>
-        </body></html>
-    `);
-    printWindow.document.close();
-    printWindow.print();
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+            throw new Error("Failed to open print window. Pop-up blocker might be enabled.");
+        }
+        printWindow.document.write(`
+            <html>
+            <head><title>Purchase Order ${po.id}</title></head>
+            <body style="font-family: sans-serif; padding: 20px;">
+                <h1>Purchase Order</h1>
+                <p><strong>PO ID:</strong> ${po.id}<br><strong>Supplier:</strong> ${supplierName}<br><strong>Date:</strong> ${date}<br><strong>Status:</strong> ${po.status}</p>
+                <table style="width:100%; border-collapse: collapse; margin-top: 20px;">
+                    <thead><tr style="background:#eee; text-align:left;"><th>Item</th><th style="text-align:right">Qty</th><th style="text-align:right">Cost</th><th style="text-align:right">Total</th></tr></thead>
+                    <tbody>${itemsHtml}</tbody>
+                    <tfoot><tr><td colspan="3" style="text-align:right; font-weight:bold; padding-top:10px;">Total:</td><td style="text-align:right; font-weight:bold; padding-top:10px;">${(po.total_amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr></tfoot>
+                </table>
+            </body></html>
+        `);
+        printWindow.document.close();
+        printWindow.print();
+    } catch (error) {
+        handleError(error, 'PO Printing');
+    }
 };
 
 let _selectedPoItem = null;

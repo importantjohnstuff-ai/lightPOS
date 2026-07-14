@@ -1,7 +1,7 @@
 import { checkPermission } from "../auth.js";
 import { renderHeader } from "../layout.js";
 import { dbPromise } from "../db.js";
-import { generateUUID } from "../utils.js";
+import { generateUUID, showToast } from "../utils.js";
 import { dbRepository as Repository } from "../db.js";
 import { SyncEngine } from "../services/SyncEngine.js";
 import { addNotification } from "../services/notification-service.js";
@@ -452,6 +452,27 @@ export async function loadSettingsView() {
                             <button type="button" id="btn-diagnostic-export" class="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition text-sm shadow-sm">Export Diagnostic Report</button>
                             <p class="text-[10px] text-gray-400 mt-1">Verifies Outbox, LWW Conflict Resolution, and Web Locks.</p>
                         </div>
+
+                        <div class="bg-white p-6 rounded-lg shadow-sm border mt-6">
+                            <h3 class="text-lg font-bold mb-2">Local Error Logs</h3>
+                            <p class="text-xs text-gray-500 mb-4">These logs are stored strictly in your browser (localStorage) and are not synchronized to the server.</p>
+                            
+                            <div id="local-logs-container" class="border rounded-lg p-3 bg-gray-50 max-h-60 overflow-y-auto mb-4 font-mono text-xs space-y-2">
+                                <div class="text-gray-400 italic text-center py-4">No error logs recorded.</div>
+                            </div>
+                            
+                            <div class="flex gap-2">
+                                <button type="button" id="btn-clear-logs" class="flex-1 bg-red-100 hover:bg-red-200 text-red-700 font-bold py-2 px-3 rounded text-xs transition border border-red-200">
+                                    Clear Logs
+                                </button>
+                                <button type="button" id="btn-copy-logs" class="flex-1 bg-blue-100 hover:bg-blue-200 text-blue-700 font-bold py-2 px-3 rounded text-xs transition border border-blue-200">
+                                    Copy Logs
+                                </button>
+                                <button type="button" id="btn-download-logs" class="flex-1 bg-teal-100 hover:bg-teal-200 text-teal-700 font-bold py-2 px-3 rounded text-xs transition border border-teal-200">
+                                    Download Logs
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -821,6 +842,7 @@ function setupEventListeners() {
             if (target === 'sync') renderSyncHistory();
             if (target === 'rewards') loadDiscountCodes();
             if (target === 'price-tools') loadPriceToolsCategories();
+            if (target === 'advanced') renderLocalLogs();
 
             // Hide save button for Sync, Migration, and Price Tools tabs
             if (target === 'sync' || target === 'migration' || target === 'price-tools') {
@@ -844,6 +866,11 @@ function setupEventListeners() {
     // Discount Codes Listeners
     document.getElementById('btn-add-discount')?.addEventListener('click', handleAddDiscountCode);
     document.getElementById('discount-codes-list')?.addEventListener('click', handleDeleteDiscountCode);
+
+    // Local Logs Listeners
+    document.getElementById('btn-clear-logs')?.addEventListener('click', handleClearLogs);
+    document.getElementById('btn-copy-logs')?.addEventListener('click', handleCopyLogs);
+    document.getElementById('btn-download-logs')?.addEventListener('click', handleDownloadLogs);
 
     // Logo Upload
     const logoFile = document.getElementById("set-store-logo-file");
@@ -3001,5 +3028,97 @@ async function applyPriceUpdates() {
     } finally {
         btn.textContent = originalText;
         btn.disabled = false;
+    }
+}
+
+function escapeHTML(str) {
+    if (!str) return '';
+    return str.replace(/[&<>'"]/g, 
+        tag => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            "'": '&#39;',
+            '"': '&quot;'
+        }[tag] || tag)
+    );
+}
+
+function renderLocalLogs() {
+    const container = document.getElementById('local-logs-container');
+    if (!container) return;
+
+    try {
+        const logsString = localStorage.getItem('app_error_logs');
+        let logs = [];
+        if (logsString) {
+            logs = JSON.parse(logsString);
+        }
+        
+        if (!Array.isArray(logs) || logs.length === 0) {
+            container.innerHTML = `<div class="text-gray-400 italic text-center py-4">No error logs recorded.</div>`;
+            return;
+        }
+
+        const sortedLogs = [...logs].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        container.innerHTML = sortedLogs.map(log => {
+            const timeStr = new Date(log.timestamp).toLocaleString();
+            return `
+                <div class="border-b border-gray-200 last:border-0 pb-2 mb-2 last:pb-0 last:mb-0">
+                    <div class="text-[10px] text-gray-400 font-sans">${timeStr}</div>
+                    <div class="text-red-600 break-words mt-0.5">${escapeHTML(log.error)}</div>
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        console.error("Failed to render local logs:", e);
+        container.innerHTML = `<div class="text-red-500 italic text-center py-4">Error loading logs.</div>`;
+    }
+}
+
+async function handleCopyLogs() {
+    try {
+        const logsString = localStorage.getItem('app_error_logs');
+        if (!logsString) {
+            showToast("No logs to copy", "info");
+            return;
+        }
+        await navigator.clipboard.writeText(logsString);
+        showToast("Logs copied to clipboard!", "success");
+    } catch (err) {
+        console.error("Failed to copy logs:", err);
+        showToast("Failed to copy logs to clipboard.", "error");
+    }
+}
+
+function handleDownloadLogs() {
+    try {
+        const logsString = localStorage.getItem('app_error_logs');
+        if (!logsString) {
+            showToast("No logs to download", "info");
+            return;
+        }
+        const blob = new Blob([logsString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `lightpos_error_logs_${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast("Logs downloaded successfully!", "success");
+    } catch (err) {
+        console.error("Failed to download logs:", err);
+        showToast("Failed to download logs.", "error");
+    }
+}
+
+function handleClearLogs() {
+    if (confirm("Are you sure you want to clear all local error logs?")) {
+        localStorage.removeItem('app_error_logs');
+        renderLocalLogs();
+        showToast("Local logs cleared", "success");
     }
 }

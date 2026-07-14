@@ -1,0 +1,16 @@
+<USER_REQUEST>
+System/Context:
+I am working on a PHP/MySQL codebase in an isolated development directory. We are restructuring this project into a single combined repository (Monorepo) to separate a massive module from the main application, allowing for independent development while maintaining a single Git history.
+
+Goal:
+Decouple the Reports V2 Module from the current unified codebase and isolate it into a dedicated folder. The root of the repository must contain exactly two primary sub-folders.
+
+Required Repository Structure:
+my-project-repo/
+├── main-app/        <-- The core application (stripped of the heavy module)
+└── Reports-module/    <-- The decoupled, standalone heavy module
+
+Execution Steps Required:
+1. Analyze the current codebase and identify all files, assets, views, and logic belonging to the Reports Module.
+2. Provide a plan detailing which files will remain in `main-app/` and which files will be moved into `heavy-module/`.
+<truncated 1987 bytes>

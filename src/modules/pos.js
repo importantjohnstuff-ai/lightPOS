@@ -2,7 +2,7 @@ import { checkPermission, requestManagerApproval } from "../auth.js";
 import { checkActiveShift, requireShift, showCloseShiftModal, recordRemittance, getShiftFinancials } from "./shift.js";
 import { addNotification } from "../services/notification-service.js";
 import { getSystemSettings } from "./settings.js";
-import { generateUUID, showToast as showGlobalToast } from "../utils.js";
+import { generateUUID, showToast as showGlobalToast, handleError } from "../utils.js";
 import { dbRepository as Repository } from "../db.js";
 import { SyncEngine } from "../services/SyncEngine.js";
 
@@ -1307,129 +1307,136 @@ async function renderPosInterface(content) {
     });
 
     async function printShiftReport(shift) {
-        const settings = await getSystemSettings();
-        const store = settings.store || { name: "LightPOS", data: "" };
+        try {
+            const settings = await getSystemSettings();
+            const store = settings.store || { name: "LightPOS", data: "" };
 
-        const defaultPrint = {
-            paper_width: 76,
-            show_dividers: true,
-            header: { text: "", font_size: 14, font_family: "'Courier New', Courier, monospace", bold: true, italic: false },
-            items: { font_size: 12, font_family: "'Courier New', Courier, monospace", bold: false, italic: false },
-            body: { font_size: 12, font_family: "'Courier New', Courier, monospace", bold: false, italic: false },
-            footer: { text: "Thank you for shopping!", font_size: 10, font_family: "'Courier New', Courier, monospace", bold: false, italic: true }
-        };
+            const defaultPrint = {
+                paper_width: 76,
+                show_dividers: true,
+                header: { text: "", font_size: 14, font_family: "'Courier New', Courier, monospace", bold: true, italic: false },
+                items: { font_size: 12, font_family: "'Courier New', Courier, monospace", bold: false, italic: false },
+                body: { font_size: 12, font_family: "'Courier New', Courier, monospace", bold: false, italic: false },
+                footer: { text: "Thank you for shopping!", font_size: 10, font_family: "'Courier New', Courier, monospace", bold: false, italic: true }
+            };
 
-        const p = {
-            ...defaultPrint,
-            ...(settings.print || {}),
-            header: { ...defaultPrint.header, ...(settings.print?.header || {}) },
-            items: { ...defaultPrint.items, ...(settings.print?.items || {}) },
-            body: { ...defaultPrint.body, ...(settings.print?.body || {}) },
-            footer: { ...defaultPrint.footer, ...(settings.print?.footer || {}) }
-        };
+            const p = {
+                ...defaultPrint,
+                ...(settings.print || {}),
+                header: { ...defaultPrint.header, ...(settings.print?.header || {}) },
+                items: { ...defaultPrint.items, ...(settings.print?.items || {}) },
+                body: { ...defaultPrint.body, ...(settings.print?.body || {}) },
+                footer: { ...defaultPrint.footer, ...(settings.print?.footer || {}) }
+            };
 
-        const pWidth = p.paper_width || 76;
-        const showHR = p.show_dividers !== false;
+            const pWidth = p.paper_width || 76;
+            const showHR = p.show_dividers !== false;
 
-        const getStyle = (s) => `
-            font-size: ${s.font_size}px; 
-            font-family: ${s.font_family}; 
-            font-weight: ${s.bold ? 'bold' : 'normal'}; 
-            font-style: ${s.italic ? 'italic' : 'normal'};
-        `;
+            const getStyle = (s) => `
+                font-size: ${s.font_size}px; 
+                font-family: ${s.font_family}; 
+                font-weight: ${s.bold ? 'bold' : 'normal'}; 
+                font-style: ${s.italic ? 'italic' : 'normal'};
+            `;
 
-        const headerText = p.header?.text || `${store.name}\n${store.data}`;
+            const headerText = p.header?.text || `${store.name}\n${store.data}`;
 
-        const printWindow = window.open('', '_blank', 'width=300,height=600');
+            const printWindow = window.open('', '_blank', 'width=300,height=600');
+            if (!printWindow) {
+                throw new Error("Failed to open print window. Pop-up blocker might be enabled.");
+            }
 
-        const receiptsHtml = (shift.closing_receipts || []).map(r => `
-            <tr>
-                <td style="font-size: 0.9em;">${r.description}</td>
-                <td style="text-align: right;">${r.amount.toFixed(2)}</td>
-            </tr>
-        `).join('');
+            const receiptsHtml = (shift.closing_receipts || []).map(r => `
+                <tr>
+                    <td style="font-size: 0.9em;">${r.description}</td>
+                    <td style="text-align: right;">${r.amount.toFixed(2)}</td>
+                </tr>
+            `).join('');
 
-        const reportHtml = `
-            <html>
-            <head>
-                <title>Shift Closing Report</title>
-                <style>
-                    @page { margin: 0; }
-                    body { 
-                        width: ${pWidth}mm;
-                        ${getStyle(p.body)}
-                        padding: 5mm;
-                        margin: 0;
-                        color: #000;
-                    }
-                    .text-center { text-align: center; }
-                    .text-right { text-align: right; }
-                    .bold { font-weight: bold; }
-                    .hr { border-bottom: 1px dashed #000; margin: 5px 0; }
-                    table { width: 100%; border-collapse: collapse; }
-                    .header-sec { ${getStyle(p.header)} }
-                    .body-sec { ${getStyle(p.body)} }
-                </style>
-            </head>
-            <body onload="window.print(); window.close();">
-                <div class="text-center header-sec">
-                    <div class="bold" style="font-size: 1.2em;">SHIFT CLOSING REPORT</div>
-                    ${store.logo ? `<img src="${store.logo}" style="max-width: 40mm; max-height: 20mm; margin-bottom: 5px; filter: grayscale(1);"><br>` : ''}
-                    <div style="white-space: pre-wrap;">${headerText}</div>
-                </div>
-                ${showHR ? '<div class="hr"></div>' : ''}
-                <div class="body-sec">
-                    User: ${shift.user_id}<br>
-                    Opened: ${new Date(shift.start_time).toLocaleString()}<br>
-                    Closed: ${new Date(shift.end_time).toLocaleString()}
-                </div>
-                ${showHR ? '<div class="hr"></div>' : ''}
-                <table>
-                    <tr><td>Opening Cash</td><td class="text-right">₱${(shift.opening || shift.opening_cash || 0).toFixed(2)}</td></tr>
-                    <tr><td>+ Sales (Cash)</td><td class="text-right">₱${(shift.sales || 0).toFixed(2)}</td></tr>
-                    <tr><td>+ Adjustments</td><td class="text-right">₱${(shift.adjustments || 0).toFixed(2)}</td></tr>
-                    <tr><td>+ Net Returns</td><td class="text-right">₱${(shift.returns_net || 0).toFixed(2)}</td></tr>
-                    <tr class="bold"><td>= Gross Account</td><td class="text-right">₱${(shift.gross_accountability || shift.expected_cash || 0).toFixed(2)}</td></tr>
-                    <tr class="hr"><td colspan="2"></td></tr>
-                    <tr class="bold"><td>Physical Cash</td><td class="text-right">₱${(shift.closing_cash || 0).toFixed(2)}</td></tr>
-                    ${shift.precounted_bills ? `
-                        <tr><td style="font-size: 0.9em; padding-left: 10px;">- Precounted Bills</td><td class="text-right" style="font-size: 0.9em;">₱${shift.precounted_bills.toFixed(2)}</td></tr>
-                    ` : ''}
-                    ${shift.precounted_coins ? `
-                        <tr><td style="font-size: 0.9em; padding-left: 10px;">- Precounted Coins</td><td class="text-right" style="font-size: 0.9em;">₱${shift.precounted_coins.toFixed(2)}</td></tr>
-                    ` : ''}
-                    ${shift.cashout ? `
-                        <tr><td>- Remitted</td><td class="text-right">₱${shift.cashout.toFixed(2)}</td></tr>
-                    ` : ''}
-                    ${shift.expenses ? `
-                        <tr><td>- Expenses</td><td class="text-right">₱${shift.expenses.toFixed(2)}</td></tr>
-                    ` : ''}
-                </table>
-                ${receiptsHtml ? `
+            const reportHtml = `
+                <html>
+                <head>
+                    <title>Shift Closing Report</title>
+                    <style>
+                        @page { margin: 0; }
+                        body { 
+                            width: ${pWidth}mm;
+                            ${getStyle(p.body)}
+                            padding: 5mm;
+                            margin: 0;
+                            color: #000;
+                        }
+                        .text-center { text-align: center; }
+                        .text-right { text-align: right; }
+                        .bold { font-weight: bold; }
+                        .hr { border-bottom: 1px dashed #000; margin: 5px 0; }
+                        table { width: 100%; border-collapse: collapse; }
+                        .header-sec { ${getStyle(p.header)} }
+                        .body-sec { ${getStyle(p.body)} }
+                    </style>
+                </head>
+                <body onload="window.print(); window.close();">
+                    <div class="text-center header-sec">
+                        <div class="bold" style="font-size: 1.2em;">SHIFT CLOSING REPORT</div>
+                        ${store.logo ? `<img src="${store.logo}" style="max-width: 40mm; max-height: 20mm; margin-bottom: 5px; filter: grayscale(1);"><br>` : ''}
+                        <div style="white-space: pre-wrap;">${headerText}</div>
+                    </div>
                     ${showHR ? '<div class="hr"></div>' : ''}
-                    <div class="bold" style="font-size: 0.9em;">EXPENSE RECEIPTS</div>
-                    <table>${receiptsHtml}</table>
-                ` : ''}
-                ${showHR ? '<div class="hr"></div>' : ''}
-                <table>
-                    <tr class="bold" style="font-size: 1.1em;">
-                        <td>TOTAL TURNOVER</td>
-                        <td class="text-right">₱${(shift.total_closing_amount || shift.closing_cash || 0).toFixed(2)}</td>
-                    </tr>
-                    <tr class="bold">
-                        <td>VARIANCE</td>
-                        <td class="text-right">₱${((shift.total_closing_amount || shift.closing_cash || 0) - (shift.expected_cash || 0)).toFixed(2)}</td>
-                    </tr>
-                </table>
-                ${showHR ? '<div class="hr" style="margin-top: 20px;"></div>' : ''}
-                <div class="text-center" style="font-size: 0.8em; margin-top: 10px;">
-                    End of Report
-                </div>
-            </body>
-            </html>
-        `;
-        printWindow.document.write(reportHtml);
-        printWindow.document.close();
+                    <div class="body-sec">
+                        User: ${shift.user_id}<br>
+                        Opened: ${new Date(shift.start_time).toLocaleString()}<br>
+                        Closed: ${new Date(shift.end_time).toLocaleString()}
+                    </div>
+                    ${showHR ? '<div class="hr"></div>' : ''}
+                    <table>
+                        <tr><td>Opening Cash</td><td class="text-right">₱${(shift.opening || shift.opening_cash || 0).toFixed(2)}</td></tr>
+                        <tr><td>+ Sales (Cash)</td><td class="text-right">₱${(shift.sales || 0).toFixed(2)}</td></tr>
+                        <tr><td>+ Adjustments</td><td class="text-right">₱${(shift.adjustments || 0).toFixed(2)}</td></tr>
+                        <tr><td>+ Net Returns</td><td class="text-right">₱${(shift.returns_net || 0).toFixed(2)}</td></tr>
+                        <tr class="bold"><td>= Gross Account</td><td class="text-right">₱${(shift.gross_accountability || shift.expected_cash || 0).toFixed(2)}</td></tr>
+                        <tr class="hr"><td colspan="2"></td></tr>
+                        <tr class="bold"><td>Physical Cash</td><td class="text-right">₱${(shift.closing_cash || 0).toFixed(2)}</td></tr>
+                        ${shift.precounted_bills ? `
+                            <tr><td style="font-size: 0.9em; padding-left: 10px;">- Precounted Bills</td><td class="text-right" style="font-size: 0.9em;">₱${shift.precounted_bills.toFixed(2)}</td></tr>
+                        ` : ''}
+                        ${shift.precounted_coins ? `
+                            <tr><td style="font-size: 0.9em; padding-left: 10px;">- Precounted Coins</td><td class="text-right" style="font-size: 0.9em;">₱${shift.precounted_coins.toFixed(2)}</td></tr>
+                        ` : ''}
+                        ${shift.cashout ? `
+                            <tr><td>- Remitted</td><td class="text-right">₱${shift.cashout.toFixed(2)}</td></tr>
+                        ` : ''}
+                        ${shift.expenses ? `
+                            <tr><td>- Expenses</td><td class="text-right">₱${shift.expenses.toFixed(2)}</td></tr>
+                        ` : ''}
+                    </table>
+                    ${receiptsHtml ? `
+                        ${showHR ? '<div class="hr"></div>' : ''}
+                        <div class="bold" style="font-size: 0.9em;">EXPENSE RECEIPTS</div>
+                        <table>${receiptsHtml}</table>
+                    ` : ''}
+                    ${showHR ? '<div class="hr"></div>' : ''}
+                    <table>
+                        <tr class="bold" style="font-size: 1.1em;">
+                            <td>TOTAL TURNOVER</td>
+                            <td class="text-right">₱${(shift.total_closing_amount || shift.closing_cash || 0).toFixed(2)}</td>
+                        </tr>
+                        <tr class="bold">
+                            <td>VARIANCE</td>
+                            <td class="text-right">₱${((shift.total_closing_amount || shift.closing_cash || 0) - (shift.expected_cash || 0)).toFixed(2)}</td>
+                        </tr>
+                    </table>
+                    ${showHR ? '<div class="hr" style="margin-top: 20px;"></div>' : ''}
+                    <div class="text-center" style="font-size: 0.8em; margin-top: 10px;">
+                        End of Report
+                    </div>
+                </body>
+                </html>
+            `;
+            printWindow.document.write(reportHtml);
+            printWindow.document.close();
+        } catch (error) {
+            handleError(error, 'Shift Report Printing');
+        }
     }
 
     // Checkout Logic
@@ -3184,128 +3191,135 @@ async function requestQuickCustomer(tx) {
 }
 
 async function printReceipt(tx, isReprint = false) {
-    // Request customer info only if it's a Guest transaction
-    if (tx.customer_id === "Guest") {
-        const result = await requestQuickCustomer(tx);
-        if (result) {
-            tx = result;
-        } else if (!isReprint) {
-            // If it's the initial print and they cancel, abort the print
-            return;
+    try {
+        // Request customer info only if it's a Guest transaction
+        if (tx.customer_id === "Guest") {
+            const result = await requestQuickCustomer(tx);
+            if (result) {
+                tx = result;
+            } else if (!isReprint) {
+                // If it's the initial print and they cancel, abort the print
+                return;
+            }
         }
+        const settings = await getSystemSettings();
+        const store = settings.store || { name: "LightPOS", data: "" };
+        const defaultPrint = {
+            paper_width: 76,
+            show_dividers: true,
+            header: { text: "", font_size: 14, font_family: "'Courier New', Courier, monospace", bold: true, italic: false },
+            items: { font_size: 12, font_family: "'Courier New', Courier, monospace", bold: false, italic: false },
+            body: { font_size: 12, font_family: "'Courier New', Courier, monospace", bold: false, italic: false },
+            footer: { text: "Thank you for shopping!", font_size: 10, font_family: "'Courier New', Courier, monospace", bold: false, italic: true }
+        };
+
+        const p = {
+            ...defaultPrint,
+            ...(settings.print || {}),
+            header: { ...defaultPrint.header, ...(settings.print?.header || {}) },
+            items: { ...defaultPrint.items, ...(settings.print?.items || {}) },
+            body: { ...defaultPrint.body, ...(settings.print?.body || {}) },
+            footer: { ...defaultPrint.footer, ...(settings.print?.footer || {}) }
+        };
+
+        const pWidth = p.paper_width || 76;
+        const showHR = p.show_dividers !== false;
+
+        const getStyle = (s) => `
+            font-size: ${s.font_size}px; 
+            font-family: ${s.font_family}; 
+            font-weight: ${s.bold ? 'bold' : 'normal'}; 
+            font-style: ${s.italic ? 'italic' : 'normal'};
+        `;
+
+        const headerText = p.header?.text || `${store.name}\n${store.data}`;
+        const footerText = p.footer?.text || "Thank you for shopping!";
+
+        const printWindow = window.open('', '_blank', 'width=300,height=600');
+        if (!printWindow) {
+            throw new Error("Failed to open print window. Pop-up blocker might be enabled.");
+        }
+        const itemsStyle = p.items ? getStyle(p.items) : getStyle(p.body);
+        const itemsHtml = tx.items.map(item => `
+            <tr style="${itemsStyle}">
+                <td colspan="2" style="padding-top: 5px;">${item.name}</td>
+            </tr>
+            <tr style="${itemsStyle}">
+                <td style="font-size: 0.9em; opacity: 0.8;">${item.qty} x ${(item.selling_price || 0).toFixed(2)}</td>
+                <td style="text-align: right;">${(item.qty * (item.selling_price || 0)).toFixed(2)}</td>
+            </tr>
+        `).join('');
+
+        const receiptHtml = `
+            <html>
+            <head>
+                <title>Print Receipt</title>
+                <style>
+                    @page { margin: 0; }
+                    body { 
+                        width: ${pWidth}mm;
+                        ${getStyle(p.body)}
+                        padding: 5mm;
+                        margin: 0;
+                        color: #000;
+                    }
+                    .text-center { text-align: center; }
+                    .text-right { text-align: right; }
+                    .bold { font-weight: bold; }
+                    .hr { border-bottom: 1px dashed #000; margin: 5px 0; }
+                    table { width: 100%; border-collapse: collapse; }
+                    .header-sec { ${getStyle(p.header)} }
+                    .body-sec { ${getStyle(p.body)} }
+                    .footer-sec { margin-top: 20px; ${getStyle(p.footer)} }
+                    .watermark {
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%) rotate(-45deg);
+                        font-size: 40px;
+                        color: rgba(0, 0, 0, 0.1);
+                        white-space: nowrap;
+                        pointer-events: none;
+                        z-index: -1;
+                        font-weight: bold;
+                    }
+                </style>
+            </head>
+            <body onload="window.print(); window.close();">
+                ${isReprint ? '<div class="watermark">REPRINT</div>' : ''}
+                <div class="text-center header-sec">
+                    ${store.logo ? `<img src="${store.logo}" style="max-width: 40mm; max-height: 20mm; margin-bottom: 5px; filter: grayscale(1);"><br>` : ''}
+                    <div style="white-space: pre-wrap;">${headerText}</div>
+                </div>
+                ${showHR ? '<div class="hr"></div>' : ''}
+                <div class="body-sec">
+                    Date: ${new Date(tx.timestamp).toLocaleString()}<br>
+                    Trans: #${tx.id.slice(-6)}<br>
+                    Cashier: ${tx.user_name || tx.user_email}<br>
+                    Customer: ${tx.customer_name}
+                </div>
+                ${showHR ? '<div class="hr"></div>' : ''}
+                <table>
+                    ${itemsHtml}
+                </table>
+                ${showHR ? '<div class="hr"></div>' : ''}
+                <table>
+                    <tr><td class="bold">TOTAL</td><td class="text-right bold">₱${tx.total_amount.toFixed(2)}</td></tr>
+                    <tr><td>Payment (${tx.payment_method})</td><td class="text-right">₱${tx.amount_tendered.toFixed(2)}</td></tr>
+                    <tr><td>Change</td><td class="text-right">₱${tx.change.toFixed(2)}</td></tr>
+                </table>
+                <div class="footer-sec text-center">
+                    <div style="white-space: pre-wrap;">${footerText}</div>
+                </div>
+            </body>
+            </html>
+        `;
+        printWindow.document.write(receiptHtml);
+        printWindow.document.close();
+
+        // Mark transaction as printed to handle watermark on manual reprints
+        tx.was_printed = true;
+    } catch (error) {
+        handleError(error, 'Receipt Printing');
     }
-    const settings = await getSystemSettings();
-    const store = settings.store || { name: "LightPOS", data: "" };
-    const defaultPrint = {
-        paper_width: 76,
-        show_dividers: true,
-        header: { text: "", font_size: 14, font_family: "'Courier New', Courier, monospace", bold: true, italic: false },
-        items: { font_size: 12, font_family: "'Courier New', Courier, monospace", bold: false, italic: false },
-        body: { font_size: 12, font_family: "'Courier New', Courier, monospace", bold: false, italic: false },
-        footer: { text: "Thank you for shopping!", font_size: 10, font_family: "'Courier New', Courier, monospace", bold: false, italic: true }
-    };
-
-    const p = {
-        ...defaultPrint,
-        ...(settings.print || {}),
-        header: { ...defaultPrint.header, ...(settings.print?.header || {}) },
-        items: { ...defaultPrint.items, ...(settings.print?.items || {}) },
-        body: { ...defaultPrint.body, ...(settings.print?.body || {}) },
-        footer: { ...defaultPrint.footer, ...(settings.print?.footer || {}) }
-    };
-
-    const pWidth = p.paper_width || 76;
-    const showHR = p.show_dividers !== false;
-
-    const getStyle = (s) => `
-        font-size: ${s.font_size}px; 
-        font-family: ${s.font_family}; 
-        font-weight: ${s.bold ? 'bold' : 'normal'}; 
-        font-style: ${s.italic ? 'italic' : 'normal'};
-    `;
-
-    const headerText = p.header?.text || `${store.name}\n${store.data}`;
-    const footerText = p.footer?.text || "Thank you for shopping!";
-
-    const printWindow = window.open('', '_blank', 'width=300,height=600');
-    const itemsStyle = p.items ? getStyle(p.items) : getStyle(p.body);
-    const itemsHtml = tx.items.map(item => `
-        <tr style="${itemsStyle}">
-            <td colspan="2" style="padding-top: 5px;">${item.name}</td>
-        </tr>
-        <tr style="${itemsStyle}">
-            <td style="font-size: 0.9em; opacity: 0.8;">${item.qty} x ${(item.selling_price || 0).toFixed(2)}</td>
-            <td style="text-align: right;">${(item.qty * (item.selling_price || 0)).toFixed(2)}</td>
-        </tr>
-    `).join('');
-
-    const receiptHtml = `
-        <html>
-        <head>
-            <title>Print Receipt</title>
-            <style>
-                @page { margin: 0; }
-                body { 
-                    width: ${pWidth}mm;
-                    ${getStyle(p.body)}
-                    padding: 5mm;
-                    margin: 0;
-                    color: #000;
-                }
-                .text-center { text-align: center; }
-                .text-right { text-align: right; }
-                .bold { font-weight: bold; }
-                .hr { border-bottom: 1px dashed #000; margin: 5px 0; }
-                table { width: 100%; border-collapse: collapse; }
-                .header-sec { ${getStyle(p.header)} }
-                .body-sec { ${getStyle(p.body)} }
-                .footer-sec { margin-top: 20px; ${getStyle(p.footer)} }
-                .watermark {
-                    position: fixed;
-                    top: 50%;
-                    left: 50%;
-                    transform: translate(-50%, -50%) rotate(-45deg);
-                    font-size: 40px;
-                    color: rgba(0, 0, 0, 0.1);
-                    white-space: nowrap;
-                    pointer-events: none;
-                    z-index: -1;
-                    font-weight: bold;
-                }
-            </style>
-        </head>
-        <body onload="window.print(); window.close();">
-            ${isReprint ? '<div class="watermark">REPRINT</div>' : ''}
-            <div class="text-center header-sec">
-                ${store.logo ? `<img src="${store.logo}" style="max-width: 40mm; max-height: 20mm; margin-bottom: 5px; filter: grayscale(1);"><br>` : ''}
-                <div style="white-space: pre-wrap;">${headerText}</div>
-            </div>
-            ${showHR ? '<div class="hr"></div>' : ''}
-            <div class="body-sec">
-                Date: ${new Date(tx.timestamp).toLocaleString()}<br>
-                Trans: #${tx.id.slice(-6)}<br>
-                Cashier: ${tx.user_name || tx.user_email}<br>
-                Customer: ${tx.customer_name}
-            </div>
-            ${showHR ? '<div class="hr"></div>' : ''}
-            <table>
-                ${itemsHtml}
-            </table>
-            ${showHR ? '<div class="hr"></div>' : ''}
-            <table>
-                <tr><td class="bold">TOTAL</td><td class="text-right bold">₱${tx.total_amount.toFixed(2)}</td></tr>
-                <tr><td>Payment (${tx.payment_method})</td><td class="text-right">₱${tx.amount_tendered.toFixed(2)}</td></tr>
-                <tr><td>Change</td><td class="text-right">₱${tx.change.toFixed(2)}</td></tr>
-            </table>
-            <div class="footer-sec text-center">
-                <div style="white-space: pre-wrap;">${footerText}</div>
-            </div>
-        </body>
-        </html>
-    `;
-    printWindow.document.write(receiptHtml);
-    printWindow.document.close();
-
-    // Mark transaction as printed to handle watermark on manual reprints
-    tx.was_printed = true;
 }

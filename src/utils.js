@@ -28,6 +28,38 @@ export function handleError(error, context = 'System') {
     console.error(`%c[${context} Error]`, 'color: white; background: #d32f2f; padding: 2px 5px; border-radius: 2px;', error);
 
     showToast(`${context}: ${message}`, 'error');
+    logErrorToLocal(`${context}: ${message}`);
+}
+
+/**
+ * Appends a new error log entry to localStorage under 'app_error_logs'.
+ * Keeps a maximum of 500 logs to prevent storage overflow.
+ * @param {Error|string} error The error object or message.
+ */
+export function logErrorToLocal(error) {
+    try {
+        const message = error instanceof Error ? error.message : String(error);
+        const logsString = localStorage.getItem('app_error_logs');
+        let logs = [];
+        if (logsString) {
+            try {
+                logs = JSON.parse(logsString);
+                if (!Array.isArray(logs)) logs = [];
+            } catch (e) {
+                logs = [];
+            }
+        }
+        logs.push({
+            timestamp: new Date().toISOString(),
+            error: message
+        });
+        if (logs.length > 500) {
+            logs = logs.slice(-500);
+        }
+        localStorage.setItem('app_error_logs', JSON.stringify(logs));
+    } catch (e) {
+        console.error("Failed to write to local error logs:", e);
+    }
 }
 
 /**

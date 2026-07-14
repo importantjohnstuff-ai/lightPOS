@@ -8,9 +8,9 @@ try {
     $pdo = $store->pdo;
 
     // Ensure schema exists
-    $schemaSql = file_get_contents(__DIR__ . '/../schema.sql');
+    $schemaSql = file_get_contents(__DIR__ . '/../schema/schema.sql');
     $pdo->exec($schemaSql);
-    $schemaPo = file_get_contents(__DIR__ . '/schema_po.sql');
+    $schemaPo = file_get_contents(__DIR__ . '/../schema/schema_po.sql');
     $pdo->exec($schemaPo);
 
     echo "Schema initialized.\n";

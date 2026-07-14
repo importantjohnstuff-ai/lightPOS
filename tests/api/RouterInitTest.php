@@ -48,7 +48,7 @@ try {
         echo "   Attempting to initialize schema via CLI fallback...\n";
         
         // Fallback: Execute schema directly to unblock development
-        $schemaSql = file_get_contents(__DIR__ . '/../../api/schema_po.sql');
+        $schemaSql = file_get_contents(__DIR__ . '/../../api/schema/schema_po.sql');
         $pdo->exec($schemaSql);
         echo "   ✅ Schema initialized via CLI fallback. You can proceed.\n";
         
