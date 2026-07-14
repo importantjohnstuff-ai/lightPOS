@@ -246,130 +246,130 @@ export async function loadSettingsView() {
                 </div>
 
                 <!-- Advanced Tab -->
-                <div id="settings-tab-advanced" class="settings-panel hidden space-y-6">
-                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                        <div class="lg:col-span-2 space-y-6">
-                            <div class="bg-white p-6 rounded-lg shadow-sm border">
-                                <h3 class="text-lg font-bold mb-4">Receipt Designer</h3>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div id="settings-tab-advanced" class="settings-panel hidden">
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <!-- Receipt Designer Card -->
+                        <div class="md:col-span-2 lg:col-span-2 bg-white p-6 rounded-lg shadow-sm border">
+                            <h3 class="text-lg font-bold mb-4">Receipt Designer</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-700 mb-1">Paper Width (mm)</label>
+                                    <input type="number" id="set-print-width" class="w-full border rounded p-2 text-sm">
+                                </div>
+                                <div class="flex items-end pb-2">
+                                    <label class="inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" id="set-print-show-dividers" class="form-checkbox h-4 w-4 text-blue-600">
+                                        <span class="ml-2 text-xs font-bold text-gray-700">Show Dividers (Dashed Lines)</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Header Section -->
+                            <div class="border-t pt-4 mt-4">
+                                <h4 class="text-sm font-bold text-blue-600 mb-3 uppercase tracking-wider">Header Section</h4>
+                                <div class="space-y-3">
                                     <div>
-                                        <label class="block text-xs font-bold text-gray-700 mb-1">Paper Width (mm)</label>
-                                        <input type="number" id="set-print-width" class="w-full border rounded p-2 text-sm">
+                                        <label class="block text-[10px] font-bold text-gray-500 uppercase">Custom Header Text (Overrides Store Info)</label>
+                                        <textarea id="set-print-header-text" rows="2" class="w-full border rounded p-2 text-sm" placeholder="Leave blank to use Store Name & Address"></textarea>
                                     </div>
-                                    <div class="flex items-end pb-2">
-                                        <label class="inline-flex items-center cursor-pointer">
-                                            <input type="checkbox" id="set-print-show-dividers" class="form-checkbox h-4 w-4 text-blue-600">
-                                            <span class="ml-2 text-xs font-bold text-gray-700">Show Dividers (Dashed Lines)</span>
-                                        </label>
-                                    </div>
-                                </div>
-
-                                <!-- Header Section -->
-                                <div class="border-t pt-4 mt-4">
-                                    <h4 class="text-sm font-bold text-blue-600 mb-3 uppercase tracking-wider">Header Section</h4>
-                                    <div class="space-y-3">
-                                        <div>
-                                            <label class="block text-[10px] font-bold text-gray-500 uppercase">Custom Header Text (Overrides Store Info)</label>
-                                            <textarea id="set-print-header-text" rows="2" class="w-full border rounded p-2 text-sm" placeholder="Leave blank to use Store Name & Address"></textarea>
-                                        </div>
-                                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                            <div>
-                                                <label class="block text-[10px] font-bold text-gray-500 uppercase">Size (px)</label>
-                                                <input type="number" id="set-print-header-size" class="w-full border rounded p-1 text-sm">
-                                            </div>
-                                            <div>
-                                                <label class="block text-[10px] font-bold text-gray-500 uppercase">Font</label>
-                                                <select id="set-print-header-font" class="w-full border rounded p-1 text-sm">
-                                                    <option value="'Courier New', Courier, monospace">Courier New</option>
-                                                    <option value="Arial, sans-serif">Arial</option>
-                                                    <option value="'Times New Roman', serif">Times New Roman</option>
-                                                </select>
-                                            </div>
-                                            <div class="flex items-center gap-2 pt-4">
-                                                <label class="inline-flex items-center"><input type="checkbox" id="set-print-header-bold" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Bold</span></label>
-                                                <label class="inline-flex items-center"><input type="checkbox" id="set-print-header-italic" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Italic</span></label>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Body Section -->
-                                <div class="border-t pt-4 mt-4">
-                                    <h4 class="text-sm font-bold text-blue-600 mb-3 uppercase tracking-wider">Body Section (General Text)</h4>
                                     <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
                                         <div>
                                             <label class="block text-[10px] font-bold text-gray-500 uppercase">Size (px)</label>
-                                            <input type="number" id="set-print-body-size" class="w-full border rounded p-1 text-sm">
+                                            <input type="number" id="set-print-header-size" class="w-full border rounded p-1 text-sm">
                                         </div>
                                         <div>
                                             <label class="block text-[10px] font-bold text-gray-500 uppercase">Font</label>
-                                            <select id="set-print-body-font" class="w-full border rounded p-1 text-sm">
+                                            <select id="set-print-header-font" class="w-full border rounded p-1 text-sm">
+                                                <option value="'Courier New', Courier, monospace">Courier New</option>
+                                                <option value="Arial, sans-serif">Arial</option>
+                                                <option value="'Times New Roman', serif">Times New Roman</option>
+                                            </select>
+                                        </div>
+                                        <div class="flex items-center gap-2 pt-4">
+                                            <label class="inline-flex items-center"><input type="checkbox" id="set-print-header-bold" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Bold</span></label>
+                                            <label class="inline-flex items-center"><input type="checkbox" id="set-print-header-italic" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Italic</span></label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Body Section -->
+                            <div class="border-t pt-4 mt-4">
+                                <h4 class="text-sm font-bold text-blue-600 mb-3 uppercase tracking-wider">Body Section (General Text)</h4>
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-gray-500 uppercase">Size (px)</label>
+                                        <input type="number" id="set-print-body-size" class="w-full border rounded p-1 text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-gray-500 uppercase">Font</label>
+                                        <select id="set-print-body-font" class="w-full border rounded p-1 text-sm">
+                                            <option value="'Courier New', Courier, monospace">Courier New</option>
+                                            <option value="Arial, sans-serif">Arial</option>
+                                        </select>
+                                    </div>
+                                    <div class="flex items-center gap-2 pt-4">
+                                        <label class="inline-flex items-center"><input type="checkbox" id="set-print-body-bold" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Bold</span></label>
+                                        <label class="inline-flex items-center"><input type="checkbox" id="set-print-body-italic" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Italic</span></label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Items Section -->
+                            <div class="border-t pt-4 mt-4">
+                                <h4 class="text-sm font-bold text-blue-600 mb-3 uppercase tracking-wider">Items List Section</h4>
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-gray-500 uppercase">Size (px)</label>
+                                        <input type="number" id="set-print-items-size" class="w-full border rounded p-1 text-sm">
+                                    </div>
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-gray-500 uppercase">Font</label>
+                                        <select id="set-print-items-font" class="w-full border rounded p-1 text-sm">
+                                            <option value="'Courier New', Courier, monospace">Courier New</option>
+                                            <option value="Arial, sans-serif">Arial</option>
+                                        </select>
+                                    </div>
+                                    <div class="flex items-center gap-2 pt-4">
+                                        <label class="inline-flex items-center"><input type="checkbox" id="set-print-items-bold" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Bold</span></label>
+                                        <label class="inline-flex items-center"><input type="checkbox" id="set-print-items-italic" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Italic</span></label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Footer Section -->
+                            <div class="border-t pt-4 mt-4">
+                                <h4 class="text-sm font-bold text-blue-600 mb-3 uppercase tracking-wider">Footer Section</h4>
+                                <div class="space-y-3">
+                                    <div>
+                                        <label class="block text-[10px] font-bold text-gray-500 uppercase">Footer Text</label>
+                                        <textarea id="set-print-footer-text" rows="2" class="w-full border rounded p-2 text-sm"></textarea>
+                                    </div>
+                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                        <div>
+                                            <label class="block text-[10px] font-bold text-gray-500 uppercase">Size (px)</label>
+                                            <input type="number" id="set-print-footer-size" class="w-full border rounded p-1 text-sm">
+                                        </div>
+                                        <div>
+                                            <label class="block text-[10px] font-bold text-gray-500 uppercase">Font</label>
+                                            <select id="set-print-footer-font" class="w-full border rounded p-1 text-sm">
                                                 <option value="'Courier New', Courier, monospace">Courier New</option>
                                                 <option value="Arial, sans-serif">Arial</option>
                                             </select>
                                         </div>
                                         <div class="flex items-center gap-2 pt-4">
-                                            <label class="inline-flex items-center"><input type="checkbox" id="set-print-body-bold" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Bold</span></label>
-                                            <label class="inline-flex items-center"><input type="checkbox" id="set-print-body-italic" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Italic</span></label>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Items Section -->
-                                <div class="border-t pt-4 mt-4">
-                                    <h4 class="text-sm font-bold text-blue-600 mb-3 uppercase tracking-wider">Items List Section</h4>
-                                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                        <div>
-                                            <label class="block text-[10px] font-bold text-gray-500 uppercase">Size (px)</label>
-                                            <input type="number" id="set-print-items-size" class="w-full border rounded p-1 text-sm">
-                                        </div>
-                                        <div>
-                                            <label class="block text-[10px] font-bold text-gray-500 uppercase">Font</label>
-                                            <select id="set-print-items-font" class="w-full border rounded p-1 text-sm">
-                                                <option value="'Courier New', Courier, monospace">Courier New</option>
-                                                <option value="Arial, sans-serif">Arial</option>
-                                            </select>
-                                        </div>
-                                        <div class="flex items-center gap-2 pt-4">
-                                            <label class="inline-flex items-center"><input type="checkbox" id="set-print-items-bold" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Bold</span></label>
-                                            <label class="inline-flex items-center"><input type="checkbox" id="set-print-items-italic" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Italic</span></label>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Footer Section -->
-                                <div class="border-t pt-4 mt-4">
-                                    <h4 class="text-sm font-bold text-blue-600 mb-3 uppercase tracking-wider">Footer Section</h4>
-                                    <div class="space-y-3">
-                                        <div>
-                                            <label class="block text-[10px] font-bold text-gray-500 uppercase">Footer Text</label>
-                                            <textarea id="set-print-footer-text" rows="2" class="w-full border rounded p-2 text-sm"></textarea>
-                                        </div>
-                                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                                            <div>
-                                                <label class="block text-[10px] font-bold text-gray-500 uppercase">Size (px)</label>
-                                                <input type="number" id="set-print-footer-size" class="w-full border rounded p-1 text-sm">
-                                            </div>
-                                            <div>
-                                                <label class="block text-[10px] font-bold text-gray-500 uppercase">Font</label>
-                                                <select id="set-print-footer-font" class="w-full border rounded p-1 text-sm">
-                                                    <option value="'Courier New', Courier, monospace">Courier New</option>
-                                                    <option value="Arial, sans-serif">Arial</option>
-                                                </select>
-                                            </div>
-                                            <div class="flex items-center gap-2 pt-4">
-                                                <label class="inline-flex items-center"><input type="checkbox" id="set-print-footer-bold" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Bold</span></label>
-                                                <label class="inline-flex items-center"><input type="checkbox" id="set-print-footer-italic" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Italic</span></label>
-                                            </div>
+                                            <label class="inline-flex items-center"><input type="checkbox" id="set-print-footer-bold" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Bold</span></label>
+                                            <label class="inline-flex items-center"><input type="checkbox" id="set-print-footer-italic" class="form-checkbox h-3 w-3"><span class="ml-1 text-[10px]">Italic</span></label>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
-                        
+
+                        <!-- Procurement Settings Card -->
                         <div class="bg-white p-6 rounded-lg shadow-sm border">
                             <h3 class="text-lg font-bold mb-4">Procurement Settings</h3>
-                            <div class="max-w-xs">
+                            <div class="w-full">
                                 <label class="block text-sm font-bold text-gray-700 mb-2">K-Factor (Sales Projection %)</label>
                                 <div class="flex items-center gap-2">
                                     <input type="number" id="set-procurement-k-factor" min="100" step="1" class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="110">
@@ -377,7 +377,7 @@ export async function loadSettingsView() {
                                 </div>
                                 <p class="text-[10px] text-gray-500 mt-1">Multiplier for OTB sales projection (e.g., 110% = 1.1x). Min 100.</p>
                             </div>
-                            <div class="max-w-xs mt-4">
+                            <div class="w-full mt-4">
                                 <label class="block text-sm font-bold text-gray-700 mb-2">OTB Calculation Mode</label>
                                 <select id="set-procurement-otb-mode" class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none">
                                     <option value="standard">Standard (Audit Based)</option>
@@ -385,7 +385,7 @@ export async function loadSettingsView() {
                                 </select>
                                 <p class="text-[10px] text-gray-500 mt-1">Standard considers current stock levels. Replenishment ignores stock gaps.</p>
                             </div>
-                            <div class="max-w-xs mt-4">
+                            <div class="w-full mt-4">
                                 <label class="block text-sm font-bold text-gray-700 mb-2">Ordering Cost (S)</label>
                                 <div class="flex items-center gap-2">
                                     <span class="text-sm text-gray-500">₱</span>
@@ -393,7 +393,7 @@ export async function loadSettingsView() {
                                 </div>
                                 <p class="text-[10px] text-gray-500 mt-1">Fixed cost per order (Shipping, Admin, etc).</p>
                             </div>
-                            <div class="max-w-xs mt-4">
+                            <div class="w-full mt-4">
                                 <label class="block text-sm font-bold text-gray-700 mb-2">Holding Cost Rate (H)</label>
                                 <div class="flex items-center gap-2">
                                     <input type="number" id="set-procurement-holding-cost" min="0" max="100" step="0.1" class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="20">
@@ -401,7 +401,7 @@ export async function loadSettingsView() {
                                 </div>
                                 <p class="text-[10px] text-gray-500 mt-1">Annual holding cost as % of unit cost.</p>
                             </div>
-                            <div class="max-w-xs mt-4">
+                            <div class="w-full mt-4">
                                 <label class="block text-sm font-bold text-gray-700 mb-2">Stock Availability Target</label>
                                 <select id="set-procurement-service-level" class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none">
                                     <option value="1.28">90% (Low Safety Stock)</option>
@@ -410,7 +410,7 @@ export async function loadSettingsView() {
                                 </select>
                                 <p class="text-[10px] text-gray-500 mt-1">Higher targets require holding more safety stock to prevent running out.</p>
                             </div>
-                            <div class="max-w-xs mt-4">
+                            <div class="w-full mt-4">
                                 <label class="block text-sm font-bold text-gray-700 mb-2">Default Lead Time (Risk Period)</label>
                                 <input type="number" id="set-procurement-lead-time" step="1" class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="7">
                                 <p class="text-[10px] text-gray-500 mt-1">Used if supplier specific lead time is missing.</p>
@@ -424,36 +424,42 @@ export async function loadSettingsView() {
                             </div>
                         </div>
 
-                        <div class="space-y-6">
-                            <div class="bg-white p-6 rounded-lg shadow-sm border">
-                                <h3 class="text-lg font-bold mb-4">Shift Settings</h3>
-                                <div class="max-w-xs">
-                                    <label class="block text-sm font-bold text-gray-700 mb-2">Discrepancy Alert Threshold (₱)</label>
-                                    <input type="number" id="set-shift-threshold" step="0.01" min="0" class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="0.00">
-                                    <p class="text-[10px] text-gray-500 mt-1">Triggers a system notification if the closing discrepancy exceeds this amount.</p>
-                                </div>
-                                <div class="mt-4">
-                                    <label class="inline-flex items-center cursor-pointer">
-                                        <input type="checkbox" id="set-auto-print" class="form-checkbox h-5 w-5 text-blue-600">
-                                        <span class="ml-2 text-sm font-bold text-gray-700">Auto-print receipt after payment</span>
-                                    </label>
-                        </div>
-                        <div class="mt-6 pt-6 border-t">
-                            <h4 class="text-xs font-bold text-gray-500 uppercase mb-2">Security</h4>
-                            <div class="max-w-xs">
-                                <label class="block text-sm font-bold text-gray-700 mb-2">Manager Password</label>
-                                <input type="password" id="set-manager-password" class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Leave blank if not required">
-                                <p class="text-[10px] text-gray-500 mt-1">This password will be required for high-clearance actions (e.g., voiding transactions, editing closed shifts).</p>
+                        <!-- Shift Settings Card -->
+                        <div class="bg-white p-6 rounded-lg shadow-sm border">
+                            <h3 class="text-lg font-bold mb-4">Shift Settings</h3>
+                            <div class="w-full">
+                                <label class="block text-sm font-bold text-gray-700 mb-2">Discrepancy Alert Threshold (₱)</label>
+                                <input type="number" id="set-shift-threshold" step="0.01" min="0" class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="0.00">
+                                <p class="text-[10px] text-gray-500 mt-1">Triggers a system notification if the closing discrepancy exceeds this amount.</p>
+                            </div>
+                            <div class="mt-4">
+                                <label class="inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" id="set-auto-print" class="form-checkbox h-5 w-5 text-blue-600">
+                                    <span class="ml-2 text-sm font-bold text-gray-700">Auto-print receipt after payment</span>
+                                </label>
                             </div>
                         </div>
-                        <div class="mt-6 pt-6 border-t">
-                            <h4 class="text-xs font-bold text-gray-500 uppercase mb-2">Developer Tools</h4>
-                            <button type="button" id="btn-run-tests" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition text-sm shadow-sm">Run Sync Architecture Tests</button>
-                            <button type="button" id="btn-diagnostic-export" class="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition text-sm shadow-sm">Export Diagnostic Report</button>
-                            <p class="text-[10px] text-gray-400 mt-1">Verifies Outbox, LWW Conflict Resolution, and Web Locks.</p>
+
+                        <!-- Security & Developer Tools Card -->
+                        <div class="bg-white p-6 rounded-lg shadow-sm border space-y-6">
+                            <div>
+                                <h3 class="text-lg font-bold mb-4">Security</h3>
+                                <div class="w-full">
+                                    <label class="block text-sm font-bold text-gray-700 mb-2">Manager Password</label>
+                                    <input type="password" id="set-manager-password" class="w-full border rounded-lg p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Leave blank if not required">
+                                    <p class="text-[10px] text-gray-500 mt-1">This password will be required for high-clearance actions (e.g., voiding transactions, editing closed shifts).</p>
+                                </div>
+                            </div>
+                            <div class="pt-6 border-t">
+                                <h3 class="text-lg font-bold mb-4">Developer Tools</h3>
+                                <button type="button" id="btn-run-tests" class="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition text-sm shadow-sm">Run Sync Architecture Tests</button>
+                                <button type="button" id="btn-diagnostic-export" class="w-full mt-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition text-sm shadow-sm">Export Diagnostic Report</button>
+                                <p class="text-[10px] text-gray-400 mt-1">Verifies Outbox, LWW Conflict Resolution, and Web Locks.</p>
+                            </div>
                         </div>
 
-                        <div class="bg-white p-6 rounded-lg shadow-sm border mt-6">
+                        <!-- Local Error Logs Card -->
+                        <div class="bg-white p-6 rounded-lg shadow-sm border">
                             <h3 class="text-lg font-bold mb-2">Local Error Logs</h3>
                             <p class="text-xs text-gray-500 mb-4">These logs are stored strictly in your browser (localStorage) and are not synchronized to the server.</p>
                             
@@ -475,8 +481,6 @@ export async function loadSettingsView() {
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
 
                 <!-- AI Settings Tab -->
                 <div id="settings-tab-ai" class="settings-panel hidden space-y-6">
