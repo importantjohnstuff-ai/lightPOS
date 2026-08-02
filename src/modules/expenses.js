@@ -3,8 +3,14 @@ import { generateUUID } from "../utils.js";
 import { dbRepository as Repository } from "../db.js";
 import { SyncEngine } from "../services/SyncEngine.js";
 import { showToast } from "../utils.js";
+import { warpPerspective, canvasToBlob, loadImageFromFile, scaleImage } from "../utils/PerspectiveWarp.js";
+import { ReceiptImageStore } from "../services/ReceiptImageStore.js";
 
 let suppliersList = [];
+// Receipt state — reset on each modal open
+let _receiptBlob = null;       // The cropped JPEG Blob ready to save
+let _receiptSourceImg = null;  // The raw uploaded Image element (for crop modal)
+let _receiptCorners = null;    // 4 corner points [{x,y},...]
 
 export async function loadExpensesView() {
     const content = document.getElementById("main-content");
@@ -143,6 +149,27 @@ export async function loadExpensesView() {
                         </select>
                         <p class="text-[10px] text-red-500 mt-1 font-medium">Expenses must be stocked in before recording.</p>
                     </div>
+
+                    <!-- Receipt Attachment -->
+                    <div class="mb-6">
+                        <label class="block text-gray-700 text-xs font-bold uppercase mb-2">📎 Receipt Image (Optional)</label>
+                        <div id="receipt-preview-area" class="hidden mb-2 relative group">
+                            <img id="receipt-thumbnail" src="" alt="Receipt" class="w-full h-32 object-cover rounded-lg border border-gray-200 cursor-pointer" title="Click to view full size">
+                            <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center">
+                                <span class="text-white opacity-0 group-hover:opacity-100 font-bold text-xs transition-all">Click to view</span>
+                            </div>
+                            <button type="button" id="btn-remove-receipt" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow hover:bg-red-600 transition">✕</button>
+                        </div>
+                        <div id="receipt-upload-area" class="flex gap-2">
+                            <label class="flex-1 cursor-pointer">
+                                <div class="border-2 border-dashed border-gray-300 rounded-lg py-3 px-4 text-center hover:border-red-400 hover:bg-red-50 transition-all">
+                                    <svg class="w-6 h-6 mx-auto text-gray-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                                    <span class="text-xs text-gray-500 font-medium">Upload / Capture Receipt</span>
+                                </div>
+                                <input type="file" id="receipt-file-input" accept="image/*" capture="environment" class="hidden">
+                            </label>
+                        </div>
+                    </div>
                     
                     <div class="flex items-center gap-2 pt-2">
                         <button type="button" id="btn-cancel-expense" class="w-1/3 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-2 rounded-lg transition duration-150">Cancel</button>
@@ -150,6 +177,32 @@ export async function loadExpensesView() {
                     </div>
                 </form>
             </div>
+        </div>
+
+        <!-- Perspective Crop Modal -->
+        <div id="modal-receipt-crop" class="fixed inset-0 bg-black bg-opacity-90 hidden z-[60] flex flex-col">
+            <div class="flex items-center justify-between p-4 text-white shrink-0">
+                <h3 class="text-lg font-bold">📐 Adjust Corners</h3>
+                <div class="flex gap-2">
+                    <button id="btn-reset-corners" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold transition">Reset</button>
+                    <button id="btn-cancel-crop" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold transition">Cancel</button>
+                    <button id="btn-apply-crop" class="px-4 py-1.5 bg-green-600 hover:bg-green-500 rounded text-xs font-bold transition">✓ Apply Crop</button>
+                </div>
+            </div>
+            <div id="crop-canvas-container" class="flex-1 relative overflow-hidden flex items-center justify-center">
+                <canvas id="crop-canvas" class="max-w-full max-h-full"></canvas>
+                <!-- Corner handles are appended dynamically -->
+            </div>
+            <div class="p-3 text-center text-gray-400 text-xs shrink-0">Drag the 4 corners to match the receipt edges, then tap Apply</div>
+        </div>
+
+        <!-- Receipt Viewer Lightbox -->
+        <div id="modal-receipt-viewer" class="fixed inset-0 bg-black bg-opacity-90 hidden z-[60] flex flex-col items-center justify-center">
+            <div class="absolute top-4 right-4 flex gap-2 z-10">
+                <button id="btn-download-receipt" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-bold transition">⬇ Download</button>
+                <button id="btn-close-viewer" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-bold transition">✕ Close</button>
+            </div>
+            <img id="receipt-viewer-img" src="" alt="Receipt" class="max-w-[90vw] max-h-[85vh] object-contain rounded shadow-2xl">
         </div>
     `;
 
@@ -170,6 +223,7 @@ export async function loadExpensesView() {
             document.getElementById("form-add-expense").reset();
             document.getElementById("exp-date").value = today;
             document.getElementById("exp-stocked-in").value = "No";
+            resetReceiptState();
 
             const pendingDataStr = localStorage.getItem('pending_expense');
             if (pendingDataStr) {
@@ -227,6 +281,9 @@ export async function loadExpensesView() {
         document.querySelectorAll(".expense-checkbox").forEach(cb => cb.checked = isChecked);
         updateQuickSum();
     });
+
+    // --- Receipt Event Listeners ---
+    setupReceiptListeners();
 
     await Promise.all([fetchSuppliers(), fetchExpenses()]);
 }
@@ -290,6 +347,7 @@ async function saveExpense() {
         invoice_number: invoiceNo,
         date: dateVal,
         user_id: user,
+        has_receipt: !!_receiptBlob,
         _updatedAt: Date.now()
     };
 
@@ -299,10 +357,17 @@ async function saveExpense() {
 
     try {
         await Repository.upsert('expenses', expenseData);
+
+        // Save receipt image (if any) to the separated image store
+        if (_receiptBlob) {
+            await ReceiptImageStore.saveReceiptImage(expenseData.id, _receiptBlob);
+        }
+
         SyncEngine.sync();
 
         document.getElementById("modal-add-expense").classList.add("hidden");
         document.getElementById("form-add-expense").reset();
+        resetReceiptState();
 
         fetchExpenses();
     } catch (error) {
@@ -378,6 +443,9 @@ async function fetchExpenses() {
                 <td class="py-3 px-6 text-left text-[10px] text-gray-500">${data.user_id}</td>
                 <td class="py-3 px-6 text-center">
                     <div class="flex items-center justify-center gap-2">
+                        <button class="view-receipt-btn text-gray-400 hover:text-amber-600 transition ${data.has_receipt ? '' : 'hidden'}" data-id="${data.id}" title="View Receipt">
+                            📎
+                        </button>
                         <button class="text-blue-500 hover:text-blue-700 edit-btn transition ${canWrite ? '' : 'hidden'}" data-id="${data.id}">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                         </button>
@@ -388,7 +456,7 @@ async function fetchExpenses() {
                 </td>
             `;
 
-            row.querySelector(".edit-btn").addEventListener("click", () => {
+            row.querySelector(".edit-btn").addEventListener("click", async () => {
                 document.getElementById("expense-modal-title").textContent = "Edit Expense";
                 document.getElementById("exp-id").value = data.id;
                 document.getElementById("exp-desc").value = data.description;
@@ -398,12 +466,30 @@ async function fetchExpenses() {
                 document.getElementById("exp-invoice-no").value = data.invoice_number || "";
                 document.getElementById("exp-date").value = data.date;
                 document.getElementById("exp-stocked-in").value = "Yes";
+                // Load existing receipt if any
+                resetReceiptState();
+                if (data.has_receipt) {
+                    await loadExistingReceipt(data.id);
+                }
                 document.getElementById("modal-add-expense").classList.remove("hidden");
             });
+
+            // View receipt button in table row
+            const viewReceiptBtn = row.querySelector(".view-receipt-btn");
+            if (viewReceiptBtn) {
+                viewReceiptBtn.addEventListener("click", async (e) => {
+                    e.stopPropagation();
+                    await showReceiptViewer(data.id);
+                });
+            }
 
             row.querySelector(".delete-btn").addEventListener("click", async () => {
                 if (confirm("Delete this expense record?")) {
                     await Repository.remove('expenses', data.id);
+                    // Also delete receipt if exists
+                    if (data.has_receipt) {
+                        await ReceiptImageStore.deleteReceiptImage(data.id);
+                    }
                     SyncEngine.sync();
                     fetchExpenses();
                 }
@@ -527,4 +613,335 @@ async function exportExpensesCSV() {
         console.error("Error exporting expenses:", error);
         showToast("Failed to export expenses", "error");
     }
+}
+
+// ─────────────────────────────────────────────────────────
+// Receipt Helper Functions
+// ─────────────────────────────────────────────────────────
+
+function resetReceiptState() {
+    _receiptBlob = null;
+    _receiptSourceImg = null;
+    _receiptCorners = null;
+    const previewArea = document.getElementById("receipt-preview-area");
+    const uploadArea = document.getElementById("receipt-upload-area");
+    const fileInput = document.getElementById("receipt-file-input");
+    if (previewArea) previewArea.classList.add("hidden");
+    if (uploadArea) uploadArea.classList.remove("hidden");
+    if (fileInput) fileInput.value = "";
+}
+
+function updateReceiptPreview(blob) {
+    const previewArea = document.getElementById("receipt-preview-area");
+    const uploadArea = document.getElementById("receipt-upload-area");
+    const thumbnail = document.getElementById("receipt-thumbnail");
+    if (!previewArea || !thumbnail) return;
+
+    const url = URL.createObjectURL(blob);
+    thumbnail.onload = () => URL.revokeObjectURL(url);
+    thumbnail.src = url;
+    previewArea.classList.remove("hidden");
+    uploadArea.classList.add("hidden");
+}
+
+async function loadExistingReceipt(expenseId) {
+    let blob = await ReceiptImageStore.getReceiptImage(expenseId);
+    if (!blob) {
+        blob = await ReceiptImageStore.fetchFromServer(expenseId);
+    }
+    if (blob) {
+        _receiptBlob = blob;
+        updateReceiptPreview(blob);
+    }
+}
+
+async function showReceiptViewer(expenseId) {
+    const viewer = document.getElementById("modal-receipt-viewer");
+    const viewerImg = document.getElementById("receipt-viewer-img");
+    if (!viewer || !viewerImg) return;
+
+    viewerImg.src = "";
+    viewer.classList.remove("hidden");
+
+    let blob = await ReceiptImageStore.getReceiptImage(expenseId);
+    if (!blob) {
+        blob = await ReceiptImageStore.fetchFromServer(expenseId);
+    }
+    if (blob) {
+        const url = URL.createObjectURL(blob);
+        viewerImg.onload = () => URL.revokeObjectURL(url);
+        viewerImg.src = url;
+        // Store for download
+        viewer.dataset.currentBlob = url;
+        viewer.dataset.currentExpenseId = expenseId;
+    } else {
+        viewer.classList.add("hidden");
+        showToast("Receipt image not found", "error");
+    }
+}
+
+function setupReceiptListeners() {
+    // File input handler — opens crop modal after image selection
+    const fileInput = document.getElementById("receipt-file-input");
+    if (fileInput) {
+        fileInput.addEventListener("change", async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+                const img = await loadImageFromFile(file);
+                const scaledCanvas = scaleImage(img, 1200);
+                _receiptSourceImg = scaledCanvas;
+                openCropModal(scaledCanvas);
+            } catch (err) {
+                console.error("Failed to load image:", err);
+                showToast("Failed to load image", "error");
+            }
+        });
+    }
+
+    // Remove receipt button
+    const removeBtn = document.getElementById("btn-remove-receipt");
+    if (removeBtn) {
+        removeBtn.addEventListener("click", () => {
+            resetReceiptState();
+        });
+    }
+
+    // Thumbnail click → open viewer with current blob
+    const thumbnail = document.getElementById("receipt-thumbnail");
+    if (thumbnail) {
+        thumbnail.addEventListener("click", () => {
+            if (_receiptBlob) {
+                const viewer = document.getElementById("modal-receipt-viewer");
+                const viewerImg = document.getElementById("receipt-viewer-img");
+                const url = URL.createObjectURL(_receiptBlob);
+                viewerImg.onload = () => URL.revokeObjectURL(url);
+                viewerImg.src = url;
+                viewer.classList.remove("hidden");
+            }
+        });
+    }
+
+    // --- Crop Modal Controls ---
+    const cropModal = document.getElementById("modal-receipt-crop");
+    
+    document.getElementById("btn-cancel-crop")?.addEventListener("click", () => {
+        cropModal.classList.add("hidden");
+        removeCropHandles();
+    });
+
+    document.getElementById("btn-reset-corners")?.addEventListener("click", () => {
+        if (_receiptSourceImg) {
+            const w = _receiptSourceImg.width;
+            const h = _receiptSourceImg.height;
+            const margin = 0.1;
+            _receiptCorners = [
+                { x: w * margin, y: h * margin },
+                { x: w * (1 - margin), y: h * margin },
+                { x: w * (1 - margin), y: h * (1 - margin) },
+                { x: w * margin, y: h * (1 - margin) }
+            ];
+            drawCropOverlay();
+        }
+    });
+
+    document.getElementById("btn-apply-crop")?.addEventListener("click", async () => {
+        if (!_receiptSourceImg || !_receiptCorners) return;
+        try {
+            // Scale corners from display coordinates to source coordinates
+            const canvas = document.getElementById("crop-canvas");
+            const scaleX = _receiptSourceImg.width / canvas.width;
+            const scaleY = _receiptSourceImg.height / canvas.height;
+            const srcCorners = _receiptCorners.map(c => ({
+                x: c.x * scaleX,
+                y: c.y * scaleY
+            }));
+
+            const warpedCanvas = warpPerspective(_receiptSourceImg, srcCorners);
+            _receiptBlob = await canvasToBlob(warpedCanvas, 0.75);
+            updateReceiptPreview(_receiptBlob);
+            cropModal.classList.add("hidden");
+            removeCropHandles();
+            showToast("Receipt cropped successfully", "success");
+        } catch (err) {
+            console.error("Perspective warp failed:", err);
+            showToast("Crop failed: " + err.message, "error");
+        }
+    });
+
+    // --- Viewer Lightbox Controls ---
+    document.getElementById("btn-close-viewer")?.addEventListener("click", () => {
+        document.getElementById("modal-receipt-viewer").classList.add("hidden");
+    });
+
+    document.getElementById("btn-download-receipt")?.addEventListener("click", () => {
+        const viewerImg = document.getElementById("receipt-viewer-img");
+        if (viewerImg.src) {
+            const a = document.createElement("a");
+            a.href = viewerImg.src;
+            a.download = "receipt.jpg";
+            a.click();
+        }
+    });
+}
+
+// ─────────────────────────────────────────────────────────
+// Crop Modal Logic
+// ─────────────────────────────────────────────────────────
+
+function openCropModal(sourceCanvas) {
+    const cropModal = document.getElementById("modal-receipt-crop");
+    const canvas = document.getElementById("crop-canvas");
+    const container = document.getElementById("crop-canvas-container");
+    if (!cropModal || !canvas || !container) return;
+
+    cropModal.classList.remove("hidden");
+
+    // Fit source to container
+    const containerRect = container.getBoundingClientRect();
+    const maxW = containerRect.width - 40;
+    const maxH = containerRect.height - 40;
+    const ratio = Math.min(maxW / sourceCanvas.width, maxH / sourceCanvas.height, 1);
+    const displayW = Math.round(sourceCanvas.width * ratio);
+    const displayH = Math.round(sourceCanvas.height * ratio);
+
+    canvas.width = displayW;
+    canvas.height = displayH;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(sourceCanvas, 0, 0, displayW, displayH);
+
+    // Initialize corners at 10% margin
+    const margin = 0.1;
+    _receiptCorners = [
+        { x: displayW * margin, y: displayH * margin },
+        { x: displayW * (1 - margin), y: displayH * margin },
+        { x: displayW * (1 - margin), y: displayH * (1 - margin) },
+        { x: displayW * margin, y: displayH * (1 - margin) }
+    ];
+
+    drawCropOverlay();
+    createCropHandles(canvas);
+}
+
+function drawCropOverlay() {
+    const canvas = document.getElementById("crop-canvas");
+    if (!canvas || !_receiptCorners || !_receiptSourceImg) return;
+    const ctx = canvas.getContext("2d");
+
+    // Redraw source image
+    ctx.drawImage(_receiptSourceImg, 0, 0, canvas.width, canvas.height);
+
+    // Draw semi-transparent overlay outside the selection
+    ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Clear the selected region
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(_receiptCorners[0].x, _receiptCorners[0].y);
+    for (let i = 1; i < 4; i++) {
+        ctx.lineTo(_receiptCorners[i].x, _receiptCorners[i].y);
+    }
+    ctx.closePath();
+    ctx.clip();
+    ctx.drawImage(_receiptSourceImg, 0, 0, canvas.width, canvas.height);
+    ctx.restore();
+
+    // Draw border lines
+    ctx.strokeStyle = "#22c55e";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(_receiptCorners[0].x, _receiptCorners[0].y);
+    for (let i = 1; i < 4; i++) {
+        ctx.lineTo(_receiptCorners[i].x, _receiptCorners[i].y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+}
+
+function removeCropHandles() {
+    document.querySelectorAll(".crop-handle").forEach(h => h.remove());
+}
+
+function createCropHandles(canvas) {
+    removeCropHandles();
+    const container = document.getElementById("crop-canvas-container");
+    if (!container || !_receiptCorners) return;
+
+    const canvasRect = canvas.getBoundingClientRect();
+    const labels = ["TL", "TR", "BR", "BL"];
+    const colors = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b"];
+
+    _receiptCorners.forEach((corner, idx) => {
+        const handle = document.createElement("div");
+        handle.className = "crop-handle";
+        handle.style.cssText = `
+            position: absolute;
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            background: ${colors[idx]};
+            border: 3px solid white;
+            cursor: grab;
+            z-index: 10;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 9px; font-weight: bold; color: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+            touch-action: none;
+            user-select: none;
+        `;
+        handle.textContent = labels[idx];
+        container.appendChild(handle);
+
+        const updateHandlePosition = () => {
+            const cr = canvas.getBoundingClientRect();
+            const containerR = container.getBoundingClientRect();
+            handle.style.left = (cr.left - containerR.left + corner.x - 14) + "px";
+            handle.style.top = (cr.top - containerR.top + corner.y - 14) + "px";
+        };
+        updateHandlePosition();
+
+        // Drag logic (mouse + touch)
+        const startDrag = (startX, startY) => {
+            handle.style.cursor = "grabbing";
+            const moveHandler = (mx, my) => {
+                const cr = canvas.getBoundingClientRect();
+                let nx = mx - cr.left;
+                let ny = my - cr.top;
+                nx = Math.max(0, Math.min(canvas.width, nx));
+                ny = Math.max(0, Math.min(canvas.height, ny));
+                corner.x = nx;
+                corner.y = ny;
+                updateHandlePosition();
+                drawCropOverlay();
+            };
+
+            const onMouseMove = (e) => moveHandler(e.clientX, e.clientY);
+            const onTouchMove = (e) => {
+                e.preventDefault();
+                const t = e.touches[0];
+                moveHandler(t.clientX, t.clientY);
+            };
+            const endDrag = () => {
+                handle.style.cursor = "grab";
+                document.removeEventListener("mousemove", onMouseMove);
+                document.removeEventListener("mouseup", endDrag);
+                document.removeEventListener("touchmove", onTouchMove);
+                document.removeEventListener("touchend", endDrag);
+            };
+            document.addEventListener("mousemove", onMouseMove);
+            document.addEventListener("mouseup", endDrag);
+            document.addEventListener("touchmove", onTouchMove, { passive: false });
+            document.addEventListener("touchend", endDrag);
+        };
+
+        handle.addEventListener("mousedown", (e) => {
+            e.preventDefault();
+            startDrag(e.clientX, e.clientY);
+        });
+        handle.addEventListener("touchstart", (e) => {
+            e.preventDefault();
+            const t = e.touches[0];
+            startDrag(t.clientX, t.clientY);
+        }, { passive: false });
+    });
 }
