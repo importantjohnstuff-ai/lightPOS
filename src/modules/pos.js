@@ -457,40 +457,117 @@ async function renderPosInterface(content) {
 
 
         <!-- Checkout Modal -->
-        <div id="modal-checkout" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50">
-            <div class="bg-white rounded-lg shadow-lg p-6 w-96">
-                <h3 class="text-xl font-bold mb-4 text-gray-800">Checkout</h3>
-                <div class="mb-4 text-center">
-                    <div class="text-sm text-gray-600">Total Amount</div>
-                    <div id="checkout-total" class="text-3xl font-bold text-blue-600">₱0.00</div>
-                    <div id="discount-display" class="hidden text-sm text-green-600 font-bold mt-1"></div>
-                </div>
-                <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-2">Discount Code</label>
-                    <div class="flex gap-2">
-                        <input type="text" id="discount-code-input" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase" placeholder="Enter code">
-                        <button id="btn-apply-discount" class="bg-purple-100 hover:bg-purple-200 text-purple-700 font-bold px-3 py-2 rounded text-xs transition whitespace-nowrap">Apply</button>
+        <div id="modal-checkout" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50 p-4">
+            <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden">
+                <div class="flex justify-between items-center pb-3 border-b shrink-0">
+                    <h3 class="text-xl font-bold text-gray-800">Checkout</h3>
+                    <div id="checkout-customer-badge" class="text-xs px-2.5 py-1 rounded-full font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                        Customer: <span id="checkout-customer-name">Guest</span>
                     </div>
                 </div>
-                <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-2">Payment Method</label>
-                    <select id="select-payment-method" class="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none">
-                        <option value="Cash">Cash</option>
-                        <option value="Points">Loyalty Points</option>
-                        <option value="Card">Card</option>
-                        <option value="E-Wallet">E-Wallet</option>
-                    </select>
-                    <div id="customer-points-info" class="hidden text-[10px] mt-1 font-bold text-blue-600">
-                        Available Points: <span id="available-points-display">0</span>
+
+                <div class="overflow-y-auto flex-1 py-4 space-y-4 pr-1">
+                    <!-- Net Total Display -->
+                    <div class="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-xl border border-blue-100 text-center">
+                        <div class="text-xs uppercase font-bold text-blue-600 tracking-wider">Total Amount Due</div>
+                        <div id="checkout-total" class="text-3xl font-black text-blue-900 my-0.5">₱0.00</div>
+                        <div id="discount-display" class="hidden text-xs text-green-600 font-bold"></div>
+                    </div>
+
+                    <!-- Discount Code Section -->
+                    <div>
+                        <label class="block text-gray-700 text-xs font-bold mb-1">Discount Code</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="discount-code-input" class="shadow-sm border rounded-lg w-full py-2 px-3 text-gray-700 text-sm focus:ring-2 focus:ring-blue-500 uppercase outline-none" placeholder="Enter code">
+                            <button id="btn-apply-discount" class="bg-purple-100 hover:bg-purple-200 text-purple-700 font-bold px-3 py-2 rounded-lg text-xs transition whitespace-nowrap">Apply</button>
+                        </div>
+                    </div>
+
+                    <!-- Primary Payment Method Selector -->
+                    <div>
+                        <label class="block text-gray-700 text-xs font-bold mb-1">Payment Mode / Primary Method</label>
+                        <select id="select-payment-method" class="w-full p-2 border rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="Cash">Cash (Full or Split)</option>
+                            <option value="Card">Card</option>
+                            <option value="E-Wallet">E-Wallet</option>
+                            <option value="Points">Loyalty Points</option>
+                            <option value="Split">Split Payment (Multi-Method)</option>
+                        </select>
+                    </div>
+
+                    <!-- Customer Loyalty Info -->
+                    <div id="customer-points-info" class="p-3 bg-amber-50 rounded-lg border border-amber-200 text-xs flex justify-between items-center">
+                        <div>
+                            <span class="font-bold text-amber-800">Available Points: </span>
+                            <span id="available-points-display" class="font-mono font-bold text-amber-900">0</span>
+                            <span class="text-amber-700"> (₱<span id="available-points-value">0.00</span>)</span>
+                        </div>
+                        <button type="button" id="btn-use-max-points" class="bg-amber-600 hover:bg-amber-700 text-white font-bold px-2.5 py-1 rounded text-[11px] shadow-sm transition">
+                            Use Max
+                        </button>
+                    </div>
+
+                    <!-- Payment Breakdown Inputs -->
+                    <div class="space-y-3 bg-gray-50 p-3.5 rounded-xl border border-gray-200">
+                        <div class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Payment Amounts</div>
+
+                        <!-- Cash Input -->
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label class="text-xs font-bold text-gray-700 flex items-center gap-1">💵 Cash</label>
+                                <div class="flex gap-1">
+                                    <button type="button" class="btn-quick-cash text-[10px] bg-white hover:bg-gray-100 border px-1.5 py-0.5 rounded font-bold text-gray-600" data-action="exact">Exact</button>
+                                    <button type="button" class="btn-quick-cash text-[10px] bg-white hover:bg-gray-100 border px-1.5 py-0.5 rounded font-bold text-gray-600" data-action="100">+100</button>
+                                    <button type="button" class="btn-quick-cash text-[10px] bg-white hover:bg-gray-100 border px-1.5 py-0.5 rounded font-bold text-gray-600" data-action="500">+500</button>
+                                    <button type="button" class="btn-quick-cash text-[10px] bg-white hover:bg-gray-100 border px-1.5 py-0.5 rounded font-bold text-gray-600" data-action="1000">+1000</button>
+                                </div>
+                            </div>
+                            <input type="number" id="input-tendered" class="w-full border rounded-lg py-2 px-3 text-gray-800 text-base text-right font-mono focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder="0.00" step="0.01" min="0">
+                        </div>
+
+                        <!-- Card Input -->
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-1">💳 Card</label>
+                            <input type="number" id="input-card" class="w-full border rounded-lg py-2 px-3 text-gray-800 text-base text-right font-mono focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder="0.00" step="0.01" min="0">
+                        </div>
+
+                        <!-- E-Wallet Input -->
+                        <div>
+                            <label class="block text-xs font-bold text-gray-700 mb-1">📱 E-Wallet</label>
+                            <input type="number" id="input-ewallet" class="w-full border rounded-lg py-2 px-3 text-gray-800 text-base text-right font-mono focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder="0.00" step="0.01" min="0">
+                        </div>
+
+                        <!-- Loyalty Points Input -->
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label class="text-xs font-bold text-gray-700">⭐ Loyalty Points (₱)</label>
+                                <span id="points-redeem-hint" class="text-[10px] text-gray-400 font-medium">1 point = ₱1.00</span>
+                            </div>
+                            <input type="number" id="input-points" class="w-full border rounded-lg py-2 px-3 text-gray-800 text-base text-right font-mono focus:ring-2 focus:ring-blue-500 outline-none bg-white" placeholder="0.00" step="0.01" min="0">
+                        </div>
+                    </div>
+
+                    <!-- Live Calculation Summary -->
+                    <div class="bg-gray-900 text-white p-3.5 rounded-xl space-y-2 text-xs">
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-400 font-bold uppercase">Total Tendered</span>
+                            <span id="summary-tendered-display" class="font-mono font-bold text-sm">₱0.00</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-400 font-bold uppercase">Remaining Due</span>
+                            <span id="summary-remaining-display" class="font-mono font-bold text-sm text-red-400">₱0.00</span>
+                        </div>
+                        <div class="flex justify-between items-center border-t border-gray-800 pt-2">
+                            <span class="text-gray-400 font-bold uppercase">Change Due</span>
+                            <span id="summary-change-display" class="font-mono font-bold text-base text-green-400">₱0.00</span>
+                        </div>
                     </div>
                 </div>
-                <div class="mb-4" id="tendered-container">
-                    <label class="block text-gray-700 text-sm font-bold mb-2">Amount Tendered</label>
-                    <input type="number" id="input-tendered" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 text-xl text-center" step="0.01">
-                </div>
-                <div class="flex justify-between gap-2">
-                    <button id="btn-cancel-checkout" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded w-1/2">Cancel</button>
-                    <button id="btn-confirm-pay" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded w-1/2 disabled:opacity-50 disabled:cursor-not-allowed" disabled>Confirm Pay</button>
+
+                <!-- Footer Buttons -->
+                <div class="flex justify-between gap-3 pt-3 border-t shrink-0">
+                    <button id="btn-cancel-checkout" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2.5 px-4 rounded-lg w-1/2 text-sm transition">Cancel</button>
+                    <button id="btn-confirm-pay" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2.5 px-4 rounded-lg w-1/2 text-sm shadow-md transition disabled:opacity-50 disabled:cursor-not-allowed" disabled>Confirm Pay</button>
                 </div>
             </div>
         </div>
@@ -1546,56 +1623,77 @@ async function renderPosInterface(content) {
     });
 
     const selectPayment = document.getElementById("select-payment-method");
-    selectPayment.addEventListener("change", (e) => {
-        const method = e.target.value;
-        const tenderedContainer = document.getElementById("tendered-container");
-        const btnConfirm = document.getElementById("btn-confirm-pay");
-        const modal = document.getElementById("modal-checkout");
-        const total = parseFloat(modal.dataset.total) || 0;
-        const discount = parseFloat(modal.dataset.discount) || 0;
-        const netTotal = total - discount;
+    if (selectPayment) {
+        selectPayment.addEventListener("change", () => updateCheckoutPayments(true));
+    }
 
-        if (method === "Points") {
-            tenderedContainer.classList.add("hidden");
-            const points = selectedCustomer.loyalty_points || 0;
-            btnConfirm.disabled = points < netTotal;
-            if (points < netTotal) {
-                showToast("Insufficient loyalty points.", true);
-            }
-        } else {
-            tenderedContainer.classList.remove("hidden");
-            const tendered = parseFloat(document.getElementById("input-tendered").value) || 0;
-            btnConfirm.disabled = tendered < netTotal;
+    ["input-tendered", "input-card", "input-ewallet", "input-points"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener("input", () => updateCheckoutPayments(false));
+            el.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    const btnConfirm = document.getElementById("btn-confirm-pay");
+                    if (!btnConfirm.disabled) {
+                        processTransaction();
+                    }
+                }
+            });
         }
     });
 
-    const inputTendered = document.getElementById("input-tendered");
-    inputTendered.addEventListener("input", (e) => {
-        const tendered = parseFloat(e.target.value) || 0;
-        const modal = document.getElementById("modal-checkout");
-        const total = parseFloat(modal.dataset.total) || 0;
-        const discount = parseFloat(modal.dataset.discount) || 0;
-        const netTotal = total - discount;
-
-        const change = tendered - netTotal;
-        const btnConfirm = document.getElementById("btn-confirm-pay");
-
-        if (change >= 0) {
-            btnConfirm.disabled = false;
-        } else {
-            btnConfirm.disabled = true;
-        }
-    });
-
-    inputTendered.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
+    document.querySelectorAll(".btn-quick-cash").forEach(btn => {
+        btn.addEventListener("click", (e) => {
             e.preventDefault();
-            const btnConfirm = document.getElementById("btn-confirm-pay");
-            if (!btnConfirm.disabled) {
-                processTransaction();
+            const action = btn.dataset.action;
+            const modal = document.getElementById("modal-checkout");
+            const total = parseFloat(modal.dataset.total) || 0;
+            const discount = parseFloat(modal.dataset.discount) || 0;
+            const netTotal = Math.max(0, total - discount);
+
+            const cardVal = parseFloat(document.getElementById("input-card").value) || 0;
+            const ewalletVal = parseFloat(document.getElementById("input-ewallet").value) || 0;
+            const pointsVal = parseFloat(document.getElementById("input-points").value) || 0;
+            const nonCash = cardVal + ewalletVal + pointsVal;
+            const cashNeeded = Math.max(0, netTotal - nonCash);
+
+            const inputCash = document.getElementById("input-tendered");
+            let currentCash = parseFloat(inputCash.value) || 0;
+
+            if (action === "exact") {
+                inputCash.value = cashNeeded.toFixed(2);
+            } else {
+                const addAmt = parseFloat(action) || 0;
+                inputCash.value = (currentCash + addAmt).toFixed(2);
             }
-        }
+            updateCheckoutPayments(false);
+        });
     });
+
+    const btnUseMaxPoints = document.getElementById("btn-use-max-points");
+    if (btnUseMaxPoints) {
+        btnUseMaxPoints.addEventListener("click", (e) => {
+            e.preventDefault();
+            if (selectedCustomer.id === "Guest") {
+                showToast("Customer selection required to redeem points.", true);
+                return;
+            }
+            const modal = document.getElementById("modal-checkout");
+            const total = parseFloat(modal.dataset.total) || 0;
+            const discount = parseFloat(modal.dataset.discount) || 0;
+            const netTotal = Math.max(0, total - discount);
+
+            const availPoints = parseFloat(selectedCustomer.loyalty_points) || 0;
+            const cardVal = parseFloat(document.getElementById("input-card").value) || 0;
+            const ewalletVal = parseFloat(document.getElementById("input-ewallet").value) || 0;
+            const remainingForPoints = Math.max(0, netTotal - cardVal - ewalletVal);
+
+            const pointsToUse = Math.min(availPoints, remainingForPoints);
+            document.getElementById("input-points").value = pointsToUse > 0 ? pointsToUse.toFixed(2) : "";
+            updateCheckoutPayments(false);
+        });
+    }
 
     document.getElementById("btn-confirm-pay").addEventListener("click", processTransaction);
 
@@ -2396,6 +2494,109 @@ function showToast(message, isError = false) {
     showGlobalToast(message, isError ? 'error' : 'success');
 }
 
+function updateCheckoutPayments(triggeredBySelect = false) {
+    const modal = document.getElementById("modal-checkout");
+    if (!modal || modal.classList.contains("hidden")) return;
+
+    const total = parseFloat(modal.dataset.total) || 0;
+    const discount = parseFloat(modal.dataset.discount) || 0;
+    const netTotal = Math.max(0, total - discount);
+
+    const selectPayment = document.getElementById("select-payment-method");
+    const inputCash = document.getElementById("input-tendered");
+    const inputCard = document.getElementById("input-card");
+    const inputEwallet = document.getElementById("input-ewallet");
+    const inputPoints = document.getElementById("input-points");
+
+    const btnConfirm = document.getElementById("btn-confirm-pay");
+
+    const availPoints = selectedCustomer.id !== "Guest" ? (parseFloat(selectedCustomer.loyalty_points) || 0) : 0;
+
+    if (triggeredBySelect && selectPayment) {
+        const mode = selectPayment.value;
+        if (mode === "Cash") {
+            inputCash.value = netTotal > 0 ? netTotal.toFixed(2) : "";
+            inputCard.value = "";
+            inputEwallet.value = "";
+            inputPoints.value = "";
+        } else if (mode === "Card") {
+            inputCash.value = "";
+            inputCard.value = netTotal > 0 ? netTotal.toFixed(2) : "";
+            inputEwallet.value = "";
+            inputPoints.value = "";
+        } else if (mode === "E-Wallet") {
+            inputCash.value = "";
+            inputCard.value = "";
+            inputEwallet.value = netTotal > 0 ? netTotal.toFixed(2) : "";
+            inputPoints.value = "";
+        } else if (mode === "Points") {
+            if (selectedCustomer.id === "Guest") {
+                showToast("Please select a registered customer to redeem points.", true);
+                selectPayment.value = "Cash";
+                return updateCheckoutPayments(true);
+            }
+            const pointsToUse = Math.min(availPoints, netTotal);
+            inputCash.value = "";
+            inputCard.value = "";
+            inputEwallet.value = "";
+            inputPoints.value = pointsToUse > 0 ? pointsToUse.toFixed(2) : "";
+            if (availPoints < netTotal) {
+                showToast(`Points cover ₱${pointsToUse.toFixed(2)}. Enter cash/card for remaining balance.`, false);
+            }
+        }
+    }
+
+    let cashVal = parseFloat(inputCash.value) || 0;
+    let cardVal = parseFloat(inputCard.value) || 0;
+    let ewalletVal = parseFloat(inputEwallet.value) || 0;
+    let pointsVal = parseFloat(inputPoints.value) || 0;
+
+    if (pointsVal > 0) {
+        if (selectedCustomer.id === "Guest") {
+            showToast("Customer selection required to redeem points.", true);
+            pointsVal = 0;
+            inputPoints.value = "";
+        } else if (pointsVal > availPoints) {
+            showToast(`Customer only has ${availPoints} available points.`, true);
+            pointsVal = availPoints;
+            inputPoints.value = availPoints > 0 ? availPoints.toFixed(2) : "";
+        }
+    }
+
+    const activeMethods = [];
+    if (cashVal > 0) activeMethods.push("Cash");
+    if (cardVal > 0) activeMethods.push("Card");
+    if (ewalletVal > 0) activeMethods.push("E-Wallet");
+    if (pointsVal > 0) activeMethods.push("Points");
+
+    if (!triggeredBySelect && selectPayment) {
+        if (activeMethods.length > 1) {
+            selectPayment.value = "Split";
+        } else if (activeMethods.length === 1) {
+            selectPayment.value = activeMethods[0];
+        }
+    }
+
+    const nonCash = cardVal + ewalletVal + pointsVal;
+    const totalTendered = cashVal + nonCash;
+    const remainingCashNeeded = Math.max(0, netTotal - nonCash);
+    const remainingBalance = Math.max(0, netTotal - totalTendered);
+    const change = cashVal > remainingCashNeeded ? (cashVal - remainingCashNeeded) : 0;
+
+    const summaryTendered = document.getElementById("summary-tendered-display");
+    const summaryRemaining = document.getElementById("summary-remaining-display");
+    const summaryChange = document.getElementById("summary-change-display");
+
+    if (summaryTendered) summaryTendered.textContent = `₱${totalTendered.toFixed(2)}`;
+    if (summaryRemaining) {
+        summaryRemaining.textContent = `₱${remainingBalance.toFixed(2)}`;
+        summaryRemaining.className = `font-mono font-bold text-sm ${remainingBalance > 0 ? 'text-red-400' : 'text-green-400'}`;
+    }
+    if (summaryChange) summaryChange.textContent = `₱${change.toFixed(2)}`;
+
+    btnConfirm.disabled = (totalTendered < netTotal - 0.001);
+}
+
 function openCheckout() {
     if (!checkPermission("pos", "write")) {
         showToast("You do not have permission to process sales.", true);
@@ -2408,9 +2609,10 @@ function openCheckout() {
     const modal = document.getElementById("modal-checkout");
     const totalEl = document.getElementById("checkout-total");
     const inputTendered = document.getElementById("input-tendered");
-    const btnConfirm = document.getElementById("btn-confirm-pay");
     const pointsInfo = document.getElementById("customer-points-info");
     const pointsDisplay = document.getElementById("available-points-display");
+    const pointsValue = document.getElementById("available-points-value");
+    const customerNameEl = document.getElementById("checkout-customer-name");
     const selectPayment = document.getElementById("select-payment-method");
 
     modal.dataset.total = total;
@@ -2422,19 +2624,25 @@ function openCheckout() {
     document.getElementById("discount-display").textContent = "";
     document.getElementById("discount-display").classList.add("hidden");
 
-    inputTendered.value = "";
-    btnConfirm.disabled = true;
-    selectPayment.value = "Cash";
-    document.getElementById("tendered-container").classList.remove("hidden");
+    inputTendered.value = total.toFixed(2);
+    document.getElementById("input-card").value = "";
+    document.getElementById("input-ewallet").value = "";
+    document.getElementById("input-points").value = "";
+    if (selectPayment) selectPayment.value = "Cash";
+
+    if (customerNameEl) customerNameEl.textContent = selectedCustomer.name || "Guest";
 
     if (selectedCustomer.id !== "Guest") {
         pointsInfo.classList.remove("hidden");
-        pointsDisplay.textContent = (selectedCustomer.loyalty_points || 0).toLocaleString();
+        const pts = parseFloat(selectedCustomer.loyalty_points) || 0;
+        pointsDisplay.textContent = pts.toLocaleString();
+        if (pointsValue) pointsValue.textContent = pts.toFixed(2);
     } else {
         pointsInfo.classList.add("hidden");
     }
 
     modal.classList.remove("hidden");
+    updateCheckoutPayments(false);
     setTimeout(() => inputTendered.focus(), 100);
 }
 
@@ -2442,14 +2650,10 @@ function closeCheckout() {
     document.getElementById("modal-checkout").classList.add("hidden");
 }
 
-
-
 async function processTransaction() {
     const btnConfirm = document.getElementById("btn-confirm-pay");
     const inputTendered = document.getElementById("input-tendered");
-    const paymentMethod = document.getElementById("select-payment-method").value;
 
-    // Prevent double submission
     if (btnConfirm.hasAttribute("data-processing")) return;
 
     btnConfirm.setAttribute("data-processing", "true");
@@ -2463,16 +2667,59 @@ async function processTransaction() {
     const discountAmount = parseFloat(document.getElementById("modal-checkout").dataset.discount || 0);
     const discountCode = document.getElementById("modal-checkout").dataset.discountCode || "";
 
-    const total = originalTotal - discountAmount; // Net Total
-    const tendered = paymentMethod === "Points" ? total : (parseFloat(inputTendered.value) || 0);
+    const total = Math.max(0, originalTotal - discountAmount);
 
-    if (paymentMethod !== "Points" && tendered < total) {
+    const cashVal = parseFloat(document.getElementById("input-tendered").value) || 0;
+    const cardVal = parseFloat(document.getElementById("input-card").value) || 0;
+    const ewalletVal = parseFloat(document.getElementById("input-ewallet").value) || 0;
+    const pointsVal = parseFloat(document.getElementById("input-points").value) || 0;
+
+    const paymentSplit = {};
+    if (cashVal > 0) paymentSplit["Cash"] = cashVal;
+    if (cardVal > 0) paymentSplit["Card"] = cardVal;
+    if (ewalletVal > 0) paymentSplit["E-Wallet"] = ewalletVal;
+    if (pointsVal > 0) paymentSplit["Points"] = pointsVal;
+
+    const activeMethods = Object.keys(paymentSplit);
+    let finalPaymentMethod = "Cash";
+    if (activeMethods.length === 1) {
+        finalPaymentMethod = activeMethods[0];
+    } else if (activeMethods.length > 1) {
+        finalPaymentMethod = "Split";
+    }
+
+    const nonCash = cardVal + ewalletVal + pointsVal;
+    const totalTendered = cashVal + nonCash;
+    const remainingCashNeeded = Math.max(0, total - nonCash);
+    const change = cashVal > remainingCashNeeded ? (cashVal - remainingCashNeeded) : 0;
+
+    if (totalTendered < total - 0.001) {
         showToast("Amount tendered is insufficient.", true);
         btnConfirm.removeAttribute("data-processing");
         btnConfirm.disabled = false;
         inputTendered.disabled = false;
         btnConfirm.textContent = originalText;
         return;
+    }
+
+    if (pointsVal > 0) {
+        if (selectedCustomer.id === "Guest") {
+            showToast("Cannot redeem points for Guest customer.", true);
+            btnConfirm.removeAttribute("data-processing");
+            btnConfirm.disabled = false;
+            inputTendered.disabled = false;
+            btnConfirm.textContent = originalText;
+            return;
+        }
+        const availPoints = parseFloat(selectedCustomer.loyalty_points) || 0;
+        if (pointsVal > availPoints) {
+            showToast(`Insufficient loyalty points (${availPoints} available).`, true);
+            btnConfirm.removeAttribute("data-processing");
+            btnConfirm.disabled = false;
+            inputTendered.disabled = false;
+            btnConfirm.textContent = originalText;
+            return;
+        }
     }
 
     const user = JSON.parse(localStorage.getItem('pos_user'));
@@ -2484,12 +2731,14 @@ async function processTransaction() {
 
     const transaction = {
         id: generateUUID(),
-        items: JSON.parse(JSON.stringify(posCart)), // Deep copy
+        items: JSON.parse(JSON.stringify(posCart)),
         total_amount: total,
-        amount_tendered: tendered,
-        change: tendered - total,
+        amount_tendered: totalTendered,
+        change: change,
         tax_amount: taxAmount,
-        payment_method: paymentMethod,
+        payment_method: finalPaymentMethod,
+        payment_split: paymentSplit,
+        points_redeemed: pointsVal,
         user_email: user ? user.email : "Guest",
         user_name: user ? user.name : "Guest",
         customer_id: selectedCustomer.id,
@@ -2529,9 +2778,10 @@ async function processTransaction() {
         // 3. Update Customer Points
         if (selectedCustomer.id !== "Guest") {
             const updatedCustomer = { ...selectedCustomer };
-            updatedCustomer.loyalty_points = (updatedCustomer.loyalty_points || 0) + pointsEarned;
-            if (paymentMethod === "Points") updatedCustomer.loyalty_points -= total;
+            const currentPts = parseFloat(updatedCustomer.loyalty_points) || 0;
+            updatedCustomer.loyalty_points = Math.max(0, currentPts - pointsVal) + pointsEarned;
             await Repository.upsert('customers', updatedCustomer);
+            selectedCustomer.loyalty_points = updatedCustomer.loyalty_points;
         }
 
         // Auto-Record Discount as Expense if configured
@@ -3305,8 +3555,20 @@ async function printReceipt(tx, isReprint = false) {
                 ${showHR ? '<div class="hr"></div>' : ''}
                 <table>
                     <tr><td class="bold">TOTAL</td><td class="text-right bold">₱${tx.total_amount.toFixed(2)}</td></tr>
-                    <tr><td>Payment (${tx.payment_method})</td><td class="text-right">₱${tx.amount_tendered.toFixed(2)}</td></tr>
-                    <tr><td>Change</td><td class="text-right">₱${tx.change.toFixed(2)}</td></tr>
+                    ${(() => {
+                        let rows = "";
+                        if (tx.payment_split && typeof tx.payment_split === "object" && Object.keys(tx.payment_split).length > 0) {
+                            Object.entries(tx.payment_split).forEach(([method, amt]) => {
+                                if (parseFloat(amt) > 0) {
+                                    rows += `<tr><td>Payment (${method})</td><td class="text-right">₱${parseFloat(amt).toFixed(2)}</td></tr>`;
+                                }
+                            });
+                        } else {
+                            rows += `<tr><td>Payment (${tx.payment_method || 'Cash'})</td><td class="text-right">₱${(tx.amount_tendered || 0).toFixed(2)}</td></tr>`;
+                        }
+                        rows += `<tr><td>Change</td><td class="text-right">₱${(tx.change || 0).toFixed(2)}</td></tr>`;
+                        return rows;
+                    })()}
                 </table>
                 <div class="footer-sec text-center">
                     <div style="white-space: pre-wrap;">${footerText}</div>

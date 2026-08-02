@@ -90,10 +90,20 @@ export async function printTransactionReceipt(tx, isReplacement = false, isRepri
                 <div class="hr"></div>
                 <table>
                     <tr><td class="bold">TOTAL</td><td class="text-right bold">₱${total.toFixed(2)}</td></tr>
-                    ${!isReplacement ? `
-                        <tr><td>Payment (${tx.payment_method})</td><td class="text-right">₱${tx.amount_tendered.toFixed(2)}</td></tr>
-                        <tr><td>Change</td><td class="text-right">₱${tx.change ? tx.change.toFixed(2) : '0.00'}</td></tr>
-                    ` : `
+                    ${!isReplacement ? (() => {
+                        let rows = "";
+                        if (tx.payment_split && typeof tx.payment_split === "object" && Object.keys(tx.payment_split).length > 0) {
+                            Object.entries(tx.payment_split).forEach(([method, amt]) => {
+                                if (parseFloat(amt) > 0) {
+                                    rows += `<tr><td>Payment (${method})</td><td class="text-right">₱${parseFloat(amt).toFixed(2)}</td></tr>`;
+                                }
+                            });
+                        } else {
+                            rows += `<tr><td>Payment (${tx.payment_method || 'Cash'})</td><td class="text-right">₱${(tx.amount_tendered || 0).toFixed(2)}</td></tr>`;
+                        }
+                        rows += `<tr><td>Change</td><td class="text-right">₱${tx.change ? tx.change.toFixed(2) : '0.00'}</td></tr>`;
+                        return rows;
+                    })() : `
                         <tr><td colspan="2" style="font-size: 9px; font-style: italic;">* Adjusted for returns</td></tr>
                     `}
                 </table>
