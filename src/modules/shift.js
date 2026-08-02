@@ -121,22 +121,14 @@ export async function getShiftFinancials(shift = currentShift, txList = null) {
     const allTransactions = txList || await Repository.getAll('transactions');
     const transactions = allTransactions.filter(tx => {
         const txTime = new Date(tx.timestamp);
-        if (txTime < startTime || txTime > endTime || tx.user_email !== userEmail || tx.is_voided) {
-            return false;
-        }
-        if (tx.payment_split && typeof tx.payment_split === 'object') {
-            return (parseFloat(tx.payment_split.Cash || tx.payment_split.cash || 0) > 0);
-        }
-        return (tx.payment_method?.toLowerCase() === 'cash' || !tx.payment_method);
+        return txTime >= startTime && txTime <= endTime &&
+            tx.user_email === userEmail && !tx.is_voided &&
+            (tx.payment_method?.toLowerCase() === 'cash' || !tx.payment_method);
     });
 
     let totalSales = 0;
     transactions.forEach(tx => {
-        if (tx.payment_split && typeof tx.payment_split === 'object') {
-            totalSales += parseFloat(tx.payment_split.Cash || tx.payment_split.cash || 0);
-        } else {
-            totalSales += parseFloat(tx.total_amount || 0);
-        }
+        totalSales += parseFloat(tx.total_amount || 0);
     });
 
     // Add adjustments

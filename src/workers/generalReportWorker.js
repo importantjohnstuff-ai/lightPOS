@@ -45,16 +45,9 @@ function generateSalesSummary(payload) {
             totalRevenue += parseFloat(tx.total_amount || 0);
 
             // Payment Method Breakdown
-            if (tx.payment_split && typeof tx.payment_split === 'object') {
-                Object.entries(tx.payment_split).forEach(([method, amt]) => {
-                    if (!paymentMethods[method]) paymentMethods[method] = 0;
-                    paymentMethods[method] += parseFloat(amt || 0);
-                });
-            } else {
-                const method = tx.payment_method || 'Cash';
-                if (!paymentMethods[method]) paymentMethods[method] = 0;
-                paymentMethods[method] += parseFloat(tx.total_amount || 0);
-            }
+            const method = tx.payment_method || 'Cash';
+            if (!paymentMethods[method]) paymentMethods[method] = 0;
+            paymentMethods[method] += parseFloat(tx.total_amount || 0);
 
             // Line Item Analysis for Cost & Category
             if (tx.items && Array.isArray(tx.items)) {
@@ -129,13 +122,9 @@ function generateShiftReports(payload) {
 
                 // Regular Sales matching normalized user and time
                 if (txUserNormalized === userEmailNormalized && txTime >= sStart && txTime <= sEnd && !tx.is_voided) {
-                    if (tx.payment_split && typeof tx.payment_split === 'object') {
-                        shiftSales += parseFloat(tx.payment_split.Cash || tx.payment_split.cash || 0);
-                    } else {
-                        const pm = (tx.payment_method || 'Cash').toLowerCase();
-                        if (pm === 'cash') {
-                            shiftSales += parseFloat(tx.total_amount || 0);
-                        }
+                    const pm = (tx.payment_method || 'Cash').toLowerCase();
+                    if (pm === 'cash') {
+                        shiftSales += parseFloat(tx.total_amount || 0);
                     }
                 }
 
@@ -278,16 +267,9 @@ function generateExportData(payload) {
             const gross = parseFloat(tx.total_amount || 0);
             day.grossSales += gross;
 
-            if (tx.payment_split && typeof tx.payment_split === 'object') {
-                Object.entries(tx.payment_split).forEach(([method, amt]) => {
-                    if (!day.paymentBreakdown[method]) day.paymentBreakdown[method] = 0;
-                    day.paymentBreakdown[method] += parseFloat(amt || 0);
-                });
-            } else {
-                const method = tx.payment_method || 'Cash';
-                if (!day.paymentBreakdown[method]) day.paymentBreakdown[method] = 0;
-                day.paymentBreakdown[method] += gross;
-            }
+            const method = tx.payment_method || 'Cash';
+            if (!day.paymentBreakdown[method]) day.paymentBreakdown[method] = 0;
+            day.paymentBreakdown[method] += gross;
 
             if (tx.items && Array.isArray(tx.items)) {
                 tx.items.forEach(li => {

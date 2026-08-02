@@ -1431,23 +1431,16 @@ function showTransactionDetails(tx, shift) {
 
     const items = tx.items || [];
 
-    let paymentDetailText = tx.payment_method || 'Cash';
-    if (tx.payment_split && typeof tx.payment_split === 'object' && Object.keys(tx.payment_split).length > 1) {
-        paymentDetailText = Object.entries(tx.payment_split)
-            .map(([m, a]) => `${m}: ₱${parseFloat(a).toFixed(2)}`)
-            .join(' + ');
-    }
-
     contentContainer.innerHTML = `
-        <div class="p-4 bg-white rounded-lg border shadow-sm max-w-2xl mx-auto mt-4">
+        < div class="p-4 bg-white rounded-lg border shadow-sm max-w-2xl mx-auto mt-4" >
             <div class="flex justify-between items-center mb-4 border-b pb-4">
                 <div>
                     <div class="text-sm text-gray-500">Date</div>
                     <div class="font-bold">${new Date(tx.timestamp).toLocaleString()}</div>
                 </div>
                  <div class="text-right">
-                    <div class="text-sm text-gray-500">Payment Method</div>
-                    <div class="font-bold text-blue-600 uppercase text-xs">${paymentDetailText}</div>
+                    <div class="text-sm text-gray-500">Payment</div>
+                    <div class="font-bold text-blue-600 uppercase">${tx.payment_method || 'Cash'}</div>
                 </div>
             </div>
 
@@ -1478,21 +1471,16 @@ function showTransactionDetails(tx, shift) {
                         <td colspan="3" class="py-3 px-3 text-right font-bold text-gray-600">Total</td>
                         <td class="py-3 px-3 text-right font-bold text-xl text-blue-700">₱${(tx.total_amount || 0).toFixed(2)}</td>
                     </tr>
-                    ${tx.payment_split && typeof tx.payment_split === 'object' && Object.keys(tx.payment_split).length > 0 ? Object.entries(tx.payment_split).map(([m, a]) => `
+                     ${tx.cash_received ? `
                     <tr>
-                        <td colspan="3" class="py-1 px-3 text-right text-gray-500 text-xs">${m} Paid</td>
-                        <td class="py-1 px-3 text-right text-gray-600 text-xs">₱${parseFloat(a).toFixed(2)}</td>
+                        <td colspan="3" class="py-1 px-3 text-right text-gray-500 text-xs">Cash Tendered</td>
+                        <td class="py-1 px-3 text-right text-gray-600 text-xs">₱${tx.cash_received.toFixed(2)}</td>
                     </tr>
-                    `).join('') : `
-                    <tr>
-                        <td colspan="3" class="py-1 px-3 text-right text-gray-500 text-xs">Amount Tendered</td>
-                        <td class="py-1 px-3 text-right text-gray-600 text-xs">₱${(tx.amount_tendered || tx.cash_received || 0).toFixed(2)}</td>
-                    </tr>
-                    `}
                     <tr>
                         <td colspan="3" class="py-1 px-3 text-right text-gray-500 text-xs">Change</td>
-                        <td class="py-1 px-3 text-right text-gray-600 text-xs font-bold text-green-600">₱${(tx.change || 0).toFixed(2)}</td>
+                        <td class="py-1 px-3 text-right text-gray-600 text-xs">₱${(tx.change || 0).toFixed(2)}</td>
                     </tr>
+                    ` : ''}
                 </tfoot>
             </table>
         </div >
