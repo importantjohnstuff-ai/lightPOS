@@ -683,58 +683,181 @@ export async function showNonCashPaymentsModal(shift = currentShift) {
             tx.user_email === userEmail && !tx.is_voided && isNonCash;
     }).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-    let totalNonCash = 0;
+    let grandTotalNonCash = 0;
+    let totalCard = 0;
+    let totalEWallet = 0;
+    let totalPoints = 0;
+    let totalOther = 0;
+
     const rows = nonCashTxs.map(tx => {
         const methodRaw = tx.payment_method || 'Card';
         const method = methodRaw.toLowerCase();
-        let amount = 0;
-        if (method === 'cash + points') {
-            amount = parseFloat(tx.points_amount || (tx.points_used * 1.0) || 0);
-        } else if (method === 'points') {
-            amount = parseFloat(tx.total_amount || tx.points_amount || 0);
-        } else {
-            amount = parseFloat(tx.total_amount || 0);
+        const totalAmt = parseFloat(tx.total_amount || 0);
+        const pointsAmt = parseFloat(tx.points_amount || (tx.points_used * 1.0) || 0);
+
+        const components = [];
+
+        // 1. Points Component
+        if (pointsAmt > 0 && (method.includes('points') || tx.points_used > 0)) {
+            components.push({
+                type: 'Points',
+                name: 'Points',
+                amount: pointsAmt,
+                badgeBg: 'bg-amber-100 text-amber-800 border-amber-300',
+                textClass: 'text-amber-700 font-black'
+            });
+            totalPoints += pointsAmt;
         }
-        totalNonCash += amount;
+
+        // 2. Primary Non-Cash Component (Card, E-Wallet, Bank, etc.)
+        let primaryName = methodRaw;
+        if (methodRaw.includes('+')) {
+            const parts = methodRaw.split('+').map(p => p.trim());
+            primaryName = parts.find(p => p.toLowerCase() !== 'points') || 'Cash';
+        }
+
+        const primaryLower = primaryName.toLowerCase();
+        if (primaryLower !== 'cash' && primaryLower !== 'points') {
+            let primaryAmt = totalAmt;
+            if (pointsAmt > 0 && method.includes('points')) {
+                primaryAmt = Math.max(0, totalAmt - pointsAmt);
+            }
+
+            if (primaryAmt > 0) {
+                if (primaryLower.includes('card') || primaryLower.includes('bank') || primaryLower.includes('debit') || primaryLower.includes('credit')) {
+                    components.unshift({
+                        type: 'Card / Bank',
+                        name: primaryName,
+                        amount: primaryAmt,
+                        badgeBg: 'bg-blue-100 text-blue-800 border-blue-300',
+                        textClass: 'text-blue-700 font-black'
+                    });
+                    totalCard += primaryAmt;
+                } else if (primaryLower.includes('wallet') || primaryLower.includes('gcash') || primaryLower.includes('paymaya') || primaryLower.includes('maya')) {
+                    components.unshift({
+                        type: 'E-Wallet',
+                        name: primaryName,
+                        amount: primaryAmt,
+                        badgeBg: 'bg-purple-100 text-purple-800 border-purple-300',
+                        textClass: 'text-purple-700 font-black'
+                    });
+                    totalEWallet += primaryAmt;
+                } else {
+                    components.unshift({
+                        type: primaryName,
+                        name: primaryName,
+                        amount: primaryAmt,
+                        badgeBg: 'bg-teal-100 text-teal-800 border-teal-300',
+                        textClass: 'text-teal-700 font-black'
+                    });
+                    totalOther += primaryAmt;
+                }
+            }
+        }
+
+        const txNonCashTotal = components.reduce((sum, c) => sum + c.amount, 0);
+        grandTotalNonCash += txNonCashTotal;
 
         const timeStr = new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const dateStr = new Date(tx.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' });
 
-        let badgeColor = "bg-teal-100 text-teal-800 border-teal-200";
-        if (method.includes("card")) badgeColor = "bg-blue-100 text-blue-800 border-blue-200";
-        else if (method.includes("e-wallet")) badgeColor = "bg-purple-100 text-purple-800 border-purple-200";
-        else if (method.includes("points")) badgeColor = "bg-amber-100 text-amber-800 border-amber-200";
+        const componentChipsHtml = components.map(c => `
+            <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-bold ${c.badgeBg}">
+                <span>${c.name}:</span>
+                <span class="${c.textClass}">₱${c.amount.toFixed(2)}</span>
+            </div>
+        `).join('');
 
         return `
-            <div class="flex justify-between items-center py-2.5 px-3 border-b last:border-0 hover:bg-gray-50 transition">
-                <div>
-                    <div class="flex items-center gap-2">
-                        <span class="font-bold text-gray-800 text-sm">${methodRaw}</span>
-                        <span class="text-[10px] px-2 py-0.5 rounded font-bold border uppercase ${badgeColor}">${methodRaw}</span>
+            <div class="p-3.5 border-b last:border-0 hover:bg-gray-50 transition">
+                <div class="flex justify-between items-start mb-1.5">
+                    <div>
+                        <div class="flex items-center gap-2">
+                            <span class="font-bold text-gray-800 text-sm">${methodRaw}</span>
+                            ${components.length > 1 ? '<span class="text-[9px] px-1.5 py-0.5 rounded font-black border uppercase bg-indigo-50 text-indigo-700 border-indigo-200">Split Tender</span>' : ''}
+                        </div>
+                        <div class="text-xs text-gray-500 mt-0.5">
+                            ${dateStr} at ${timeStr} • Customer: ${tx.customer_name || tx.customer_id || 'Guest'}
+                        </div>
                     </div>
-                    <div class="text-xs text-gray-500 mt-0.5">
-                        ${dateStr} at ${timeStr} • Customer: ${tx.customer_name || tx.customer_id || 'Guest'}
+                    <div class="text-right">
+                        <div class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Tx Non-Cash</div>
+                        <div class="font-black text-gray-900 text-base">₱${txNonCashTotal.toFixed(2)}</div>
                     </div>
                 </div>
-                <div class="font-bold text-teal-700 text-base">₱${amount.toFixed(2)}</div>
+                <div class="flex flex-wrap gap-2 mt-2 pt-2 border-t border-gray-100">
+                    ${componentChipsHtml}
+                </div>
             </div>
         `;
     }).join("");
 
+    const summaryCategoryChips = [];
+    if (totalCard > 0) {
+        summaryCategoryChips.push(`
+            <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-blue-50 border-blue-200 text-xs font-bold text-blue-900">
+                <span class="w-2 h-2 rounded-full bg-blue-500"></span>
+                <span>Card / Bank:</span>
+                <span class="font-black text-blue-700">₱${totalCard.toFixed(2)}</span>
+            </div>
+        `);
+    }
+    if (totalEWallet > 0) {
+        summaryCategoryChips.push(`
+            <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-purple-50 border-purple-200 text-xs font-bold text-purple-900">
+                <span class="w-2 h-2 rounded-full bg-purple-500"></span>
+                <span>E-Wallet:</span>
+                <span class="font-black text-purple-700">₱${totalEWallet.toFixed(2)}</span>
+            </div>
+        `);
+    }
+    if (totalPoints > 0) {
+        summaryCategoryChips.push(`
+            <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-amber-50 border-amber-200 text-xs font-bold text-amber-900">
+                <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                <span>Points:</span>
+                <span class="font-black text-amber-700">₱${totalPoints.toFixed(2)}</span>
+            </div>
+        `);
+    }
+    if (totalOther > 0) {
+        summaryCategoryChips.push(`
+            <div class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border bg-teal-50 border-teal-200 text-xs font-bold text-teal-900">
+                <span class="w-2 h-2 rounded-full bg-teal-500"></span>
+                <span>Other Non-Cash:</span>
+                <span class="font-black text-teal-700">₱${totalOther.toFixed(2)}</span>
+            </div>
+        `);
+    }
+
     const div = document.createElement("div");
     div.className = "fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-[70]";
     div.innerHTML = `
-        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg max-h-[80vh] flex flex-col">
-            <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2 border-b pb-3">
-                <svg class="w-6 h-6 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                Non-Cash Payments (Card / E-Wallet / Points)
-            </h3>
-            <div class="flex-1 overflow-y-auto mb-4 border rounded bg-white">
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-xl max-h-[85vh] flex flex-col">
+            <div class="flex justify-between items-center border-b pb-3 mb-3">
+                <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+                    <svg class="w-6 h-6 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                    Non-Cash Shift Payments
+                </h3>
+                <button class="text-gray-400 hover:text-gray-600 text-2xl font-bold" onclick="this.closest('.fixed').remove()">&times;</button>
+            </div>
+
+            ${summaryCategoryChips.length > 0 ? `
+                <div class="flex flex-wrap gap-2 mb-3 p-3 bg-gray-50 rounded-xl border border-gray-200">
+                    ${summaryCategoryChips.join('')}
+                </div>
+            ` : ''}
+
+            <div class="flex-1 overflow-y-auto mb-4 border rounded-xl bg-white shadow-inner">
                 ${nonCashTxs.length > 0 ? rows : '<div class="p-8 text-center text-gray-400 italic">No non-cash payments recorded in this shift.</div>'}
             </div>
+
             <div class="flex justify-between items-center pt-3 border-t">
-                <div class="font-bold text-lg text-teal-800">Total: ₱${totalNonCash.toFixed(2)}</div>
-                <button class="bg-gray-800 text-white px-5 py-2 rounded-lg font-bold hover:bg-gray-700 transition" onclick="this.closest('.fixed').remove()">Close</button>
+                <div>
+                    <div class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Grand Non-Cash Total</div>
+                    <div class="font-black text-xl text-teal-800">₱${grandTotalNonCash.toFixed(2)}</div>
+                </div>
+                <button class="bg-gray-800 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-black transition shadow" onclick="this.closest('.fixed').remove()">Close</button>
             </div>
         </div>
     `;
