@@ -111,7 +111,7 @@ export function requireShift(callback) {
 }
 
 export async function getShiftFinancials(shift = currentShift, txList = null) {
-    if (!shift) return { opening: 0, sales: 0, adjustments: 0, returns_net: 0, remittances: 0, expenses: 0, gross_accountability: 0, expected_in_drawer: 0 };
+    if (!shift) return { opening: 0, sales: 0, adjustments: 0, returns_net: 0, remittances: 0, expenses: 0, non_cash: 0, gross_accountability: 0, expected_in_drawer: 0 };
 
     // Query local Dexie transactions for this user since shift start
     const startTime = new Date(shift.start_time);
@@ -129,6 +129,27 @@ export async function getShiftFinancials(shift = currentShift, txList = null) {
     let totalSales = 0;
     transactions.forEach(tx => {
         totalSales += parseFloat(tx.total_amount || 0);
+    });
+
+    // Calculate Non-Cash Transactions (Card, E-Wallet, Points, Split)
+    const nonCashTransactions = allTransactions.filter(tx => {
+        const txTime = new Date(tx.timestamp);
+        const method = (tx.payment_method || 'Cash').toLowerCase();
+        const isNonCashMethod = method !== 'cash' || (tx.points_used > 0 || tx.points_amount > 0);
+        return txTime >= startTime && txTime <= endTime &&
+            tx.user_email === userEmail && !tx.is_voided && isNonCashMethod;
+    });
+
+    let totalNonCash = 0;
+    nonCashTransactions.forEach(tx => {
+        const method = (tx.payment_method || 'Cash').toLowerCase();
+        if (method === 'cash + points') {
+            totalNonCash += parseFloat(tx.points_amount || (tx.points_used * 1.0) || 0);
+        } else if (method === 'points') {
+            totalNonCash += parseFloat(tx.total_amount || tx.points_amount || 0);
+        } else {
+            totalNonCash += parseFloat(tx.total_amount || 0);
+        }
     });
 
     // Add adjustments
@@ -172,6 +193,7 @@ export async function getShiftFinancials(shift = currentShift, txList = null) {
         adjustments: totalAdjustments,
         remittances: totalRemittances,
         expenses: totalExpenses,
+        non_cash: totalNonCash,
         returns_net: totalExchangeCash,
         gross_accountability: gross,
         expected_in_drawer: expected_in_drawer
@@ -494,6 +516,13 @@ async function selectShift(shift) {
                         </td>
                         <td class="border p-2 text-right font-bold text-red-600">₱${financials.expenses.toFixed(2)}</td>
                     </tr>
+                    <tr class="bg-white border-b hover:bg-teal-50 cursor-pointer transition-colors" id="row-detail-non-cash">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2 flex items-center justify-between">
+                            <span>Non-Cash Payments</span>
+                             <svg class="w-4 h-4 text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                        </td>
+                        <td class="border p-2 text-right font-bold text-teal-600">₱${(financials.non_cash || 0).toFixed(2)}</td>
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -536,6 +565,7 @@ async function selectShift(shift) {
     document.getElementById("row-detail-cash-count")?.addEventListener("click", () => showCashBreakdownModal(shift));
     document.getElementById("row-detail-precounted")?.addEventListener("click", () => showPrecountedModal(shift));
     document.getElementById("row-detail-expenses")?.addEventListener("click", () => showShiftExpensesModal(shift));
+    document.getElementById("row-detail-non-cash")?.addEventListener("click", () => showNonCashPaymentsModal(shift));
 }
 
 function showCashBreakdownModal(shift) {
@@ -631,6 +661,80 @@ function showShiftExpensesModal(shift) {
              <div class="flex justify-end pt-2 border-t">
                  <div class="flex-1 text-left font-bold text-lg text-red-800 self-center">Total: ₱${expenses.reduce((s, e) => s + (e.amount || 0), 0).toLocaleString()}</div>
                  <button class="bg-gray-800 text-white px-4 py-2 rounded font-bold hover:bg-gray-700 transition" onclick="this.closest('.fixed').remove()">Close</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(div);
+}
+
+export async function showNonCashPaymentsModal(shift = currentShift) {
+    if (!shift) return;
+
+    const startTime = new Date(shift.start_time);
+    const endTime = shift.end_time ? new Date(shift.end_time) : new Date();
+    const userEmail = shift.user_id;
+
+    const allTransactions = await Repository.getAll('transactions');
+    const nonCashTxs = allTransactions.filter(tx => {
+        const txTime = new Date(tx.timestamp);
+        const method = (tx.payment_method || 'Cash').toLowerCase();
+        const isNonCash = method !== 'cash' || (tx.points_used > 0 || tx.points_amount > 0);
+        return txTime >= startTime && txTime <= endTime &&
+            tx.user_email === userEmail && !tx.is_voided && isNonCash;
+    }).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    let totalNonCash = 0;
+    const rows = nonCashTxs.map(tx => {
+        const methodRaw = tx.payment_method || 'Card';
+        const method = methodRaw.toLowerCase();
+        let amount = 0;
+        if (method === 'cash + points') {
+            amount = parseFloat(tx.points_amount || (tx.points_used * 1.0) || 0);
+        } else if (method === 'points') {
+            amount = parseFloat(tx.total_amount || tx.points_amount || 0);
+        } else {
+            amount = parseFloat(tx.total_amount || 0);
+        }
+        totalNonCash += amount;
+
+        const timeStr = new Date(tx.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const dateStr = new Date(tx.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' });
+
+        let badgeColor = "bg-teal-100 text-teal-800 border-teal-200";
+        if (method.includes("card")) badgeColor = "bg-blue-100 text-blue-800 border-blue-200";
+        else if (method.includes("e-wallet")) badgeColor = "bg-purple-100 text-purple-800 border-purple-200";
+        else if (method.includes("points")) badgeColor = "bg-amber-100 text-amber-800 border-amber-200";
+
+        return `
+            <div class="flex justify-between items-center py-2.5 px-3 border-b last:border-0 hover:bg-gray-50 transition">
+                <div>
+                    <div class="flex items-center gap-2">
+                        <span class="font-bold text-gray-800 text-sm">${methodRaw}</span>
+                        <span class="text-[10px] px-2 py-0.5 rounded font-bold border uppercase ${badgeColor}">${methodRaw}</span>
+                    </div>
+                    <div class="text-xs text-gray-500 mt-0.5">
+                        ${dateStr} at ${timeStr} • Customer: ${tx.customer_name || tx.customer_id || 'Guest'}
+                    </div>
+                </div>
+                <div class="font-bold text-teal-700 text-base">₱${amount.toFixed(2)}</div>
+            </div>
+        `;
+    }).join("");
+
+    const div = document.createElement("div");
+    div.className = "fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-[70]";
+    div.innerHTML = `
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg max-h-[80vh] flex flex-col">
+            <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2 border-b pb-3">
+                <svg class="w-6 h-6 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                Non-Cash Payments (Card / E-Wallet / Points)
+            </h3>
+            <div class="flex-1 overflow-y-auto mb-4 border rounded bg-white">
+                ${nonCashTxs.length > 0 ? rows : '<div class="p-8 text-center text-gray-400 italic">No non-cash payments recorded in this shift.</div>'}
+            </div>
+            <div class="flex justify-between items-center pt-3 border-t">
+                <div class="font-bold text-lg text-teal-800">Total: ₱${totalNonCash.toFixed(2)}</div>
+                <button class="bg-gray-800 text-white px-5 py-2 rounded-lg font-bold hover:bg-gray-700 transition" onclick="this.closest('.fixed').remove()">Close</button>
             </div>
         </div>
     `;
@@ -809,6 +913,14 @@ export async function openEditShiftModal(shift) {
                             <span class="text-xs font-bold text-red-500 uppercase">Expenses</span>
                             <span id="summary-expenses-total" class="font-mono font-bold text-red-700">₱0.00</span>
                         </div>
+
+                        <div id="row-summary-non-cash" class="flex justify-between items-center p-3 bg-teal-50 hover:bg-teal-100 border border-teal-200 rounded cursor-pointer transition-colors">
+                            <div class="flex items-center gap-1.5">
+                                <span class="text-xs font-bold text-teal-700 uppercase">Non-Cash Payments</span>
+                                <svg class="w-3.5 h-3.5 text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                            </div>
+                            <span id="summary-non-cash-total" class="font-mono font-bold text-teal-800">₱0.00</span>
+                        </div>
                     </div>
 
                     <!-- Final Summary -->
@@ -943,6 +1055,12 @@ export async function openEditShiftModal(shift) {
 
     document.getElementById("precounted-bills").addEventListener("input", updateTotals);
     document.getElementById("precounted-coins").addEventListener("input", updateTotals);
+
+    getShiftFinancials(shift).then(financials => {
+        const el = document.getElementById("summary-non-cash-total");
+        if (el) el.textContent = `₱${(financials.non_cash || 0).toFixed(2)}`;
+    });
+    document.getElementById("row-summary-non-cash")?.addEventListener("click", () => showNonCashPaymentsModal(shift));
 
     grid.querySelectorAll(".denom-input").forEach(input => {
         input.addEventListener("input", updateTotals);
@@ -1122,9 +1240,13 @@ export async function openEditShiftModal(shift) {
     updateTotals();
 }
 
-export function showCloseShiftModal(onSuccess) {
+export async function showCloseShiftModal(onSuccess) {
     let modal = document.getElementById("modal-close-shift");
     if (modal) modal.remove();
+
+    const activeShift = await checkActiveShift();
+    const activeFinancials = await getShiftFinancials(activeShift);
+    const nonCashTotal = activeFinancials ? activeFinancials.non_cash : 0;
 
     const div = document.createElement("div");
     div.id = "modal-close-shift";
@@ -1190,8 +1312,16 @@ export function showCloseShiftModal(onSuccess) {
                                 <button type="button" id="btn-add-receipt-main" class="text-[10px] font-black bg-blue-50 text-blue-600 px-2 py-1 rounded border border-blue-200 hover:bg-blue-100">+ Add Receipt</button>
                              </div>
                         </div>
-                        <div id="session-expenses-list" class="max-h-40 overflow-y-auto">
+                        <div id="session-expenses-list" class="max-h-40 overflow-y-auto mb-3">
                             ${expenseRows || '<div class="text-center py-4 text-gray-300 text-xs italic border-2 border-dashed rounded-lg">No receipts added</div>'}
+                        </div>
+
+                        <div id="btn-view-non-cash-main" class="p-3 bg-teal-50 hover:bg-teal-100 border border-teal-200 rounded-xl cursor-pointer transition-colors flex justify-between items-center">
+                            <div class="flex items-center gap-2">
+                                <svg class="w-4 h-4 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                                <span class="text-[10px] font-black text-teal-800 uppercase">Non-Cash Payments (Card/E-Wallet/Points)</span>
+                            </div>
+                            <span class="text-sm font-black text-teal-700">₱${nonCashTotal.toFixed(2)}</span>
                         </div>
                     </div>
 
@@ -1217,6 +1347,9 @@ export function showCloseShiftModal(onSuccess) {
         div.innerHTML = body;
 
         // Bind inner actions
+        document.getElementById("btn-view-non-cash-main")?.addEventListener("click", () => {
+            showNonCashPaymentsModal(activeShift);
+        });
         document.getElementById("btn-add-receipt-main").addEventListener("click", () => {
             showAddReceiptPrompt((choice) => {
                 if (choice === 'existing') {
