@@ -313,11 +313,12 @@ export async function loadShiftsView() {
         </div>
     `;
 
-    // Set default dates
-    const today = new Date().toISOString().split('T')[0];
+    // Set default dates using local timezone string
+    const today = new Date().toLocaleDateString('en-CA');
     const lastMonth = new Date();
     lastMonth.setDate(lastMonth.getDate() - 30);
-    document.getElementById('shift-history-start').value = lastMonth.toISOString().split('T')[0];
+    const lastMonthStr = lastMonth.toLocaleDateString('en-CA');
+    document.getElementById('shift-history-start').value = lastMonthStr;
     document.getElementById('shift-history-end').value = today;
 
     document.getElementById('btn-filter-shifts').addEventListener('click', fetchShifts);
@@ -348,9 +349,8 @@ async function fetchShifts() {
             .sort((a, b) => new Date(b.start_time) - new Date(a.start_time));
 
         if (startStr && endStr) {
-            const startDate = new Date(startStr);
-            const endDate = new Date(endStr);
-            endDate.setHours(23, 59, 59, 999);
+            const startDate = new Date(startStr + 'T00:00:00');
+            const endDate = new Date(endStr + 'T23:59:59.999');
             shiftList = shiftList.filter(s => {
                 const d = new Date(s.start_time);
                 // ALWAYS include open shift for current user
@@ -977,7 +977,7 @@ export async function openEditShiftModal(shift) {
 
         try {
             const allExpenses = await Repository.getAll('expenses');
-            const shiftDateStr = new Date(shift.start_time).toISOString().split('T')[0];
+            const shiftDateStr = new Date(shift.start_time).toLocaleDateString('en-CA');
 
             todayExpenses = allExpenses.filter(e => e.date === shiftDateStr);
             todayExpenses.sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());

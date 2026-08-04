@@ -2520,11 +2520,7 @@ function openCheckout() {
     updateCheckoutCalculations();
 
     setTimeout(() => {
-        if (pointsSection && !pointsSection.classList.contains("hidden") && (selectedCustomer.loyalty_points || 0) > 0) {
-            inputPoints.focus();
-        } else {
-            inputTendered.focus();
-        }
+        inputTendered.focus();
     }, 100);
 }
 

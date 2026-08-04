@@ -401,16 +401,27 @@ async function refreshDashboard() {
         const compareEl = document.getElementById("dash-sales-compare");
         const compareIcon = document.getElementById("dash-sales-compare-icon");
 
-        compareEl.textContent = `${salesDiff >= 0 ? '+' : ''}${salesDiff}% vs last week`;
-        compareEl.className = `text-[10px] font-bold ${salesDiff >= 0 ? 'text-green-600' : 'text-red-600'}`;
-        compareIcon.innerHTML = salesDiff >= 0
-            ? `<svg class="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z" clip-rule="evenodd"></path></svg>`
-            : `<svg class="w-3 h-3 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 112 0v7.586l2.293-2.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>`;
+        if (compareEl) {
+            compareEl.textContent = `${salesDiff >= 0 ? '+' : ''}${salesDiff}% vs last week`;
+            compareEl.className = `text-[10px] font-bold ${salesDiff >= 0 ? 'text-green-600' : 'text-red-600'}`;
+        }
+        if (compareIcon) {
+            compareIcon.innerHTML = salesDiff >= 0
+                ? `<svg class="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5.293 9.707a1 1 0 010-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 01-1.414 1.414L11 7.414V15a1 1 0 11-2 0V7.414L6.707 9.707a1 1 0 01-1.414 0z" clip-rule="evenodd"></path></svg>`
+                : `<svg class="w-3 h-3 text-red-600" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 112 0v7.586l2.293-2.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>`;
+        }
 
-        document.getElementById("dash-margin").textContent = `${margin}%`;
-        document.getElementById("dash-tx-count").textContent = todayTxs.length;
-        document.getElementById("dash-atv").textContent = `ATV: ₱${atv}`;
-        document.getElementById("dash-open-shifts").textContent = openShiftsCount;
+        const marginEl = document.getElementById("dash-margin");
+        if (marginEl) marginEl.textContent = `${margin}%`;
+
+        const txCountEl = document.getElementById("dash-tx-count");
+        if (txCountEl) txCountEl.textContent = todayTxs.length;
+
+        const atvEl = document.getElementById("dash-atv");
+        if (atvEl) atvEl.textContent = `ATV: ₱${atv}`;
+
+        const openShiftsEl = document.getElementById("dash-open-shifts");
+        if (openShiftsEl) openShiftsEl.textContent = openShiftsCount;
 
         // 4. Visuals
         renderVelocityChart(hourlySalesToday, hourlySalesYesterday);
@@ -421,59 +432,69 @@ async function refreshDashboard() {
 
         // 5. Action Center
         const lowStockItems = allItems.filter(i => i.stock_level <= (i.min_stock || 10));
-        document.getElementById("alert-low-stock-count").textContent = `${lowStockItems.length} Items Low Stock`;
+        const lowStockEl = document.getElementById("alert-low-stock-count");
+        if (lowStockEl) lowStockEl.textContent = `${lowStockItems.length} Items Low Stock`;
 
         // Pending POs
         const pendingPOs = allPOs.filter(po => po.status === 'draft' || po.status === 'approved');
-        document.getElementById("alert-po-count").textContent = `${pendingPOs.length} POs Pending`;
+        const poCountEl = document.getElementById("alert-po-count");
+        if (poCountEl) poCountEl.textContent = `${pendingPOs.length} POs Pending`;
 
         // Security Alerts
         const securityCount = todayVoids.length + todayReturns.length;
-        document.getElementById("alert-security-count").textContent = `${securityCount} Security Alerts`;
-        document.getElementById("alert-security-detail").textContent = `${todayVoids.length} Voids, ${todayReturns.length} Returns today`;
+        const secCountEl = document.getElementById("alert-security-count");
+        if (secCountEl) secCountEl.textContent = `${securityCount} Security Alerts`;
+        const secDetailEl = document.getElementById("alert-security-detail");
+        if (secDetailEl) secDetailEl.textContent = `${todayVoids.length} Voids, ${todayReturns.length} Returns today`;
 
-        document.getElementById("total-alerts-badge").textContent = lowStockItems.length + securityCount;
+        const badgeEl = document.getElementById("total-alerts-badge");
+        if (badgeEl) badgeEl.textContent = lowStockItems.length + securityCount;
 
         // 6. Relationships
         const newCustToday = allCustomers.filter(c => c.id !== 'Guest' && c.timestamp && new Date(c.timestamp).toLocaleDateString('en-CA') === todayStr).length;
-        document.getElementById("dash-new-customers").textContent = newCustToday;
+        const newCustEl = document.getElementById("dash-new-customers");
+        if (newCustEl) newCustEl.textContent = newCustToday;
 
         // Calculate Expected Cash for Today (Per Open Shift)
         const openShifts = allShifts.filter(s => s.status === 'open');
         const expectedCashContainer = document.getElementById("dash-expected-cash");
 
-        if (openShifts.length === 0) {
-            expectedCashContainer.innerHTML = `₱0.00`;
-        } else {
-            let html = "";
-            for (const s of openShifts) {
-                const expected = await calculateExpectedCash(s);
-                const staff = Array.isArray(allUsers) ? allUsers.find(u => u.email === s.user_id) : null;
-                const displayName = staff ? staff.name : s.user_id.split('@')[0];
-                html += `
-                    <div class="flex justify-between items-center mb-1">
-                        <span class="text-[10px] text-gray-400 font-bold truncate mr-2">${displayName}</span>
-                        <span class="text-sm font-black text-gray-800">₱${expected.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
-                    </div>
-                `;
+        if (expectedCashContainer) {
+            if (openShifts.length === 0) {
+                expectedCashContainer.innerHTML = `₱0.00`;
+            } else {
+                let html = "";
+                for (const s of openShifts) {
+                    const expected = await calculateExpectedCash(s);
+                    const staff = Array.isArray(allUsers) ? allUsers.find(u => u.email === s.user_id) : null;
+                    const displayName = staff ? staff.name : s.user_id.split('@')[0];
+                    html += `
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-[10px] text-gray-400 font-bold truncate mr-2">${displayName}</span>
+                            <span class="text-sm font-black text-gray-800">₱${expected.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                        </div>
+                    `;
+                }
+                expectedCashContainer.innerHTML = html;
             }
-            expectedCashContainer.innerHTML = html;
         }
 
         // Update Active Staff List
         const activeStaffList = document.getElementById("active-staff-list");
-        if (openShifts.length === 0) {
-            activeStaffList.innerHTML = `<div class="text-[10px] text-gray-400 italic">No active shifts</div>`;
-        } else {
-            activeStaffList.innerHTML = openShifts.map(s => {
-                const staff = Array.isArray(allUsers) ? allUsers.find(u => u.email === s.user_id) : null;
-                const displayName = staff ? staff.name : s.user_id;
-                return `
-                <div class="flex items-center gap-2 text-[10px] font-bold text-gray-700">
-                    <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                    ${displayName}
-                </div>
-            `}).join('');
+        if (activeStaffList) {
+            if (openShifts.length === 0) {
+                activeStaffList.innerHTML = `<div class="text-[10px] text-gray-400 italic">No active shifts</div>`;
+            } else {
+                activeStaffList.innerHTML = openShifts.map(s => {
+                    const staff = Array.isArray(allUsers) ? allUsers.find(u => u.email === s.user_id) : null;
+                    const displayName = staff ? staff.name : s.user_id;
+                    return `
+                    <div class="flex items-center gap-2 text-[10px] font-bold text-gray-700">
+                        <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                        ${displayName}
+                    </div>
+                `}).join('');
+            }
         }
 
     } catch (error) {
