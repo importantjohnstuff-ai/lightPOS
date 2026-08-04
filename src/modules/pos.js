@@ -1,5 +1,5 @@
 import { checkPermission, requestManagerApproval } from "../auth.js";
-import { checkActiveShift, requireShift, showCloseShiftModal, recordRemittance, getShiftFinancials, showNonCashPaymentsModal } from "./shift.js";
+import { checkActiveShift, requireShift, showCloseShiftModal, recordRemittance, getShiftFinancials, showNonCashPaymentsModal, showRemittanceHistoryModal } from "./shift.js";
 import { addNotification } from "../services/notification-service.js";
 import { getSystemSettings } from "./settings.js";
 import { generateUUID, showToast as showGlobalToast, handleError } from "../utils.js";
@@ -755,9 +755,12 @@ async function renderPosInterface(content) {
                                 <span id="summary-precounted-total" class="font-mono font-bold text-gray-700">₱0.00</span>
                             </div>
 
-                            <div class="flex justify-between items-center p-3 bg-purple-50 rounded border border-purple-100">
-                                <span class="text-xs font-bold text-purple-500 uppercase">Remittance</span>
-                                <span id="summary-remittance-total" class="font-mono font-bold text-purple-700">₱0.00</span>
+                            <div id="row-summary-remittance" class="flex justify-between items-center p-3 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded cursor-pointer transition-colors">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="text-xs font-bold text-purple-700 uppercase">Remittance</span>
+                                    <svg class="w-3.5 h-3.5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                </div>
+                                <span id="summary-remittance-total" class="font-mono font-bold text-purple-800">₱0.00</span>
                             </div>
 
                             <div class="flex justify-between items-center p-3 bg-red-50 rounded border border-red-100">
@@ -1052,6 +1055,10 @@ async function renderPosInterface(content) {
             const nonCashRow = document.getElementById("row-summary-non-cash");
             if (nonCashRow) {
                 nonCashRow.onclick = () => showNonCashPaymentsModal(activeShiftObj);
+            }
+            const remittanceRow = document.getElementById("row-summary-remittance");
+            if (remittanceRow) {
+                remittanceRow.onclick = () => showRemittanceHistoryModal(activeShiftObj);
             }
         }
 
