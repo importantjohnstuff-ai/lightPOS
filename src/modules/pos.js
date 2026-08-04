@@ -1,5 +1,5 @@
 import { checkPermission, requestManagerApproval } from "../auth.js";
-import { checkActiveShift, requireShift, showCloseShiftModal, recordRemittance, getShiftFinancials } from "./shift.js";
+import { checkActiveShift, requireShift, showCloseShiftModal, recordRemittance, getShiftFinancials, showNonCashPaymentsModal } from "./shift.js";
 import { addNotification } from "../services/notification-service.js";
 import { getSystemSettings } from "./settings.js";
 import { generateUUID, showToast as showGlobalToast, handleError } from "../utils.js";
@@ -764,6 +764,14 @@ async function renderPosInterface(content) {
                                 <span class="text-xs font-bold text-red-500 uppercase">Expenses</span>
                                 <span id="summary-expenses-total" class="font-mono font-bold text-red-700">₱0.00</span>
                             </div>
+
+                            <div id="row-summary-non-cash" class="flex justify-between items-center p-3 bg-teal-50 hover:bg-teal-100 border border-teal-200 rounded cursor-pointer transition-colors">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="text-xs font-bold text-teal-700 uppercase">Non-Cash Payments</span>
+                                    <svg class="w-3.5 h-3.5 text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                </div>
+                                <span id="summary-non-cash-total" class="font-mono font-bold text-teal-800">₱0.00</span>
+                            </div>
                         </div>
 
                         <!-- Final Summary -->
@@ -1022,18 +1030,30 @@ async function renderPosInterface(content) {
         document.getElementById("precounted-bills").value = "";
         document.getElementById("precounted-coins").value = "";
 
-        // Fetch active shift for remittance total
+        // Fetch active shift for remittance & non-cash total
         let totalRemittance = 0;
+        let activeShiftObj = null;
         try {
             const user = JSON.parse(localStorage.getItem('pos_user'));
             if (user) {
                 const shifts = await Repository.getAll('shifts');
-                const activeShift = shifts.find(s => s.user_id === user.email && s.status === 'open');
-                if (activeShift && activeShift.remittances) {
-                    totalRemittance = activeShift.remittances.reduce((sum, r) => sum + (r.amount || 0), 0);
+                activeShiftObj = shifts.find(s => s.user_id === user.email && s.status === 'open');
+                if (activeShiftObj && activeShiftObj.remittances) {
+                    totalRemittance = activeShiftObj.remittances.reduce((sum, r) => sum + (r.amount || 0), 0);
                 }
             }
         } catch (e) { console.error(e); }
+
+        if (activeShiftObj) {
+            getShiftFinancials(activeShiftObj).then(financials => {
+                const el = document.getElementById("summary-non-cash-total");
+                if (el) el.textContent = `₱${(financials.non_cash || 0).toFixed(2)}`;
+            });
+            const nonCashRow = document.getElementById("row-summary-non-cash");
+            if (nonCashRow) {
+                nonCashRow.onclick = () => showNonCashPaymentsModal(activeShiftObj);
+            }
+        }
 
         const cashoutInput = document.getElementById("shift-cashout");
         cashoutInput.value = totalRemittance.toFixed(2);
