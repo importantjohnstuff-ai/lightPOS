@@ -7,6 +7,15 @@ import { warpPerspective, canvasToBlob, loadImageFromFile, scaleImage } from "..
 import { ReceiptImageStore } from "../services/ReceiptImageStore.js";
 
 let suppliersList = [];
+// Multi-receipt state — reset on each modal open
+let _receiptItems = [];          // Array of { blob, sourceCanvas, corners }
+let _pendingCropQueue = [];      // Queue of images waiting to be cropped
+let _currentCropSource = null;   // Current image canvas being cropped
+let _currentCropIndex = -1;      // -1 if new, >=0 if editing existing item
+let _receiptCorners = null;      // 4 corner points [{x,y},...]
+
+let _viewerBlobs = [];           // Blobs array loaded in lightbox viewer
+let _viewerIndex = 0;            // Current displayed index in lightbox viewer
 
 export async function loadExpensesView() {
     const content = document.getElementById("main-content");

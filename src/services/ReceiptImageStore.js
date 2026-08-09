@@ -17,21 +17,34 @@ const pathSegments = globalThis.location.pathname.split('/').filter(Boolean);
 const IMAGE_DB_NAME = (pathSegments[0] || 'lightPOS') + '_Images_DB';
 const RECEIPTS_API = 'api/receipts.php';
 
-// Create a completely separate Dexie database for images
-const imageDb = new Dexie(IMAGE_DB_NAME);
+// Initialize Dexie instance with primary key 'id'
+let imageDb = new Dexie(IMAGE_DB_NAME);
 imageDb.version(1).stores({
-    receipt_images: 'expense_id, sync_status, created_at'
-});
-imageDb.version(2).stores({
     receipt_images: 'id, expense_id, sync_status, created_at'
-}).upgrade(tx => {
-    return tx.table('receipt_images').toCollection().modify(item => {
-        if (!item.id && item.expense_id) {
-            item.id = `${item.expense_id}_${item.image_index || 0}`;
-            item.image_index = item.image_index || 0;
-        }
-    });
 });
+
+/**
+ * Safely ensure the image database is open and schema matches.
+ * Deletes and recreates database cleanly if upgrading primary keys fails.
+ */
+async function getDb() {
+    if (imageDb.isOpen()) return imageDb;
+    try {
+        await imageDb.open();
+    } catch (e) {
+        console.warn("ReceiptImageStore: Primary key schema upgrade needed, resetting local image cache...", e);
+        try {
+            imageDb.close();
+        } catch (_) {}
+        await Dexie.delete(IMAGE_DB_NAME);
+        imageDb = new Dexie(IMAGE_DB_NAME);
+        imageDb.version(1).stores({
+            receipt_images: 'id, expense_id, sync_status, created_at'
+        });
+        await imageDb.open();
+    }
+    return imageDb;
+}
 
 export const ReceiptImageStore = {
 
@@ -43,11 +56,12 @@ export const ReceiptImageStore = {
      * @returns {Promise<void>}
      */
     async saveReceiptImages(expenseId, blobs) {
+        const db = await getDb();
         await this.deleteLocalReceiptImages(expenseId);
 
         for (let i = 0; i < blobs.length; i++) {
             const id = `${expenseId}_${i}`;
-            await imageDb.receipt_images.put({
+            await db.receipt_images.put({
                 id: id,
                 expense_id: expenseId,
                 image_index: i,
@@ -78,9 +92,10 @@ export const ReceiptImageStore = {
      * @returns {Promise<Blob[]>}
      */
     async getReceiptImages(expenseId) {
+        const db = await getDb();
         let records = [];
         try {
-            records = await imageDb.receipt_images
+            records = await db.receipt_images
                 .where('expense_id')
                 .equals(expenseId)
                 .toArray();
@@ -88,10 +103,12 @@ export const ReceiptImageStore = {
         } catch (e) { }
 
         if (records.length === 0) {
-            const legacyRecord = await imageDb.receipt_images.get(expenseId);
-            if (legacyRecord && legacyRecord.blob) {
-                records = [legacyRecord];
-            }
+            try {
+                const legacyRecord = await db.receipt_images.get(expenseId);
+                if (legacyRecord && legacyRecord.blob) {
+                    records = [legacyRecord];
+                }
+            } catch (e) { }
         }
 
         return records.map(r => r.blob).filter(Boolean);
@@ -109,17 +126,20 @@ export const ReceiptImageStore = {
      * Delete local images for an expense.
      */
     async deleteLocalReceiptImages(expenseId) {
+        const db = await getDb();
         try {
-            const records = await imageDb.receipt_images
+            const records = await db.receipt_images
                 .where('expense_id')
                 .equals(expenseId)
                 .toArray();
             const keys = records.map(r => r.id || r.expense_id);
             if (keys.length > 0) {
-                await imageDb.receipt_images.bulkDelete(keys);
+                await db.receipt_images.bulkDelete(keys);
             }
         } catch (e) { }
-        await imageDb.receipt_images.delete(expenseId);
+        try {
+            await db.receipt_images.delete(expenseId);
+        } catch (e) { }
     },
 
     /**
@@ -150,9 +170,10 @@ export const ReceiptImageStore = {
         const reachable = await isServerReachable();
         if (!reachable) return;
 
+        const db = await getDb();
         let pending = [];
         try {
-            pending = await imageDb.receipt_images
+            pending = await db.receipt_images
                 .where('sync_status')
                 .equals('pending')
                 .toArray();
@@ -178,13 +199,13 @@ export const ReceiptImageStore = {
                 });
 
                 if (response.ok) {
-                    await imageDb.receipt_images.update(key, {
+                    await db.receipt_images.update(key, {
                         sync_status: 'synced'
                     });
                     console.log(`ReceiptImageStore: Uploaded receipt image ${key}`);
                 } else {
-                    console.warn(`ReceiptImageStore: Upload failed for ${key}: ${response.status}`);
-                    await imageDb.receipt_images.update(key, {
+                  console.warn(`ReceiptImageStore: Upload failed for ${key}: ${response.status}`);
+                    await db.receipt_images.update(key, {
                         sync_status: 'error'
                     });
                 }
@@ -212,6 +233,7 @@ export const ReceiptImageStore = {
             const indices = listData.indices || [0];
             const blobs = [];
 
+            const db = await getDb();
             for (const idx of indices) {
                 const res = await fetch(`${RECEIPTS_API}?expense_id=${encodeURIComponent(expenseId)}&index=${idx}`);
                 if (res.ok) {
@@ -219,7 +241,7 @@ export const ReceiptImageStore = {
                     blobs.push(blob);
 
                     const recKey = `${expenseId}_${idx}`;
-                    await imageDb.receipt_images.put({
+                    await db.receipt_images.put({
                         id: recKey,
                         expense_id: expenseId,
                         image_index: idx,
