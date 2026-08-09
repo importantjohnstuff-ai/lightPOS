@@ -18,6 +18,8 @@ const generalReportWorker = new Worker('src/workers/generalReportWorker.js?v=' +
 let generalResolve = null;
 let generalReject = null;
 let lastShiftData = null; // Cache for navigation
+let shiftHistoryMode = 'daily'; // 'daily' | 'monthly'
+let selectedMonthKey = null; // null or 'YYYY-MM'
 
 let exportResolve = null;
 let exportReject = null;
@@ -253,6 +255,11 @@ function renderReportCards(category) {
 
 async function openReportModal(report) {
     if (!report.implemented) return;
+
+    if (report.id === 'fin-shift-history' || report.id === 'fin-shift-reports') {
+        shiftHistoryMode = 'daily';
+        selectedMonthKey = null;
+    }
 
     currentModalReportId = report.id;
     const modal = document.getElementById("report-modal");
@@ -978,6 +985,41 @@ function renderSalesSummary(data) {
     });
 }
 
+function groupShiftsByMonth(shifts) {
+    const map = {};
+    (shifts || []).forEach(s => {
+        const d = new Date(s.start_time);
+        const yearMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        const monthLabel = d.toLocaleString('default', { month: 'long', year: 'numeric' });
+
+        if (!map[yearMonth]) {
+            map[yearMonth] = {
+                key: yearMonth,
+                label: monthLabel,
+                sortDate: new Date(d.getFullYear(), d.getMonth(), 1),
+                shifts: [],
+                totalShifts: 0,
+                totalSales: 0,
+                totalCashout: 0,
+                totalVariance: 0
+            };
+        }
+
+        const m = map[yearMonth];
+        m.shifts.push(s);
+        m.totalShifts++;
+        m.totalSales += parseFloat(s.total_sales || 0);
+        m.totalCashout += parseFloat(s.cashout || s.remittance_total || 0);
+        if (s.status === 'closed') {
+            m.totalVariance += parseFloat(s.variance || 0);
+        }
+    });
+
+    const list = Object.values(map);
+    list.sort((a, b) => b.sortDate - a.sortDate);
+    return list;
+}
+
 function renderShiftReports(data) {
     lastShiftData = data; // Cache for back navigation
     const { shifts, summary } = data;
@@ -993,65 +1035,187 @@ function renderShiftReports(data) {
         return;
     }
 
-    // Render Metrics (Fixed Top)
-    metricsContainer.innerHTML = `
-        <div class="grid grid-cols-4 gap-6 p-6">
-            <div class="p-4 bg-blue-50 rounded-lg border border-blue-100 flex flex-col justify-center">
-                <div class="text-xs text-blue-500 uppercase font-bold tracking-wider">Total Shifts</div>
-                <div class="text-3xl font-bold text-blue-800 mt-1">${summary.totalShifts}</div>
+    const monthsGrouped = groupShiftsByMonth(shifts);
+    const activeMonthObj = selectedMonthKey ? monthsGrouped.find(m => m.key === selectedMonthKey) : null;
+
+    // Mode Header Controls
+    const modeHeader = `
+        <div class="px-6 py-3 bg-gray-50 border-b border-gray-200 flex flex-wrap justify-between items-center gap-3">
+            <div class="flex items-center gap-3">
+                <span class="text-xs font-bold text-gray-500 uppercase tracking-wider">Shift History Mode:</span>
+                <div class="inline-flex rounded-lg p-0.5 bg-gray-200 border border-gray-300" role="group">
+                    <button id="btn-shift-mode-daily" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all ${shiftHistoryMode === 'daily' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-700 hover:text-gray-900'}">
+                        Daily Mode
+                    </button>
+                    <button id="btn-shift-mode-monthly" class="px-4 py-1.5 text-xs font-bold rounded-md transition-all ${shiftHistoryMode === 'monthly' ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-700 hover:text-gray-900'}">
+                        Monthly Mode
+                    </button>
+                </div>
             </div>
-            <div class="p-4 bg-purple-50 rounded-lg border border-purple-100 flex flex-col justify-center">
-                <div class="text-xs text-purple-500 uppercase font-bold tracking-wider">Total Sales</div>
-                <div class="text-3xl font-bold text-purple-800 mt-1">₱${(summary.totalSales || 0).toFixed(2)}</div>
+            ${selectedMonthKey ? `
+            <div class="flex items-center gap-2 text-xs font-medium bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-200">
+                <span>Filtered: <strong>${activeMonthObj ? activeMonthObj.label : selectedMonthKey}</strong></span>
+                <button id="btn-clear-month-filter" class="hover:text-blue-900 font-bold ml-1" title="Show All Months">&times;</button>
             </div>
-            <div class="p-4 bg-green-50 rounded-lg border border-green-100 flex flex-col justify-center">
-                <div class="text-xs text-green-500 uppercase font-bold tracking-wider">Total Cashout</div>
-                <div class="text-3xl font-bold text-green-800 mt-1">₱${summary.totalCashout.toFixed(2)}</div>
-            </div>
-            <div class="p-4 ${summary.totalVariance < 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'} rounded-lg border flex flex-col justify-center">
-                <div class="text-xs ${summary.totalVariance < 0 ? 'text-red-500' : 'text-gray-500'} uppercase font-bold tracking-wider">Net Variance</div>
-                <div class="text-3xl font-bold ${summary.totalVariance < 0 ? 'text-red-800' : 'text-gray-800'} mt-1">₱${summary.totalVariance.toFixed(2)}</div>
-            </div>
+            ` : ''}
         </div>
     `;
 
-    // Render Table (Scrollable)
-    contentContainer.innerHTML = `
-        <div class="overflow-hidden border border-gray-200 rounded-lg">
-            <table class="min-w-full bg-white border border-gray-200">
-                <thead class="bg-gray-50">
-                    <tr>
-                        <th class="py-2 px-4 border-b text-left text-xs font-semibold text-gray-600 uppercase">Started</th>
-                        <th class="py-2 px-4 border-b text-left text-xs font-semibold text-gray-600 uppercase">User</th>
-                         <th class="py-2 px-4 border-b text-center text-xs font-semibold text-gray-600 uppercase">Status</th>
-                        <th class="py-2 px-4 border-b text-right text-xs font-semibold text-gray-600 uppercase">Variance</th>
-                    </tr>
-                </thead>
-                <tbody class="text-sm divide-y divide-gray-100">
-                    ${shifts.map(s => `
-                        <tr class="hover:bg-blue-50 cursor-pointer transition-colors shift-row" data-id="${s.id}">
-                            <td class="py-3 px-4 whitespace-nowrap">
-                                <span class="block font-medium text-gray-800">${new Date(s.start_time).toLocaleDateString()}</span>
-                                <span class="text-xs text-gray-500">${new Date(s.start_time).toLocaleTimeString()}</span>
-                            </td>
-                            <td class="py-3 px-4 text-gray-600">${s.user_id}</td>
-                             <td class="py-3 px-4 text-center">
-                                <span class="px-2 py-1 rounded-full text-xs font-bold ${s.status === 'closed' ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-600'}">${s.status}</span>
-                            </td>
-                            <td class="py-3 px-4 text-right font-mono font-bold ${s.variance < 0 ? 'text-red-500' : (s.variance > 0 ? 'text-green-600' : 'text-gray-400')}">${s.variance > 0 ? '+' : ''}${s.variance.toFixed(2)}</td>
+    if (shiftHistoryMode === 'monthly') {
+        // --- MONTHLY MODE ---
+        metricsContainer.innerHTML = modeHeader + `
+            <div class="grid grid-cols-4 gap-6 p-6">
+                <div class="p-4 bg-blue-50 rounded-lg border border-blue-100 flex flex-col justify-center">
+                    <div class="text-xs text-blue-500 uppercase font-bold tracking-wider">Total Months</div>
+                    <div class="text-3xl font-bold text-blue-800 mt-1">${monthsGrouped.length}</div>
+                </div>
+                <div class="p-4 bg-purple-50 rounded-lg border border-purple-100 flex flex-col justify-center">
+                    <div class="text-xs text-purple-500 uppercase font-bold tracking-wider">Total Sales</div>
+                    <div class="text-3xl font-bold text-purple-800 mt-1">₱${(summary.totalSales || 0).toFixed(2)}</div>
+                </div>
+                <div class="p-4 bg-green-50 rounded-lg border border-green-100 flex flex-col justify-center">
+                    <div class="text-xs text-green-500 uppercase font-bold tracking-wider">Total Cashout</div>
+                    <div class="text-3xl font-bold text-green-800 mt-1">₱${summary.totalCashout.toFixed(2)}</div>
+                </div>
+                <div class="p-4 ${summary.totalVariance < 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'} rounded-lg border flex flex-col justify-center">
+                    <div class="text-xs ${summary.totalVariance < 0 ? 'text-red-500' : 'text-gray-500'} uppercase font-bold tracking-wider">Net Variance</div>
+                    <div class="text-3xl font-bold ${summary.totalVariance < 0 ? 'text-red-800' : 'text-gray-800'} mt-1">₱${summary.totalVariance.toFixed(2)}</div>
+                </div>
+            </div>
+        `;
+
+        contentContainer.innerHTML = `
+            <div class="overflow-hidden border border-gray-200 rounded-lg">
+                <table class="min-w-full bg-white border border-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="py-2.5 px-4 border-b text-left text-xs font-semibold text-gray-600 uppercase">Month</th>
+                            <th class="py-2.5 px-4 border-b text-center text-xs font-semibold text-gray-600 uppercase">Shifts</th>
+                            <th class="py-2.5 px-4 border-b text-right text-xs font-semibold text-gray-600 uppercase">Total Sales</th>
+                            <th class="py-2.5 px-4 border-b text-right text-xs font-semibold text-gray-600 uppercase">Cashout</th>
+                            <th class="py-2.5 px-4 border-b text-right text-xs font-semibold text-gray-600 uppercase">Net Variance</th>
+                            <th class="py-2.5 px-4 border-b text-center text-xs font-semibold text-gray-600 uppercase">Action</th>
                         </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        </div>
-    `;
+                    </thead>
+                    <tbody class="text-sm divide-y divide-gray-100">
+                        ${monthsGrouped.map(m => `
+                            <tr class="hover:bg-blue-50 cursor-pointer transition-colors month-row" data-key="${m.key}">
+                                <td class="py-3 px-4 font-bold text-gray-800 whitespace-nowrap">${m.label}</td>
+                                <td class="py-3 px-4 text-center font-medium text-gray-600">${m.totalShifts} shift${m.totalShifts === 1 ? '' : 's'}</td>
+                                <td class="py-3 px-4 text-right font-mono font-semibold text-purple-700">₱${m.totalSales.toFixed(2)}</td>
+                                <td class="py-3 px-4 text-right font-mono font-semibold text-green-700">₱${m.totalCashout.toFixed(2)}</td>
+                                <td class="py-3 px-4 text-right font-mono font-bold ${m.totalVariance < 0 ? 'text-red-500' : (m.totalVariance > 0 ? 'text-green-600' : 'text-gray-400')}">${m.totalVariance > 0 ? '+' : ''}₱${m.totalVariance.toFixed(2)}</td>
+                                <td class="py-3 px-4 text-center">
+                                    <button class="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded text-xs font-bold transition-colors btn-view-month-shifts" data-key="${m.key}">
+                                        View Daily Shifts &rarr;
+                                    </button>
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
 
-    // Attach Listeners
-    contentContainer.querySelectorAll('.shift-row').forEach(row => {
-        row.addEventListener('click', () => {
-            const id = row.getAttribute('data-id');
-            renderShiftDetail(id);
+        contentContainer.querySelectorAll('.month-row').forEach(row => {
+            row.addEventListener('click', () => {
+                const key = row.getAttribute('data-key');
+                shiftHistoryMode = 'daily';
+                selectedMonthKey = key;
+                renderShiftReports(lastShiftData);
+            });
         });
+
+    } else {
+        // --- DAILY MODE ---
+        const shiftsToRender = selectedMonthKey 
+            ? shifts.filter(s => {
+                const d = new Date(s.start_time);
+                const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                return key === selectedMonthKey;
+              })
+            : shifts;
+
+        const dailyTotalSales = shiftsToRender.reduce((sum, s) => sum + (parseFloat(s.total_sales) || 0), 0);
+        const dailyTotalCashout = shiftsToRender.reduce((sum, s) => sum + (parseFloat(s.cashout || s.remittance_total) || 0), 0);
+        const dailyTotalVariance = shiftsToRender.reduce((sum, s) => s.status === 'closed' ? sum + (parseFloat(s.variance) || 0) : sum, 0);
+
+        metricsContainer.innerHTML = modeHeader + `
+            <div class="grid grid-cols-4 gap-6 p-6">
+                <div class="p-4 bg-blue-50 rounded-lg border border-blue-100 flex flex-col justify-center">
+                    <div class="text-xs text-blue-500 uppercase font-bold tracking-wider">Total Shifts</div>
+                    <div class="text-3xl font-bold text-blue-800 mt-1">${shiftsToRender.length}</div>
+                </div>
+                <div class="p-4 bg-purple-50 rounded-lg border border-purple-100 flex flex-col justify-center">
+                    <div class="text-xs text-purple-500 uppercase font-bold tracking-wider">Total Sales</div>
+                    <div class="text-3xl font-bold text-purple-800 mt-1">₱${dailyTotalSales.toFixed(2)}</div>
+                </div>
+                <div class="p-4 bg-green-50 rounded-lg border border-green-100 flex flex-col justify-center">
+                    <div class="text-xs text-green-500 uppercase font-bold tracking-wider">Total Cashout</div>
+                    <div class="text-3xl font-bold text-green-800 mt-1">₱${dailyTotalCashout.toFixed(2)}</div>
+                </div>
+                <div class="p-4 ${dailyTotalVariance < 0 ? 'bg-red-50 border-red-100' : 'bg-gray-50 border-gray-100'} rounded-lg border flex flex-col justify-center">
+                    <div class="text-xs ${dailyTotalVariance < 0 ? 'text-red-500' : 'text-gray-500'} uppercase font-bold tracking-wider">Net Variance</div>
+                    <div class="text-3xl font-bold ${dailyTotalVariance < 0 ? 'text-red-800' : 'text-gray-800'} mt-1">₱${dailyTotalVariance.toFixed(2)}</div>
+                </div>
+            </div>
+        `;
+
+        contentContainer.innerHTML = `
+            <div class="overflow-hidden border border-gray-200 rounded-lg">
+                <table class="min-w-full bg-white border border-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="py-2 px-4 border-b text-left text-xs font-semibold text-gray-600 uppercase">Started</th>
+                            <th class="py-2 px-4 border-b text-left text-xs font-semibold text-gray-600 uppercase">User</th>
+                            <th class="py-2 px-4 border-b text-center text-xs font-semibold text-gray-600 uppercase">Status</th>
+                            <th class="py-2 px-4 border-b text-right text-xs font-semibold text-gray-600 uppercase">Total Sales</th>
+                            <th class="py-2 px-4 border-b text-right text-xs font-semibold text-gray-600 uppercase">Variance</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-sm divide-y divide-gray-100">
+                        ${shiftsToRender.map(s => `
+                            <tr class="hover:bg-blue-50 cursor-pointer transition-colors shift-row" data-id="${s.id}">
+                                <td class="py-3 px-4 whitespace-nowrap">
+                                    <span class="block font-medium text-gray-800">${new Date(s.start_time).toLocaleDateString()}</span>
+                                    <span class="text-xs text-gray-500">${new Date(s.start_time).toLocaleTimeString()}</span>
+                                </td>
+                                <td class="py-3 px-4 text-gray-600">${s.user_id}</td>
+                                <td class="py-3 px-4 text-center">
+                                    <span class="px-2 py-1 rounded-full text-xs font-bold ${s.status === 'closed' ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-600'}">${s.status}</span>
+                                </td>
+                                <td class="py-3 px-4 text-right font-mono font-semibold text-purple-700">₱${(s.total_sales || 0).toFixed(2)}</td>
+                                <td class="py-3 px-4 text-right font-mono font-bold ${s.variance < 0 ? 'text-red-500' : (s.variance > 0 ? 'text-green-600' : 'text-gray-400')}">${s.variance > 0 ? '+' : ''}${s.variance.toFixed(2)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+
+        contentContainer.querySelectorAll('.shift-row').forEach(row => {
+            row.addEventListener('click', () => {
+                const id = row.getAttribute('data-id');
+                renderShiftDetail(id);
+            });
+        });
+    }
+
+    // Attach Mode Switcher listeners
+    document.getElementById("btn-shift-mode-daily")?.addEventListener("click", () => {
+        shiftHistoryMode = 'daily';
+        renderShiftReports(lastShiftData);
+    });
+
+    document.getElementById("btn-shift-mode-monthly")?.addEventListener("click", () => {
+        shiftHistoryMode = 'monthly';
+        selectedMonthKey = null;
+        renderShiftReports(lastShiftData);
+    });
+
+    document.getElementById("btn-clear-month-filter")?.addEventListener("click", () => {
+        selectedMonthKey = null;
+        renderShiftReports(lastShiftData);
     });
 }
 
