@@ -7,10 +7,6 @@ import { warpPerspective, canvasToBlob, loadImageFromFile, scaleImage } from "..
 import { ReceiptImageStore } from "../services/ReceiptImageStore.js";
 
 let suppliersList = [];
-// Receipt state — reset on each modal open
-let _receiptBlob = null;       // The cropped JPEG Blob ready to save
-let _receiptSourceImg = null;  // The raw uploaded Image element (for crop modal)
-let _receiptCorners = null;    // 4 corner points [{x,y},...]
 
 export async function loadExpensesView() {
     const content = document.getElementById("main-content");
@@ -101,79 +97,74 @@ export async function loadExpensesView() {
                 <h3 id="expense-modal-title" class="text-xl font-black text-gray-800 text-center mb-6">Record Expense</h3>
                 <form id="form-add-expense">
                     <input type="hidden" id="exp-id">
-                    <div class="mb-4">
-                        <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Description</label>
-                        <input type="text" id="exp-desc" class="w-full border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="e.g. Electricity Bill" required>
-                    </div>
-                    <div class="mb-4">
-                        <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Amount (PHP)</label>
-                        <input type="number" step="0.01" id="exp-amount" class="w-full border rounded-lg py-2 px-3 text-lg font-bold focus:ring-2 focus:ring-red-500 outline-none no-spinner" placeholder="0.00" required onwheel="this.blur()">
+                    <div>
+                        <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Description *</label>
+                        <input type="text" id="exp-desc" required placeholder="e.g. Store Utilities, Packaging Supply" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-500">
                     </div>
                     <div class="grid grid-cols-2 gap-4">
-                        <div class="mb-4">
-                            <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Category</label>
-                            <select id="exp-category" class="w-full border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-red-500 outline-none">
-                                <option value="Procurement">Procurement</option>
+                        <div>
+                            <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Amount (₱) *</label>
+                            <input type="number" id="exp-amount" step="0.01" min="0.01" required placeholder="0.00" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-500">
+                        </div>
+                        <div>
+                            <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Category *</label>
+                            <select id="exp-category" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-500">
                                 <option value="Utilities">Utilities</option>
                                 <option value="Rent">Rent</option>
-                                <option value="Salary">Salary</option>
+                                <option value="Salaries">Salaries</option>
+                                <option value="Supplies">Supplies</option>
+                                <option value="Inventory Purchase">Inventory Purchase</option>
                                 <option value="Maintenance">Maintenance</option>
-                                <option value="Karinderya">Karinderya</option>
-                                <option value="CHMSU">CHMSU</option>
+                                <option value="Marketing">Marketing</option>
                                 <option value="Other">Other</option>
                             </select>
                         </div>
-                        <div class="mb-4">
-                            <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Date</label>
-                            <input type="date" id="exp-date" class="w-full border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-red-500 outline-none" required>
-                        </div>
                     </div>
-                    <div class="grid grid-cols-2 gap-4 mb-6">
+                    <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Supplier (Optional)</label>
-                            <select id="exp-supplier" class="w-full border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-red-500 outline-none">
-                                <option value="">None</option>
+                            <select id="exp-supplier" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-500">
+                                <option value="">-- None --</option>
                             </select>
                         </div>
                         <div>
-                            <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Sales Invoice No.</label>
-                            <input type="text" id="exp-invoice-no" class="w-full border rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="e.g. 00123">
+                            <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Ref / Invoice #</label>
+                            <input type="text" id="exp-invoice-no" placeholder="e.g. INV-10024" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-500">
                         </div>
                     </div>
-
-                    <div class="mb-6 border border-red-200 bg-red-50 p-4 rounded-lg">
-                        <label class="block text-red-700 text-xs font-bold uppercase mb-1">Has this been Stocked In?</label>
-                        <select id="exp-stocked-in" class="w-full border border-red-300 rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-red-500 outline-none bg-white">
-                            <option value="No">No</option>
-                            <option value="Yes">Yes</option>
+                    <div>
+                        <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Date *</label>
+                        <input type="date" id="exp-date" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-red-500">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 text-xs font-bold uppercase mb-1">Stocked In Status</label>
+                        <select id="exp-stocked-in" disabled class="w-full border border-gray-200 bg-gray-50 rounded-lg px-3 py-2 text-sm text-gray-500">
+                            <option value="Yes">Yes (Direct Expense)</option>
                         </select>
                         <p class="text-[10px] text-red-500 mt-1 font-medium">Expenses must be stocked in before recording.</p>
                     </div>
 
                     <!-- Receipt Attachment -->
                     <div class="mb-6">
-                        <label class="block text-gray-700 text-xs font-bold uppercase mb-2">📎 Receipt Image (Optional)</label>
-                        <div id="receipt-preview-area" class="hidden mb-2 relative group">
-                            <img id="receipt-thumbnail" src="" alt="Receipt" class="w-full h-32 object-cover rounded-lg border border-gray-200 cursor-pointer" title="Click to view full size">
-                            <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all rounded-lg flex items-center justify-center">
-                                <span class="text-white opacity-0 group-hover:opacity-100 font-bold text-xs transition-all">Click to view</span>
-                            </div>
-                            <button type="button" id="btn-remove-receipt" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold shadow hover:bg-red-600 transition">✕</button>
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="block text-gray-700 text-xs font-bold uppercase">📎 Receipt Images (Optional)</label>
+                            <span id="receipt-count-badge" class="text-xs font-bold text-gray-400">0 pictures</span>
                         </div>
+                        <div id="receipt-preview-grid" class="grid grid-cols-3 gap-2 mb-3 hidden"></div>
                         <div id="receipt-upload-area" class="flex gap-2">
                             <label class="flex-1 cursor-pointer">
-                                <div class="border-2 border-dashed border-gray-300 rounded-lg py-3 px-4 text-center hover:border-red-400 hover:bg-red-50 transition-all">
-                                    <svg class="w-6 h-6 mx-auto text-gray-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-                                    <span class="text-xs text-gray-500 font-medium">Upload / Capture Receipt</span>
+                                <div class="border-2 border-dashed border-gray-300 rounded-lg py-3 px-4 text-center hover:border-red-400 hover:bg-red-50 transition-all flex items-center justify-center gap-2">
+                                    <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                                    <span id="btn-add-receipt-text" class="text-xs text-gray-600 font-bold">Upload / Capture Receipt</span>
                                 </div>
-                                <input type="file" id="receipt-file-input" accept="image/*" capture="environment" class="hidden">
+                                <input type="file" id="receipt-file-input" accept="image/*" capture="environment" multiple class="hidden">
                             </label>
                         </div>
                     </div>
                     
                     <div class="flex items-center gap-2 pt-2">
-                        <button type="button" id="btn-cancel-expense" class="w-1/3 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-2 rounded-lg transition duration-150">Cancel</button>
-                        <button type="submit" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-lg shadow-md transition duration-150">Save Expense</button>
+                        <button type="button" id="btn-cancel-expense" class="w-1/3 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-2 rounded-lg transition">Cancel</button>
+                        <button type="submit" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-lg shadow-md transition">Save Expense</button>
                     </div>
                 </form>
             </div>
@@ -191,18 +182,27 @@ export async function loadExpensesView() {
             </div>
             <div id="crop-canvas-container" class="flex-1 relative overflow-hidden flex items-center justify-center">
                 <canvas id="crop-canvas" class="max-w-full max-h-full"></canvas>
-                <!-- Corner handles are appended dynamically -->
             </div>
             <div class="p-3 text-center text-gray-400 text-xs shrink-0">Drag the 4 corners to match the receipt edges, then tap Apply</div>
         </div>
 
         <!-- Receipt Viewer Lightbox -->
-        <div id="modal-receipt-viewer" class="fixed inset-0 bg-black bg-opacity-90 hidden z-[60] flex flex-col items-center justify-center">
-            <div class="absolute top-4 right-4 flex gap-2 z-10">
-                <button id="btn-download-receipt" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-bold transition">⬇ Download</button>
-                <button id="btn-close-viewer" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-bold transition">✕ Close</button>
+        <div id="modal-receipt-viewer" class="fixed inset-0 bg-black bg-opacity-90 hidden z-[60] flex flex-col items-center justify-between p-4">
+            <div class="w-full flex items-center justify-between z-10">
+                <span id="viewer-title" class="font-bold text-xs bg-gray-800 text-gray-200 px-3 py-1.5 rounded-full border border-gray-700">Receipt 1 of 1</span>
+                <div class="flex gap-2">
+                    <button id="btn-download-receipt" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-bold transition">⬇ Download</button>
+                    <button id="btn-close-viewer" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-bold transition">✕ Close</button>
+                </div>
             </div>
-            <img id="receipt-viewer-img" src="" alt="Receipt" class="max-w-[90vw] max-h-[85vh] object-contain rounded shadow-2xl">
+            
+            <div class="relative max-w-[90vw] max-h-[75vh] flex-1 flex items-center justify-center my-2">
+                <button id="btn-viewer-prev" class="absolute left-2 top-1/2 transform -translate-y-1/2 bg-gray-800 bg-opacity-80 hover:bg-opacity-100 text-white w-10 h-10 rounded-full flex items-center justify-center font-bold text-xl shadow-lg z-20">‹</button>
+                <img id="receipt-viewer-img" src="" alt="Receipt" class="max-w-[85vw] max-h-[75vh] object-contain rounded shadow-2xl">
+                <button id="btn-viewer-next" class="absolute right-2 top-1/2 transform -translate-y-1/2 bg-gray-800 bg-opacity-80 hover:bg-opacity-100 text-white w-10 h-10 rounded-full flex items-center justify-center font-bold text-xl shadow-lg z-20">›</button>
+            </div>
+
+            <div id="viewer-thumbs-strip" class="flex gap-2 overflow-x-auto max-w-[90vw] py-2 shrink-0"></div>
         </div>
     `;
 
@@ -347,7 +347,8 @@ async function saveExpense() {
         invoice_number: invoiceNo,
         date: dateVal,
         user_id: user,
-        has_receipt: !!_receiptBlob,
+        has_receipt: _receiptItems.length > 0,
+        receipt_count: _receiptItems.length,
         _updatedAt: Date.now()
     };
 
@@ -358,9 +359,12 @@ async function saveExpense() {
     try {
         await Repository.upsert('expenses', expenseData);
 
-        // Save receipt image (if any) to the separated image store
-        if (_receiptBlob) {
-            await ReceiptImageStore.saveReceiptImage(expenseData.id, _receiptBlob);
+        // Save receipt image(s) to the separated image store
+        if (_receiptItems.length > 0) {
+            const blobs = _receiptItems.map(item => item.blob);
+            await ReceiptImageStore.saveReceiptImages(expenseData.id, blobs);
+        } else {
+            await ReceiptImageStore.deleteReceiptImage(expenseData.id);
         }
 
         SyncEngine.sync();
@@ -418,9 +422,10 @@ async function fetchExpenses() {
 
         expenses.forEach(data => {
             const dateStr = data.date;
+            const receiptCount = data.receipt_count || (data.has_receipt ? 1 : 0);
 
             const row = document.createElement("tr");
-            row.className = "border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer"; // Added cursor-pointer
+            row.className = "border-b border-gray-100 hover:bg-gray-50 transition-colors cursor-pointer";
 
             // Allow clicking row to toggle checkbox (except on buttons)
             row.addEventListener('click', (e) => {
@@ -443,8 +448,8 @@ async function fetchExpenses() {
                 <td class="py-3 px-6 text-left text-[10px] text-gray-500">${data.user_id}</td>
                 <td class="py-3 px-6 text-center">
                     <div class="flex items-center justify-center gap-2">
-                        <button class="view-receipt-btn text-gray-400 hover:text-amber-600 transition ${data.has_receipt ? '' : 'hidden'}" data-id="${data.id}" title="View Receipt">
-                            📎
+                        <button class="view-receipt-btn text-gray-400 hover:text-amber-600 font-bold text-xs flex items-center gap-1 transition ${data.has_receipt ? '' : 'hidden'}" data-id="${data.id}" title="View Receipt(s)">
+                            📎${receiptCount > 1 ? `<span class="bg-amber-100 text-amber-800 text-[10px] px-1.5 py-0.5 rounded-full font-extrabold">${receiptCount}</span>` : ''}
                         </button>
                         <button class="text-blue-500 hover:text-blue-700 edit-btn transition ${canWrite ? '' : 'hidden'}" data-id="${data.id}">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
@@ -466,7 +471,7 @@ async function fetchExpenses() {
                 document.getElementById("exp-invoice-no").value = data.invoice_number || "";
                 document.getElementById("exp-date").value = data.date;
                 document.getElementById("exp-stocked-in").value = "Yes";
-                // Load existing receipt if any
+                // Load existing receipts if any
                 resetReceiptState();
                 if (data.has_receipt) {
                     await loadExistingReceipt(data.id);
@@ -620,105 +625,195 @@ async function exportExpensesCSV() {
 // ─────────────────────────────────────────────────────────
 
 function resetReceiptState() {
-    _receiptBlob = null;
-    _receiptSourceImg = null;
+    _receiptItems = [];
+    _pendingCropQueue = [];
+    _currentCropSource = null;
+    _currentCropIndex = -1;
     _receiptCorners = null;
-    const previewArea = document.getElementById("receipt-preview-area");
-    const uploadArea = document.getElementById("receipt-upload-area");
+    const grid = document.getElementById("receipt-preview-grid");
+    const badge = document.getElementById("receipt-count-badge");
+    const addText = document.getElementById("btn-add-receipt-text");
     const fileInput = document.getElementById("receipt-file-input");
-    if (previewArea) previewArea.classList.add("hidden");
-    if (uploadArea) uploadArea.classList.remove("hidden");
+
+    if (grid) {
+        grid.innerHTML = "";
+        grid.classList.add("hidden");
+    }
+    if (badge) badge.textContent = "0 pictures";
+    if (addText) addText.textContent = "Upload / Capture Receipt";
     if (fileInput) fileInput.value = "";
 }
 
-function updateReceiptPreview(blob) {
-    const previewArea = document.getElementById("receipt-preview-area");
-    const uploadArea = document.getElementById("receipt-upload-area");
-    const thumbnail = document.getElementById("receipt-thumbnail");
-    if (!previewArea || !thumbnail) return;
+function renderReceiptThumbnails() {
+    const grid = document.getElementById("receipt-preview-grid");
+    const badge = document.getElementById("receipt-count-badge");
+    const addText = document.getElementById("btn-add-receipt-text");
+    if (!grid) return;
 
-    const url = URL.createObjectURL(blob);
-    thumbnail.onload = () => URL.revokeObjectURL(url);
-    thumbnail.src = url;
-    previewArea.classList.remove("hidden");
-    uploadArea.classList.add("hidden");
+    grid.innerHTML = "";
+    if (_receiptItems.length === 0) {
+        grid.classList.add("hidden");
+        if (badge) badge.textContent = "0 pictures";
+        if (addText) addText.textContent = "Upload / Capture Receipt";
+        return;
+    }
+
+    grid.classList.remove("hidden");
+    if (badge) badge.textContent = `${_receiptItems.length} picture${_receiptItems.length > 1 ? 's' : ''}`;
+    if (addText) addText.textContent = "+ Add Another Picture";
+
+    _receiptItems.forEach((item, index) => {
+        const card = document.createElement("div");
+        card.className = "relative group rounded-lg overflow-hidden border border-gray-200 bg-gray-50 h-24 flex items-center justify-center shadow-sm";
+
+        const url = URL.createObjectURL(item.blob);
+        card.innerHTML = `
+            <img src="${url}" class="w-full h-full object-cover cursor-pointer receipt-thumb-img" title="Click to view">
+            <div class="absolute top-1 left-1 bg-black bg-opacity-70 text-white text-[10px] font-extrabold px-1.5 py-0.5 rounded backdrop-blur-sm">
+                #${index + 1}
+            </div>
+            <div class="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all flex items-center justify-center gap-1.5 opacity-0 group-hover:opacity-100">
+                <button type="button" class="btn-recrop-thumb bg-white text-gray-800 text-[10px] font-bold px-2 py-1 rounded shadow hover:bg-gray-100 transition">Crop</button>
+                <button type="button" class="btn-remove-thumb bg-red-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow hover:bg-red-700 transition">✕</button>
+            </div>
+        `;
+
+        card.querySelector('.receipt-thumb-img').addEventListener('click', () => {
+            openReceiptViewerLocal(index);
+        });
+
+        card.querySelector('.btn-recrop-thumb').addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (item.sourceCanvas) {
+                _currentCropSource = item.sourceCanvas;
+                _currentCropIndex = index;
+                openCropModal(item.sourceCanvas, item.corners);
+            } else {
+                showToast("Original uncropped image not available for re-cropping", "info");
+            }
+        });
+
+        card.querySelector('.btn-remove-thumb').addEventListener('click', (e) => {
+            e.stopPropagation();
+            _receiptItems.splice(index, 1);
+            renderReceiptThumbnails();
+        });
+
+        grid.appendChild(card);
+    });
 }
 
 async function loadExistingReceipt(expenseId) {
-    let blob = await ReceiptImageStore.getReceiptImage(expenseId);
-    if (!blob) {
-        blob = await ReceiptImageStore.fetchFromServer(expenseId);
+    resetReceiptState();
+    let blobs = await ReceiptImageStore.getReceiptImages(expenseId);
+    if (!blobs || blobs.length === 0) {
+        blobs = await ReceiptImageStore.fetchFromServer(expenseId);
     }
-    if (blob) {
-        _receiptBlob = blob;
-        updateReceiptPreview(blob);
+    if (blobs && blobs.length > 0) {
+        _receiptItems = blobs.map(blob => ({
+            blob: blob,
+            sourceCanvas: null,
+            corners: null
+        }));
+        renderReceiptThumbnails();
     }
 }
 
-async function showReceiptViewer(expenseId) {
+function renderViewerState() {
     const viewer = document.getElementById("modal-receipt-viewer");
     const viewerImg = document.getElementById("receipt-viewer-img");
+    const title = document.getElementById("viewer-title");
+    const prevBtn = document.getElementById("btn-viewer-prev");
+    const nextBtn = document.getElementById("btn-viewer-next");
+    const thumbsStrip = document.getElementById("viewer-thumbs-strip");
     if (!viewer || !viewerImg) return;
 
-    viewerImg.src = "";
-    viewer.classList.remove("hidden");
-
-    let blob = await ReceiptImageStore.getReceiptImage(expenseId);
-    if (!blob) {
-        blob = await ReceiptImageStore.fetchFromServer(expenseId);
-    }
-    if (blob) {
-        const url = URL.createObjectURL(blob);
-        viewerImg.onload = () => URL.revokeObjectURL(url);
-        viewerImg.src = url;
-        // Store for download
-        viewer.dataset.currentBlob = url;
-        viewer.dataset.currentExpenseId = expenseId;
-    } else {
+    if (!_viewerBlobs || _viewerBlobs.length === 0) {
         viewer.classList.add("hidden");
+        showToast("No receipt pictures to view", "error");
+        return;
+    }
+
+    if (_viewerIndex < 0) _viewerIndex = 0;
+    if (_viewerIndex >= _viewerBlobs.length) _viewerIndex = _viewerBlobs.length - 1;
+
+    const activeBlob = _viewerBlobs[_viewerIndex];
+    const url = URL.createObjectURL(activeBlob);
+    viewerImg.src = url;
+
+    if (title) title.textContent = `Receipt ${_viewerIndex + 1} of ${_viewerBlobs.length}`;
+
+    if (prevBtn) prevBtn.style.display = _viewerBlobs.length > 1 ? 'flex' : 'none';
+    if (nextBtn) nextBtn.style.display = _viewerBlobs.length > 1 ? 'flex' : 'none';
+
+    if (thumbsStrip) {
+        thumbsStrip.innerHTML = "";
+        if (_viewerBlobs.length > 1) {
+            _viewerBlobs.forEach((b, idx) => {
+                const tUrl = URL.createObjectURL(b);
+                const tImg = document.createElement("img");
+                tImg.src = tUrl;
+                tImg.className = `w-12 h-12 object-cover rounded border-2 cursor-pointer transition ${idx === _viewerIndex ? 'border-red-500 scale-105 shadow-md' : 'border-transparent opacity-60 hover:opacity-100'}`;
+                tImg.addEventListener('click', () => {
+                    _viewerIndex = idx;
+                    renderViewerState();
+                });
+                thumbsStrip.appendChild(tImg);
+            });
+        }
+    }
+
+    viewer.classList.remove("hidden");
+}
+
+function openReceiptViewerLocal(index) {
+    _viewerBlobs = _receiptItems.map(item => item.blob);
+    _viewerIndex = index;
+    renderViewerState();
+}
+
+async function showReceiptViewer(expenseId) {
+    let blobs = await ReceiptImageStore.getReceiptImages(expenseId);
+    if (!blobs || blobs.length === 0) {
+        blobs = await ReceiptImageStore.fetchFromServer(expenseId);
+    }
+    if (blobs && blobs.length > 0) {
+        _viewerBlobs = blobs;
+        _viewerIndex = 0;
+        renderViewerState();
+    } else {
         showToast("Receipt image not found", "error");
     }
 }
 
+function processNextInCropQueue() {
+    if (_pendingCropQueue.length === 0) return;
+    const nextCanvas = _pendingCropQueue.shift();
+    _currentCropSource = nextCanvas;
+    _currentCropIndex = -1;
+    openCropModal(nextCanvas);
+}
+
 function setupReceiptListeners() {
-    // File input handler — opens crop modal after image selection
     const fileInput = document.getElementById("receipt-file-input");
     if (fileInput) {
         fileInput.addEventListener("change", async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            try {
-                const img = await loadImageFromFile(file);
-                const scaledCanvas = scaleImage(img, 1200);
-                _receiptSourceImg = scaledCanvas;
-                openCropModal(scaledCanvas);
-            } catch (err) {
-                console.error("Failed to load image:", err);
-                showToast("Failed to load image", "error");
-            }
-        });
-    }
+            const files = Array.from(e.target.files || []);
+            if (files.length === 0) return;
 
-    // Remove receipt button
-    const removeBtn = document.getElementById("btn-remove-receipt");
-    if (removeBtn) {
-        removeBtn.addEventListener("click", () => {
-            resetReceiptState();
-        });
-    }
-
-    // Thumbnail click → open viewer with current blob
-    const thumbnail = document.getElementById("receipt-thumbnail");
-    if (thumbnail) {
-        thumbnail.addEventListener("click", () => {
-            if (_receiptBlob) {
-                const viewer = document.getElementById("modal-receipt-viewer");
-                const viewerImg = document.getElementById("receipt-viewer-img");
-                const url = URL.createObjectURL(_receiptBlob);
-                viewerImg.onload = () => URL.revokeObjectURL(url);
-                viewerImg.src = url;
-                viewer.classList.remove("hidden");
+            _pendingCropQueue = [];
+            for (const file of files) {
+                try {
+                    const img = await loadImageFromFile(file);
+                    const scaledCanvas = scaleImage(img, 1200);
+                    _pendingCropQueue.push(scaledCanvas);
+                } catch (err) {
+                    console.error("Failed to load image file:", err);
+                }
             }
+
+            fileInput.value = "";
+            processNextInCropQueue();
         });
     }
 
@@ -728,12 +823,15 @@ function setupReceiptListeners() {
     document.getElementById("btn-cancel-crop")?.addEventListener("click", () => {
         cropModal.classList.add("hidden");
         removeCropHandles();
+        if (_pendingCropQueue.length > 0) {
+            setTimeout(processNextInCropQueue, 200);
+        }
     });
 
     document.getElementById("btn-reset-corners")?.addEventListener("click", () => {
-        if (_receiptSourceImg) {
-            const w = _receiptSourceImg.width;
-            const h = _receiptSourceImg.height;
+        if (_currentCropSource) {
+            const w = _currentCropSource.width;
+            const h = _currentCropSource.height;
             const margin = 0.1;
             _receiptCorners = [
                 { x: w * margin, y: h * margin },
@@ -746,23 +844,39 @@ function setupReceiptListeners() {
     });
 
     document.getElementById("btn-apply-crop")?.addEventListener("click", async () => {
-        if (!_receiptSourceImg || !_receiptCorners) return;
+        if (!_currentCropSource || !_receiptCorners) return;
         try {
-            // Scale corners from display coordinates to source coordinates
             const canvas = document.getElementById("crop-canvas");
-            const scaleX = _receiptSourceImg.width / canvas.width;
-            const scaleY = _receiptSourceImg.height / canvas.height;
+            const scaleX = _currentCropSource.width / canvas.width;
+            const scaleY = _currentCropSource.height / canvas.height;
             const srcCorners = _receiptCorners.map(c => ({
                 x: c.x * scaleX,
                 y: c.y * scaleY
             }));
 
-            const warpedCanvas = warpPerspective(_receiptSourceImg, srcCorners);
-            _receiptBlob = await canvasToBlob(warpedCanvas, 0.75);
-            updateReceiptPreview(_receiptBlob);
+            const warpedCanvas = warpPerspective(_currentCropSource, srcCorners);
+            const croppedBlob = await canvasToBlob(warpedCanvas, 0.75);
+
+            const newItem = {
+                blob: croppedBlob,
+                sourceCanvas: _currentCropSource,
+                corners: _receiptCorners.map(c => ({ ...c }))
+            };
+
+            if (_currentCropIndex >= 0 && _currentCropIndex < _receiptItems.length) {
+                _receiptItems[_currentCropIndex] = newItem;
+            } else {
+                _receiptItems.push(newItem);
+            }
+
+            renderReceiptThumbnails();
             cropModal.classList.add("hidden");
             removeCropHandles();
-            showToast("Receipt cropped successfully", "success");
+            showToast("Receipt picture attached", "success");
+
+            if (_pendingCropQueue.length > 0) {
+                setTimeout(processNextInCropQueue, 200);
+            }
         } catch (err) {
             console.error("Perspective warp failed:", err);
             showToast("Crop failed: " + err.message, "error");
@@ -774,13 +888,28 @@ function setupReceiptListeners() {
         document.getElementById("modal-receipt-viewer").classList.add("hidden");
     });
 
+    document.getElementById("btn-viewer-prev")?.addEventListener("click", () => {
+        if (_viewerBlobs && _viewerBlobs.length > 1) {
+            _viewerIndex = (_viewerIndex - 1 + _viewerBlobs.length) % _viewerBlobs.length;
+            renderViewerState();
+        }
+    });
+
+    document.getElementById("btn-viewer-next")?.addEventListener("click", () => {
+        if (_viewerBlobs && _viewerBlobs.length > 1) {
+            _viewerIndex = (_viewerIndex + 1) % _viewerBlobs.length;
+            renderViewerState();
+        }
+    });
+
     document.getElementById("btn-download-receipt")?.addEventListener("click", () => {
-        const viewerImg = document.getElementById("receipt-viewer-img");
-        if (viewerImg.src) {
+        if (_viewerBlobs && _viewerBlobs[_viewerIndex]) {
+            const url = URL.createObjectURL(_viewerBlobs[_viewerIndex]);
             const a = document.createElement("a");
-            a.href = viewerImg.src;
-            a.download = "receipt.jpg";
+            a.href = url;
+            a.download = `receipt_${_viewerIndex + 1}.jpg`;
             a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
     });
 }
@@ -825,11 +954,11 @@ function openCropModal(sourceCanvas) {
 
 function drawCropOverlay() {
     const canvas = document.getElementById("crop-canvas");
-    if (!canvas || !_receiptCorners || !_receiptSourceImg) return;
+    if (!canvas || !_receiptCorners || !_currentCropSource) return;
     const ctx = canvas.getContext("2d");
 
     // Redraw source image
-    ctx.drawImage(_receiptSourceImg, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(_currentCropSource, 0, 0, canvas.width, canvas.height);
 
     // Draw semi-transparent overlay outside the selection
     ctx.fillStyle = "rgba(0, 0, 0, 0.4)";
@@ -844,7 +973,7 @@ function drawCropOverlay() {
     }
     ctx.closePath();
     ctx.clip();
-    ctx.drawImage(_receiptSourceImg, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(_currentCropSource, 0, 0, canvas.width, canvas.height);
     ctx.restore();
 
     // Draw border lines

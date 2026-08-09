@@ -22,53 +22,115 @@ const imageDb = new Dexie(IMAGE_DB_NAME);
 imageDb.version(1).stores({
     receipt_images: 'expense_id, sync_status, created_at'
 });
+imageDb.version(2).stores({
+    receipt_images: 'id, expense_id, sync_status, created_at'
+}).upgrade(tx => {
+    return tx.table('receipt_images').toCollection().modify(item => {
+        if (!item.id && item.expense_id) {
+            item.id = `${item.expense_id}_${item.image_index || 0}`;
+            item.image_index = item.image_index || 0;
+        }
+    });
+});
 
 export const ReceiptImageStore = {
 
     /**
-     * Save a receipt image blob to the local image database.
-     * Marks it as 'pending' for server upload.
+     * Save multiple receipt image blobs for an expense.
      * 
-     * @param {string} expenseId - The expense this receipt belongs to
-     * @param {Blob} blob - The JPEG image blob
+     * @param {string} expenseId 
+     * @param {Blob[]} blobs 
      * @returns {Promise<void>}
      */
-    async saveReceiptImage(expenseId, blob) {
-        await imageDb.receipt_images.put({
-            expense_id: expenseId,
-            blob: blob,
-            sync_status: 'pending',
-            created_at: Date.now()
-        });
+    async saveReceiptImages(expenseId, blobs) {
+        await this.deleteLocalReceiptImages(expenseId);
 
-        // Attempt immediate upload (fire-and-forget)
+        for (let i = 0; i < blobs.length; i++) {
+            const id = `${expenseId}_${i}`;
+            await imageDb.receipt_images.put({
+                id: id,
+                expense_id: expenseId,
+                image_index: i,
+                blob: blobs[i],
+                sync_status: 'pending',
+                created_at: Date.now()
+            });
+        }
+
         this.syncPendingImages().catch(e => {
             console.warn('ReceiptImageStore: Background sync failed:', e.message);
         });
     },
 
     /**
-     * Retrieve a receipt image from the local database.
-     * 
-     * @param {string} expenseId 
-     * @returns {Promise<Blob|null>} The image blob, or null if not found
+     * Legacy helper for saving a single receipt image.
      */
-    async getReceiptImage(expenseId) {
-        const record = await imageDb.receipt_images.get(expenseId);
-        return record ? record.blob : null;
+    async saveReceiptImage(expenseId, blob) {
+        if (blob) {
+            await this.saveReceiptImages(expenseId, [blob]);
+        }
     },
 
     /**
-     * Delete a receipt image from the local database.
-     * Also attempts to delete from the server.
+     * Retrieve all receipt image blobs for an expense from local database.
+     * 
+     * @param {string} expenseId 
+     * @returns {Promise<Blob[]>}
+     */
+    async getReceiptImages(expenseId) {
+        let records = [];
+        try {
+            records = await imageDb.receipt_images
+                .where('expense_id')
+                .equals(expenseId)
+                .toArray();
+            records.sort((a, b) => (a.image_index || 0) - (b.image_index || 0));
+        } catch (e) { }
+
+        if (records.length === 0) {
+            const legacyRecord = await imageDb.receipt_images.get(expenseId);
+            if (legacyRecord && legacyRecord.blob) {
+                records = [legacyRecord];
+            }
+        }
+
+        return records.map(r => r.blob).filter(Boolean);
+    },
+
+    /**
+     * Retrieve single receipt image (first one) for legacy callers.
+     */
+    async getReceiptImage(expenseId) {
+        const images = await this.getReceiptImages(expenseId);
+        return images.length > 0 ? images[0] : null;
+    },
+
+    /**
+     * Delete local images for an expense.
+     */
+    async deleteLocalReceiptImages(expenseId) {
+        try {
+            const records = await imageDb.receipt_images
+                .where('expense_id')
+                .equals(expenseId)
+                .toArray();
+            const keys = records.map(r => r.id || r.expense_id);
+            if (keys.length > 0) {
+                await imageDb.receipt_images.bulkDelete(keys);
+            }
+        } catch (e) { }
+        await imageDb.receipt_images.delete(expenseId);
+    },
+
+    /**
+     * Delete all receipt images from local database and server.
      * 
      * @param {string} expenseId 
      * @returns {Promise<void>}
      */
     async deleteReceiptImage(expenseId) {
-        await imageDb.receipt_images.delete(expenseId);
+        await this.deleteLocalReceiptImages(expenseId);
 
-        // Try to delete from server too
         try {
             const reachable = await isServerReachable();
             if (reachable) {
@@ -83,28 +145,32 @@ export const ReceiptImageStore = {
 
     /**
      * Upload all pending images to the server.
-     * Called after save, on sync-updated events, and periodically.
-     * 
-     * @returns {Promise<void>}
      */
     async syncPendingImages() {
         const reachable = await isServerReachable();
         if (!reachable) return;
 
-        const pending = await imageDb.receipt_images
-            .where('sync_status')
-            .equals('pending')
-            .toArray();
+        let pending = [];
+        try {
+            pending = await imageDb.receipt_images
+                .where('sync_status')
+                .equals('pending')
+                .toArray();
+        } catch (e) {
+            return;
+        }
 
         if (pending.length === 0) return;
 
-        console.log(`ReceiptImageStore: Uploading ${pending.length} pending receipt(s)...`);
+        console.log(`ReceiptImageStore: Uploading ${pending.length} pending receipt image(s)...`);
 
         for (const record of pending) {
+            const key = record.id || record.expense_id;
             try {
                 const formData = new FormData();
                 formData.append('expense_id', record.expense_id);
-                formData.append('image', record.blob, `${record.expense_id}.jpg`);
+                formData.append('index', record.image_index || 0);
+                formData.append('image', record.blob, `${key}.jpg`);
 
                 const response = await fetch(RECEIPTS_API, {
                     method: 'POST',
@@ -112,51 +178,62 @@ export const ReceiptImageStore = {
                 });
 
                 if (response.ok) {
-                    await imageDb.receipt_images.update(record.expense_id, {
+                    await imageDb.receipt_images.update(key, {
                         sync_status: 'synced'
                     });
-                    console.log(`ReceiptImageStore: Uploaded receipt for expense ${record.expense_id}`);
+                    console.log(`ReceiptImageStore: Uploaded receipt image ${key}`);
                 } else {
-                    console.warn(`ReceiptImageStore: Upload failed for ${record.expense_id}: ${response.status}`);
-                    await imageDb.receipt_images.update(record.expense_id, {
+                    console.warn(`ReceiptImageStore: Upload failed for ${key}: ${response.status}`);
+                    await imageDb.receipt_images.update(key, {
                         sync_status: 'error'
                     });
                 }
             } catch (e) {
-                console.warn(`ReceiptImageStore: Upload error for ${record.expense_id}:`, e.message);
+                console.warn(`ReceiptImageStore: Upload error for ${key}:`, e.message);
             }
         }
     },
 
     /**
-     * Fetch a receipt image from the server and cache it locally.
-     * Used when viewing an expense on a device that doesn't have the image locally.
+     * Fetch all receipt images for an expense from the server and cache locally.
      * 
      * @param {string} expenseId 
-     * @returns {Promise<Blob|null>}
+     * @returns {Promise<Blob[]>}
      */
     async fetchFromServer(expenseId) {
         try {
             const reachable = await isServerReachable();
-            if (!reachable) return null;
+            if (!reachable) return [];
 
-            const response = await fetch(`${RECEIPTS_API}?expense_id=${encodeURIComponent(expenseId)}`);
-            if (!response.ok) return null;
+            const listRes = await fetch(`${RECEIPTS_API}?expense_id=${encodeURIComponent(expenseId)}&list=1`);
+            if (!listRes.ok) return [];
 
-            const blob = await response.blob();
+            const listData = await listRes.json();
+            const indices = listData.indices || [0];
+            const blobs = [];
 
-            // Cache locally
-            await imageDb.receipt_images.put({
-                expense_id: expenseId,
-                blob: blob,
-                sync_status: 'synced',
-                created_at: Date.now()
-            });
+            for (const idx of indices) {
+                const res = await fetch(`${RECEIPTS_API}?expense_id=${encodeURIComponent(expenseId)}&index=${idx}`);
+                if (res.ok) {
+                    const blob = await res.blob();
+                    blobs.push(blob);
 
-            return blob;
+                    const recKey = `${expenseId}_${idx}`;
+                    await imageDb.receipt_images.put({
+                        id: recKey,
+                        expense_id: expenseId,
+                        image_index: idx,
+                        blob: blob,
+                        sync_status: 'synced',
+                        created_at: Date.now()
+                    });
+                }
+            }
+
+            return blobs;
         } catch (e) {
             console.warn('ReceiptImageStore: Fetch from server failed:', e.message);
-            return null;
+            return [];
         }
     },
 
@@ -167,8 +244,8 @@ export const ReceiptImageStore = {
      * @returns {Promise<boolean>}
      */
     async hasReceiptImage(expenseId) {
-        const record = await imageDb.receipt_images.get(expenseId);
-        return !!record;
+        const images = await this.getReceiptImages(expenseId);
+        return images.length > 0;
     }
 };
 

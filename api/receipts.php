@@ -64,6 +64,7 @@ if ($method === 'POST') {
     header('Content-Type: application/json');
 
     $expenseId = $_POST['expense_id'] ?? null;
+    $index = isset($_POST['index']) ? (int)$_POST['index'] : 0;
 
     if (!$expenseId) {
         http_response_code(400);
@@ -82,11 +83,17 @@ if ($method === 'POST') {
     }
 
     $tmpFile = $_FILES['image']['tmp_name'];
-    $targetFile = $receiptsDir . $expenseId . '.jpg';
+    $targetFile = $receiptsDir . $expenseId . '_' . $index . '.jpg';
 
     // Move the uploaded file
     if (move_uploaded_file($tmpFile, $targetFile)) {
         $size = filesize($targetFile);
+
+        // If index 0, clean up legacy file without _0 prefix if exists
+        $legacyFile = $receiptsDir . $expenseId . '.jpg';
+        if ($index === 0 && file_exists($legacyFile) && $legacyFile !== $targetFile) {
+            @unlink($legacyFile);
+        }
 
         // Flush output buffer before sending JSON
         if (ob_get_length()) ob_end_clean();
@@ -94,10 +101,11 @@ if ($method === 'POST') {
         echo json_encode([
             'success' => true,
             'expense_id' => $expenseId,
+            'index' => $index,
             'size' => $size
         ]);
 
-        error_log("Receipt uploaded: $expenseId ($size bytes)");
+        error_log("Receipt uploaded: {$expenseId}_$index ($size bytes)");
     } else {
         http_response_code(500);
         echo json_encode(['error' => 'Failed to save receipt file']);
@@ -106,7 +114,7 @@ if ($method === 'POST') {
 }
 
 // ─────────────────────────────────────────────────────────
-// GET: Download a receipt image
+// GET: Download or list receipt images
 // ─────────────────────────────────────────────────────────
 if ($method === 'GET') {
     $expenseId = $_GET['expense_id'] ?? null;
@@ -119,13 +127,50 @@ if ($method === 'GET') {
 
     // Sanitize
     $expenseId = preg_replace('/[^a-zA-Z0-9\-_]/', '', $expenseId);
-    $filePath = $receiptsDir . $expenseId . '.jpg';
+
+    // List mode: return list of available image indices
+    if (isset($_GET['list']) && $_GET['list']) {
+        header('Content-Type: application/json');
+        $indices = [];
+        $files = glob($receiptsDir . $expenseId . '_*.jpg');
+        if ($files) {
+            foreach ($files as $f) {
+                $base = basename($f);
+                if (preg_match('/^' . preg_quote($expenseId, '/') . '_(\d+)\.jpg$/i', $base, $m)) {
+                    $indices[] = (int)$m[1];
+                }
+            }
+        }
+        sort($indices);
+
+        $legacyFile = $receiptsDir . $expenseId . '.jpg';
+        if (empty($indices) && file_exists($legacyFile)) {
+            $indices = [0];
+        }
+
+        if (ob_get_length()) ob_end_clean();
+        echo json_encode([
+            'success' => true,
+            'expense_id' => $expenseId,
+            'count' => count($indices),
+            'indices' => array_values(array_unique($indices))
+        ]);
+        exit;
+    }
+
+    $index = isset($_GET['index']) ? (int)$_GET['index'] : 0;
+    $filePath = $receiptsDir . $expenseId . '_' . $index . '.jpg';
+    $legacyPath = $receiptsDir . $expenseId . '.jpg';
 
     if (!file_exists($filePath)) {
-        http_response_code(404);
-        header('Content-Type: application/json');
-        echo json_encode(['error' => 'Receipt not found']);
-        exit;
+        if ($index === 0 && file_exists($legacyPath)) {
+            $filePath = $legacyPath;
+        } else {
+            http_response_code(404);
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Receipt not found']);
+            exit;
+        }
     }
 
     // Flush output buffer before sending binary
@@ -139,7 +184,7 @@ if ($method === 'GET') {
 }
 
 // ─────────────────────────────────────────────────────────
-// DELETE: Remove a receipt image
+// DELETE: Remove receipt image(s)
 // ─────────────────────────────────────────────────────────
 if ($method === 'DELETE') {
     header('Content-Type: application/json');
@@ -154,13 +199,23 @@ if ($method === 'DELETE') {
 
     // Sanitize
     $expenseId = preg_replace('/[^a-zA-Z0-9\-_]/', '', $expenseId);
-    $filePath = $receiptsDir . $expenseId . '.jpg';
 
-    if (file_exists($filePath)) {
-        unlink($filePath);
-        error_log("Receipt deleted: $expenseId");
+    if (isset($_GET['index'])) {
+        $index = (int)$_GET['index'];
+        $filePath = $receiptsDir . $expenseId . '_' . $index . '.jpg';
+        if (file_exists($filePath)) @unlink($filePath);
+        if ($index === 0 && file_exists($receiptsDir . $expenseId . '.jpg')) @unlink($receiptsDir . $expenseId . '.jpg');
+    } else {
+        // Delete all images matching this expenseId
+        $files = glob($receiptsDir . $expenseId . '*.jpg');
+        if ($files) {
+            foreach ($files as $f) {
+                @unlink($f);
+            }
+        }
     }
 
+    if (ob_get_length()) ob_end_clean();
     echo json_encode(['success' => true, 'expense_id' => $expenseId]);
     exit;
 }
