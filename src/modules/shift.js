@@ -539,6 +539,7 @@ async function selectShift(shift) {
                         </td>
                         <td class="border p-2 text-right font-bold text-teal-600">₱${(financials.non_cash || 0).toFixed(2)}</td>
                     </tr>
+                    ${isClosed ? `
                     <tr class="bg-gray-50 border-b hover:bg-blue-50 cursor-pointer transition-colors" id="row-detail-total-tx">
                         <td class="border p-2 font-bold text-gray-600 w-1/2 flex items-center justify-between">
                             <span>Total Transactions Accepted</span>
@@ -548,6 +549,7 @@ async function selectShift(shift) {
                             <span class="text-xs text-gray-500 font-normal mr-1">(${financials.total_transactions_count || 0} txs)</span>₱${(financials.total_transactions_amount || 0).toFixed(2)}
                         </td>
                     </tr>
+                    ` : ''}
                 </tbody>
             </table>
         </div>
