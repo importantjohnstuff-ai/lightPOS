@@ -762,7 +762,8 @@ function renderViewerState() {
                 const tUrl = URL.createObjectURL(b);
                 const tImg = document.createElement("img");
                 tImg.src = tUrl;
-                tImg.className = `w-12 h-12 object-cover rounded border-2 cursor-pointer transition ${idx === _viewerIndex ? 'border-red-500 scale-105 shadow-md' : 'border-transparent opacity-60 hover:opacity-100'}`;
+                tImg.className = `w-14 h-14 object-cover rounded-lg border-2 cursor-pointer transition-all ${idx === _viewerIndex ? 'border-red-500 scale-105 shadow-lg ring-2 ring-red-400' : 'border-gray-600 opacity-60 hover:opacity-100 hover:border-gray-400'}`;
+                tImg.title = `View picture #${idx + 1}`;
                 tImg.addEventListener('click', () => {
                     _viewerIndex = idx;
                     renderViewerState();
@@ -783,8 +784,10 @@ function openReceiptViewerLocal(index) {
 
 async function showReceiptViewer(expenseId) {
     let blobs = await ReceiptImageStore.getReceiptImages(expenseId);
-    if (!blobs || blobs.length === 0) {
-        blobs = await ReceiptImageStore.fetchFromServer(expenseId);
+    // Fetch latest image list from server if available to ensure all images are present
+    const serverBlobs = await ReceiptImageStore.fetchFromServer(expenseId);
+    if (serverBlobs && serverBlobs.length > 0) {
+        blobs = serverBlobs;
     }
     if (blobs && blobs.length > 0) {
         _viewerBlobs = blobs;
@@ -892,7 +895,7 @@ function setupReceiptListeners() {
         }
     });
 
-    // --- Viewer Lightbox Controls ---
+    // --- Viewer Lightbox Controls & Navigation ---
     document.getElementById("btn-close-viewer")?.addEventListener("click", () => {
         document.getElementById("modal-receipt-viewer").classList.add("hidden");
     });
@@ -908,6 +911,60 @@ function setupReceiptListeners() {
         if (_viewerBlobs && _viewerBlobs.length > 1) {
             _viewerIndex = (_viewerIndex + 1) % _viewerBlobs.length;
             renderViewerState();
+        }
+    });
+
+    // Tap main image to advance to next picture
+    const viewerImg = document.getElementById("receipt-viewer-img");
+    if (viewerImg) {
+        let touchStartX = 0;
+        viewerImg.addEventListener("touchstart", (e) => {
+            touchStartX = e.changedTouches[0].screenX;
+        }, { passive: true });
+
+        viewerImg.addEventListener("touchend", (e) => {
+            const touchEndX = e.changedTouches[0].screenX;
+            const diff = touchEndX - touchStartX;
+            if (Math.abs(diff) > 40) {
+                if (diff < 0) {
+                    if (_viewerBlobs && _viewerBlobs.length > 1) {
+                        _viewerIndex = (_viewerIndex + 1) % _viewerBlobs.length;
+                        renderViewerState();
+                    }
+                } else {
+                    if (_viewerBlobs && _viewerBlobs.length > 1) {
+                        _viewerIndex = (_viewerIndex - 1 + _viewerBlobs.length) % _viewerBlobs.length;
+                        renderViewerState();
+                    }
+                }
+            }
+        }, { passive: true });
+
+        viewerImg.addEventListener("click", () => {
+            if (_viewerBlobs && _viewerBlobs.length > 1) {
+                _viewerIndex = (_viewerIndex + 1) % _viewerBlobs.length;
+                renderViewerState();
+            }
+        });
+    }
+
+    // Keyboard Arrow Keys & Escape listener
+    window.addEventListener("keydown", (e) => {
+        const viewer = document.getElementById("modal-receipt-viewer");
+        if (!viewer || viewer.classList.contains("hidden")) return;
+
+        if (e.key === "ArrowLeft") {
+            if (_viewerBlobs && _viewerBlobs.length > 1) {
+                _viewerIndex = (_viewerIndex - 1 + _viewerBlobs.length) % _viewerBlobs.length;
+                renderViewerState();
+            }
+        } else if (e.key === "ArrowRight" || e.key === " ") {
+            if (_viewerBlobs && _viewerBlobs.length > 1) {
+                _viewerIndex = (_viewerIndex + 1) % _viewerBlobs.length;
+                renderViewerState();
+            }
+        } else if (e.key === "Escape") {
+            viewer.classList.add("hidden");
         }
     });
 
