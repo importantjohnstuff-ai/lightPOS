@@ -111,7 +111,7 @@ export function requireShift(callback) {
 }
 
 export async function getShiftFinancials(shift = currentShift, txList = null) {
-    if (!shift) return { opening: 0, sales: 0, adjustments: 0, returns_net: 0, remittances: 0, expenses: 0, non_cash: 0, gross_accountability: 0, expected_in_drawer: 0 };
+    if (!shift) return { opening: 0, sales: 0, adjustments: 0, returns_net: 0, remittances: 0, expenses: 0, non_cash: 0, gross_accountability: 0, expected_in_drawer: 0, total_transactions_count: 0, total_transactions_amount: 0 };
 
     // Query local Dexie transactions for this user since shift start
     const startTime = new Date(shift.start_time);
@@ -152,6 +152,18 @@ export async function getShiftFinancials(shift = currentShift, txList = null) {
         }
     });
 
+    // All accepted non-voided transactions for this shift (Cash + Non-Cash)
+    const acceptedTransactions = allTransactions.filter(tx => {
+        const txTime = new Date(tx.timestamp);
+        return txTime >= startTime && txTime <= endTime &&
+            tx.user_email === userEmail && !tx.is_voided;
+    });
+
+    let totalTransactionsAmount = 0;
+    acceptedTransactions.forEach(tx => {
+        totalTransactionsAmount += parseFloat(tx.total_amount || 0);
+    });
+
     // Add adjustments
     const adjustments = shift.adjustments || [];
     const totalAdjustments = adjustments.reduce((sum, adj) => sum + (parseFloat(adj.amount) || 0), 0);
@@ -166,6 +178,7 @@ export async function getShiftFinancials(shift = currentShift, txList = null) {
 
     // Calculate returns/exchanges impact (Net Cash Effect)
     let totalExchangeCash = 0;
+    let exchangeCount = 0;
     allTransactions.forEach(tx => {
         if (tx.exchanges && Array.isArray(tx.exchanges)) {
             tx.exchanges.forEach(exch => {
@@ -178,6 +191,7 @@ export async function getShiftFinancials(shift = currentShift, txList = null) {
                     // If Returned > Taken, store paid cash out (Negative)
                     const net = takenTotal - returnedTotal;
                     totalExchangeCash += net;
+                    exchangeCount++;
                 }
             });
         }
@@ -196,7 +210,9 @@ export async function getShiftFinancials(shift = currentShift, txList = null) {
         non_cash: totalNonCash,
         returns_net: totalExchangeCash,
         gross_accountability: gross,
-        expected_in_drawer: expected_in_drawer
+        expected_in_drawer: expected_in_drawer,
+        total_transactions_count: acceptedTransactions.length + exchangeCount,
+        total_transactions_amount: totalTransactionsAmount + totalExchangeCash
     };
 }
 
@@ -523,6 +539,15 @@ async function selectShift(shift) {
                         </td>
                         <td class="border p-2 text-right font-bold text-teal-600">₱${(financials.non_cash || 0).toFixed(2)}</td>
                     </tr>
+                    <tr class="bg-gray-50 border-b hover:bg-blue-50 cursor-pointer transition-colors" id="row-detail-total-tx">
+                        <td class="border p-2 font-bold text-gray-600 w-1/2 flex items-center justify-between">
+                            <span>Total Transactions Accepted</span>
+                            <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                        </td>
+                        <td class="border p-2 text-right font-bold text-blue-800">
+                            <span class="text-xs text-gray-500 font-normal mr-1">(${financials.total_transactions_count || 0} txs)</span>₱${(financials.total_transactions_amount || 0).toFixed(2)}
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -566,6 +591,7 @@ async function selectShift(shift) {
     document.getElementById("row-detail-precounted")?.addEventListener("click", () => showPrecountedModal(shift));
     document.getElementById("row-detail-expenses")?.addEventListener("click", () => showShiftExpensesModal(shift));
     document.getElementById("row-detail-non-cash")?.addEventListener("click", () => showNonCashPaymentsModal(shift));
+    document.getElementById("row-detail-total-tx")?.addEventListener("click", () => showShiftTransactions(shift));
 }
 
 function showCashBreakdownModal(shift) {
@@ -1047,6 +1073,14 @@ export async function openEditShiftModal(shift) {
                             </div>
                             <span id="summary-non-cash-total" class="font-mono font-bold text-teal-800">₱0.00</span>
                         </div>
+
+                        <div id="row-summary-total-tx" class="flex justify-between items-center p-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded cursor-pointer transition-colors">
+                            <div class="flex items-center gap-1.5">
+                                <span class="text-xs font-bold text-blue-700 uppercase">Total Transactions</span>
+                                <svg class="w-3.5 h-3.5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                            </div>
+                            <span id="summary-total-tx-val" class="font-mono font-bold text-blue-800">0 (₱0.00)</span>
+                        </div>
                     </div>
 
                     <!-- Final Summary -->
@@ -1185,9 +1219,12 @@ export async function openEditShiftModal(shift) {
     getShiftFinancials(shift).then(financials => {
         const el = document.getElementById("summary-non-cash-total");
         if (el) el.textContent = `₱${(financials.non_cash || 0).toFixed(2)}`;
+        const elTx = document.getElementById("summary-total-tx-val");
+        if (elTx) elTx.textContent = `${financials.total_transactions_count || 0} (₱${(financials.total_transactions_amount || 0).toFixed(2)})`;
     });
     document.getElementById("row-summary-non-cash")?.addEventListener("click", () => showNonCashPaymentsModal(shift));
     document.getElementById("row-summary-remittance")?.addEventListener("click", () => showRemittanceHistoryModal(shift));
+    document.getElementById("row-summary-total-tx")?.addEventListener("click", () => showShiftTransactions(shift));
 
     grid.querySelectorAll(".denom-input").forEach(input => {
         input.addEventListener("input", updateTotals);
