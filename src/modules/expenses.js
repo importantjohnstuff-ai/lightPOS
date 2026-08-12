@@ -13,6 +13,8 @@ let _pendingCropQueue = [];      // Queue of images waiting to be cropped
 let _currentCropSource = null;   // Current image canvas being cropped
 let _currentCropIndex = -1;      // -1 if new, >=0 if editing existing item
 let _receiptCorners = null;      // 4 corner points [{x,y},...]
+let _totalCropBatchCount = 0;    // Total count of images in current upload batch
+let _currentCropBatchIndex = 0;  // 1-indexed count of currently processed image in batch
 
 let _viewerBlobs = [];           // Blobs array loaded in lightbox viewer
 let _viewerIndex = 0;            // Current displayed index in lightbox viewer
@@ -182,7 +184,7 @@ export async function loadExpensesView() {
         <!-- Perspective Crop Modal -->
         <div id="modal-receipt-crop" class="fixed inset-0 bg-black bg-opacity-90 hidden z-[60] flex flex-col">
             <div class="flex items-center justify-between p-4 text-white shrink-0">
-                <h3 class="text-lg font-bold">📐 Adjust Corners</h3>
+                <h3 id="crop-modal-title" class="text-lg font-bold">📐 Adjust Corners</h3>
                 <div class="flex gap-2">
                     <button id="btn-reset-corners" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold transition">Reset</button>
                     <button id="btn-cancel-crop" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold transition">Cancel</button>
@@ -639,6 +641,8 @@ function resetReceiptState() {
     _currentCropSource = null;
     _currentCropIndex = -1;
     _receiptCorners = null;
+    _totalCropBatchCount = 0;
+    _currentCropBatchIndex = 0;
     const grid = document.getElementById("receipt-preview-grid");
     const badge = document.getElementById("receipt-count-badge");
     const addText = document.getElementById("btn-add-receipt-text");
@@ -784,10 +788,13 @@ function openReceiptViewerLocal(index) {
 
 async function showReceiptViewer(expenseId) {
     let blobs = await ReceiptImageStore.getReceiptImages(expenseId);
-    // Fetch latest image list from server if available to ensure all images are present
-    const serverBlobs = await ReceiptImageStore.fetchFromServer(expenseId);
-    if (serverBlobs && serverBlobs.length > 0) {
-        blobs = serverBlobs;
+    if (!blobs || blobs.length === 0) {
+        blobs = await ReceiptImageStore.fetchFromServer(expenseId);
+    } else {
+        const serverBlobs = await ReceiptImageStore.fetchFromServer(expenseId);
+        if (serverBlobs && serverBlobs.length > blobs.length) {
+            blobs = serverBlobs;
+        }
     }
     if (blobs && blobs.length > 0) {
         _viewerBlobs = blobs;
@@ -799,7 +806,12 @@ async function showReceiptViewer(expenseId) {
 }
 
 function processNextInCropQueue() {
-    if (_pendingCropQueue.length === 0) return;
+    if (_pendingCropQueue.length === 0) {
+        _totalCropBatchCount = 0;
+        _currentCropBatchIndex = 0;
+        return;
+    }
+    _currentCropBatchIndex++;
     const nextCanvas = _pendingCropQueue.shift();
     _currentCropSource = nextCanvas;
     _currentCropIndex = -1;
@@ -814,6 +826,9 @@ function setupReceiptListeners() {
             if (files.length === 0) return;
 
             _pendingCropQueue = [];
+            _totalCropBatchCount = files.length;
+            _currentCropBatchIndex = 0;
+
             for (const file of files) {
                 try {
                     const img = await loadImageFromFile(file);
@@ -833,10 +848,11 @@ function setupReceiptListeners() {
     const cropModal = document.getElementById("modal-receipt-crop");
     
     document.getElementById("btn-cancel-crop")?.addEventListener("click", () => {
-        cropModal.classList.add("hidden");
         removeCropHandles();
         if (_pendingCropQueue.length > 0) {
-            setTimeout(processNextInCropQueue, 200);
+            processNextInCropQueue();
+        } else {
+            cropModal.classList.add("hidden");
         }
     });
 
@@ -882,12 +898,14 @@ function setupReceiptListeners() {
             }
 
             renderReceiptThumbnails();
-            cropModal.classList.add("hidden");
             removeCropHandles();
-            showToast("Receipt picture attached", "success");
 
             if (_pendingCropQueue.length > 0) {
-                setTimeout(processNextInCropQueue, 200);
+                showToast(`Picture ${_currentCropBatchIndex} attached`, "success");
+                processNextInCropQueue();
+            } else {
+                cropModal.classList.add("hidden");
+                showToast("Receipt picture attached", "success");
             }
         } catch (err) {
             console.error("Perspective warp failed:", err);
@@ -984,38 +1002,58 @@ function setupReceiptListeners() {
 // Crop Modal Logic
 // ─────────────────────────────────────────────────────────
 
-function openCropModal(sourceCanvas) {
+function openCropModal(sourceCanvas, existingCorners = null) {
     const cropModal = document.getElementById("modal-receipt-crop");
     const canvas = document.getElementById("crop-canvas");
     const container = document.getElementById("crop-canvas-container");
+    const titleEl = document.getElementById("crop-modal-title");
     if (!cropModal || !canvas || !container) return;
 
     cropModal.classList.remove("hidden");
 
-    // Fit source to container
-    const containerRect = container.getBoundingClientRect();
-    const maxW = containerRect.width - 40;
-    const maxH = containerRect.height - 40;
-    const ratio = Math.min(maxW / sourceCanvas.width, maxH / sourceCanvas.height, 1);
-    const displayW = Math.round(sourceCanvas.width * ratio);
-    const displayH = Math.round(sourceCanvas.height * ratio);
+    if (titleEl) {
+        if (_totalCropBatchCount > 1 && _currentCropBatchIndex > 0) {
+            titleEl.textContent = `📐 Adjust Corners (${_currentCropBatchIndex} of ${_totalCropBatchCount})`;
+        } else {
+            titleEl.textContent = "📐 Adjust Corners";
+        }
+    }
 
-    canvas.width = displayW;
-    canvas.height = displayH;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(sourceCanvas, 0, 0, displayW, displayH);
+    const initCanvas = () => {
+        const containerRect = container.getBoundingClientRect();
+        if (containerRect.width <= 0 || containerRect.height <= 0) {
+            requestAnimationFrame(initCanvas);
+            return;
+        }
 
-    // Initialize corners at 10% margin
-    const margin = 0.1;
-    _receiptCorners = [
-        { x: displayW * margin, y: displayH * margin },
-        { x: displayW * (1 - margin), y: displayH * margin },
-        { x: displayW * (1 - margin), y: displayH * (1 - margin) },
-        { x: displayW * margin, y: displayH * (1 - margin) }
-    ];
+        const maxW = Math.max(containerRect.width - 40, 200);
+        const maxH = Math.max(containerRect.height - 40, 200);
+        const ratio = Math.min(maxW / sourceCanvas.width, maxH / sourceCanvas.height, 1);
+        const displayW = Math.max(Math.round(sourceCanvas.width * ratio), 100);
+        const displayH = Math.max(Math.round(sourceCanvas.height * ratio), 100);
 
-    drawCropOverlay();
-    createCropHandles(canvas);
+        canvas.width = displayW;
+        canvas.height = displayH;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(sourceCanvas, 0, 0, displayW, displayH);
+
+        if (existingCorners && existingCorners.length === 4) {
+            _receiptCorners = existingCorners.map(c => ({ ...c }));
+        } else {
+            const margin = 0.1;
+            _receiptCorners = [
+                { x: displayW * margin, y: displayH * margin },
+                { x: displayW * (1 - margin), y: displayH * margin },
+                { x: displayW * (1 - margin), y: displayH * (1 - margin) },
+                { x: displayW * margin, y: displayH * (1 - margin) }
+            ];
+        }
+
+        drawCropOverlay();
+        createCropHandles(canvas);
+    };
+
+    requestAnimationFrame(initCanvas);
 }
 
 function drawCropOverlay() {
