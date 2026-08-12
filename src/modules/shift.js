@@ -1,7 +1,7 @@
 import { checkPermission, requestManagerApproval } from "../auth.js";
 import { addNotification } from "../services/notification-service.js";
 import { generateUUID, handleError } from "../utils.js";
-import { dbRepository as Repository } from "../db.js";
+import { dbRepository as Repository, dbPromise } from "../db.js";
 import { SyncEngine } from "../services/SyncEngine.js";
 import { getSystemSettings, checkShiftDiscrepancy } from "./settings.js";
 
@@ -110,6 +110,45 @@ export function requireShift(callback) {
     }
 }
 
+export async function getShiftTransactionsFast(shift) {
+    if (!shift || !shift.start_time) return [];
+
+    const startTime = new Date(shift.start_time);
+    const endTime = shift.end_time ? new Date(shift.end_time) : new Date();
+    const userEmail = shift.user_id;
+
+    try {
+        const db = await dbPromise;
+        const startIso = startTime.toISOString();
+        const endIso = endTime.toISOString();
+
+        // Perform indexed range query on IndexedDB 'timestamp'
+        const candidateTxs = await db.transactions
+            .where('timestamp')
+            .between(startIso, endIso, true, true)
+            .toArray();
+
+        return candidateTxs.filter(tx => {
+            const isDeleted = tx._deleted === true || tx._deleted === 1 || tx._deleted === "1" || tx._deleted === "true";
+            if (isDeleted) return false;
+
+            const txTime = new Date(tx.timestamp);
+            const matchTime = txTime >= startTime && txTime <= endTime;
+            const matchUser = !userEmail || !tx.user_email || tx.user_email === userEmail;
+
+            return matchTime && matchUser;
+        });
+    } catch (e) {
+        console.warn("[getShiftTransactionsFast] IndexedDB range query fallback:", e);
+        const allTransactions = await Repository.getAll('transactions');
+        return allTransactions.filter(tx => {
+            const txTime = new Date(tx.timestamp);
+            const matchUser = !userEmail || !tx.user_email || tx.user_email === userEmail;
+            return txTime >= startTime && txTime <= endTime && matchUser;
+        });
+    }
+}
+
 export async function getShiftFinancials(shift = currentShift, txList = null) {
     if (!shift) return { opening: 0, sales: 0, adjustments: 0, returns_net: 0, remittances: 0, expenses: 0, non_cash: 0, gross_accountability: 0, expected_in_drawer: 0, total_transactions_count: 0, total_transactions_amount: 0 };
 
@@ -118,7 +157,7 @@ export async function getShiftFinancials(shift = currentShift, txList = null) {
     const endTime = shift.end_time ? new Date(shift.end_time) : new Date();
     const userEmail = shift.user_id;
 
-    const allTransactions = txList || await Repository.getAll('transactions');
+    const allTransactions = txList || await getShiftTransactionsFast(shift);
     const transactions = allTransactions.filter(tx => {
         const txTime = new Date(tx.timestamp);
         return txTime >= startTime && txTime <= endTime &&
@@ -702,7 +741,7 @@ export async function showNonCashPaymentsModal(shift = currentShift) {
     const endTime = shift.end_time ? new Date(shift.end_time) : new Date();
     const userEmail = shift.user_id;
 
-    const allTransactions = await Repository.getAll('transactions');
+    const allTransactions = await getShiftTransactionsFast(shift);
     const nonCashTxs = allTransactions.filter(tx => {
         const txTime = new Date(tx.timestamp);
         const method = (tx.payment_method || 'Cash').toLowerCase();
@@ -797,7 +836,7 @@ export async function showNonCashPaymentsModal(shift = currentShift) {
         `).join('');
 
         return `
-            <div class="p-3.5 border-b last:border-0 hover:bg-gray-50 transition">
+            <div class="p-3.5 border-b last:border-0 hover:bg-teal-50/50 transition">
                 <div class="flex justify-between items-start mb-1.5">
                     <div>
                         <div class="flex items-center gap-2">
@@ -859,15 +898,23 @@ export async function showNonCashPaymentsModal(shift = currentShift) {
     }
 
     const div = document.createElement("div");
-    div.className = "fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-[70]";
+    div.className = "fixed inset-0 bg-gray-900 bg-opacity-75 flex items-center justify-center z-[70] backdrop-blur-sm p-4 animate-fade-in";
     div.innerHTML = `
-        <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-xl max-h-[85vh] flex flex-col">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-xl max-h-[85vh] flex flex-col scale-in">
             <div class="flex justify-between items-center border-b pb-3 mb-3">
-                <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
-                    <svg class="w-6 h-6 text-teal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                    Non-Cash Shift Payments
-                </h3>
-                <button class="text-gray-400 hover:text-gray-600 text-2xl font-bold" onclick="this.closest('.fixed').remove()">&times;</button>
+                <div class="flex items-center gap-2">
+                    <div class="p-2 bg-teal-50 text-teal-600 rounded-xl border border-teal-100">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                            Non-Cash Shift Payments
+                            <span class="text-xs font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200">${nonCashTxs.length} tx${nonCashTxs.length === 1 ? '' : 's'}</span>
+                        </h3>
+                        <p class="text-xs text-gray-400">Audit of non-cash payment breakdown for current shift</p>
+                    </div>
+                </div>
+                <button id="btn-close-noncash-modal-x" class="text-gray-400 hover:text-gray-600 text-2xl font-bold p-1 rounded-lg hover:bg-gray-100 transition">&times;</button>
             </div>
 
             ${summaryCategoryChips.length > 0 ? `
@@ -876,8 +923,13 @@ export async function showNonCashPaymentsModal(shift = currentShift) {
                 </div>
             ` : ''}
 
-            <div class="flex-1 overflow-y-auto mb-4 border rounded-xl bg-white shadow-inner">
-                ${nonCashTxs.length > 0 ? rows : '<div class="p-8 text-center text-gray-400 italic">No non-cash payments recorded in this shift.</div>'}
+            <div class="flex-1 overflow-y-auto mb-4 border rounded-xl bg-white shadow-inner custom-scrollbar">
+                ${nonCashTxs.length > 0 ? rows : `
+                    <div class="p-12 text-center text-gray-400 flex flex-col items-center justify-center gap-2">
+                        <svg class="w-10 h-10 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        <span class="font-medium text-sm">No non-cash payments recorded in this shift.</span>
+                    </div>
+                `}
             </div>
 
             <div class="flex justify-between items-center pt-3 border-t">
@@ -885,11 +937,29 @@ export async function showNonCashPaymentsModal(shift = currentShift) {
                     <div class="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Grand Non-Cash Total</div>
                     <div class="font-black text-xl text-teal-800">₱${grandTotalNonCash.toFixed(2)}</div>
                 </div>
-                <button class="bg-gray-800 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-black transition shadow" onclick="this.closest('.fixed').remove()">Close</button>
+                <button id="btn-close-noncash-modal" class="bg-gray-800 text-white px-6 py-2.5 rounded-xl font-bold hover:bg-black transition shadow">Close</button>
             </div>
         </div>
     `;
+
+    const closeModal = () => {
+        document.removeEventListener("keydown", onKeyDown);
+        div.remove();
+    };
+
+    const onKeyDown = (e) => {
+        if (e.key === "Escape") closeModal();
+    };
+
+    div.addEventListener("click", (e) => {
+        if (e.target === div) closeModal();
+    });
+
+    document.addEventListener("keydown", onKeyDown);
     document.body.appendChild(div);
+
+    div.querySelector("#btn-close-noncash-modal-x")?.addEventListener("click", closeModal);
+    div.querySelector("#btn-close-noncash-modal")?.addEventListener("click", closeModal);
 }
 
 function showOpenShiftModal(onSuccess) {
@@ -1884,12 +1954,8 @@ export async function showXReport() {
     }
 
     // Calculate live metrics
-    const txs = await Repository.getAll('transactions');
-    const shiftTxs = txs.filter(t => {
-        const d = new Date(t.timestamp);
-        const start = new Date(currentShift.start_time);
-        return d >= start && t.user_email === currentShift.user_id && !t.is_voided;
-    });
+    const txs = await getShiftTransactionsFast(currentShift);
+    const shiftTxs = txs.filter(t => !t.is_voided);
 
     // Sales by Payment Method
     const payments = {};
@@ -2037,7 +2103,7 @@ async function showShiftTransactions(shift) {
     const tbody = document.getElementById("shift-tx-body");
 
     try {
-        const allTxs = await Repository.getAll('transactions');
+        const allTxs = await getShiftTransactionsFast(shift);
         const start = new Date(shift.start_time);
         const end = shift.end_time ? new Date(shift.end_time) : new Date();
 
