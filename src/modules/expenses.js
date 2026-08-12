@@ -15,6 +15,7 @@ let _currentCropIndex = -1;      // -1 if new, >=0 if editing existing item
 let _receiptCorners = null;      // 4 corner points [{x,y},...]
 let _totalCropBatchCount = 0;    // Total count of images in current upload batch
 let _currentCropBatchIndex = 0;  // 1-indexed count of currently processed image in batch
+let _batchSelectedCanvases = []; // Batch picture queue before perspective cropping
 
 let _viewerBlobs = [];           // Blobs array loaded in lightbox viewer
 let _viewerIndex = 0;            // Current displayed index in lightbox viewer
@@ -159,7 +160,14 @@ export async function loadExpensesView() {
                     <div class="mb-6">
                         <div class="flex justify-between items-center mb-2">
                             <label class="block text-gray-700 text-xs font-bold uppercase">📎 Receipt Images (Optional)</label>
-                            <span id="receipt-count-badge" class="text-xs font-bold text-gray-400">0 pictures</span>
+                            <div class="flex items-center gap-3">
+                                <label class="inline-flex items-center cursor-pointer text-xs text-gray-600 font-semibold select-none" title="Enable to pick multiple photos or review batch before cropping">
+                                    <input type="checkbox" id="toggle-batch-mode" class="sr-only peer" checked>
+                                    <div class="w-8 h-4 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-red-600 relative"></div>
+                                    <span class="ml-1.5 text-[11px] font-bold text-gray-700">Batch Mode</span>
+                                </label>
+                                <span id="receipt-count-badge" class="text-xs font-bold text-gray-400">0 pictures</span>
+                            </div>
                         </div>
                         <div id="receipt-preview-grid" class="grid grid-cols-3 gap-2 mb-3 hidden"></div>
                         <div id="receipt-upload-area" class="flex gap-2">
@@ -181,6 +189,31 @@ export async function loadExpensesView() {
             </div>
         </div>
 
+        <!-- Batch Pictures Review Modal -->
+        <div id="modal-batch-review" class="fixed inset-0 bg-black bg-opacity-80 hidden z-[55] flex flex-col items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden flex flex-col max-h-[85vh]">
+                <div class="px-6 py-4 bg-gray-900 text-white flex justify-between items-center shrink-0">
+                    <div class="flex items-center gap-2">
+                        <span class="text-xl">📸</span>
+                        <h3 class="font-bold text-base">Batch Pictures Review</h3>
+                    </div>
+                    <span id="batch-review-count" class="text-xs bg-red-600 text-white px-2.5 py-1 rounded-full font-extrabold">0 Pictures</span>
+                </div>
+                <div class="p-3 text-xs text-gray-500 bg-gray-50 border-b border-gray-100 flex items-center justify-between shrink-0">
+                    <span>Review selected photos before perspective cropping</span>
+                    <button type="button" id="btn-batch-add-more" class="text-red-600 font-bold hover:underline">+ Add More</button>
+                </div>
+                <div id="batch-review-grid" class="p-6 grid grid-cols-3 gap-3 overflow-y-auto flex-1 max-h-[50vh]"></div>
+                <div class="p-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between gap-2 shrink-0">
+                    <button type="button" id="btn-cancel-batch" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-bold rounded-xl transition">Cancel</button>
+                    <div class="flex gap-2">
+                        <button type="button" id="btn-skip-crop-all" class="px-3 py-2 bg-gray-800 hover:bg-black text-white text-xs font-bold rounded-xl transition shadow">⚡ Attach All (No Crop)</button>
+                        <button type="button" id="btn-start-batch-crop" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-xl transition shadow-md">📐 Crop Pictures ›</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Perspective Crop Modal -->
         <div id="modal-receipt-crop" class="fixed inset-0 bg-black bg-opacity-90 hidden z-[60] flex flex-col">
             <div class="flex items-center justify-between p-4 text-white shrink-0">
@@ -188,6 +221,7 @@ export async function loadExpensesView() {
                 <div class="flex gap-2">
                     <button type="button" id="btn-rotate-crop" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold transition flex items-center gap-1">🔄 Rotate 90°</button>
                     <button type="button" id="btn-reset-corners" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold transition">Reset</button>
+                    <button type="button" id="btn-skip-crop" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold transition">⏩ Skip</button>
                     <button type="button" id="btn-cancel-crop" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold transition">Cancel</button>
                     <button type="button" id="btn-apply-crop" class="px-4 py-1.5 bg-green-600 hover:bg-green-500 rounded text-xs font-bold transition">✓ Apply Crop</button>
                 </div>
@@ -640,6 +674,7 @@ async function exportExpensesCSV() {
 function resetReceiptState() {
     _receiptItems = [];
     _pendingCropQueue = [];
+    _batchSelectedCanvases = [];
     _currentCropSource = null;
     _currentCropIndex = -1;
     _receiptCorners = null;
@@ -822,29 +857,111 @@ function processNextInCropQueue() {
 
 function setupReceiptListeners() {
     const fileInput = document.getElementById("receipt-file-input");
+    const toggleBatch = document.getElementById("toggle-batch-mode");
+
+    if (toggleBatch && fileInput) {
+        toggleBatch.addEventListener("change", (e) => {
+            if (e.target.checked) {
+                fileInput.setAttribute("multiple", "multiple");
+            } else {
+                fileInput.removeAttribute("multiple");
+            }
+        });
+    }
+
     if (fileInput) {
         fileInput.addEventListener("change", async (e) => {
             const files = Array.from(e.target.files || []);
             if (files.length === 0) return;
 
-            _pendingCropQueue = [];
-            _totalCropBatchCount = files.length;
-            _currentCropBatchIndex = 0;
+            const isBatchMode = document.getElementById("toggle-batch-mode")?.checked ?? true;
 
+            const newItems = [];
             for (const file of files) {
                 try {
                     const img = await loadImageFromFile(file);
                     const scaledCanvas = scaleImage(img, 1200);
-                    _pendingCropQueue.push(scaledCanvas);
+                    newItems.push({
+                        id: "batch_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
+                        canvas: scaledCanvas,
+                        file: file
+                    });
                 } catch (err) {
                     console.error("Failed to load image file:", err);
                 }
             }
 
             fileInput.value = "";
-            processNextInCropQueue();
+
+            if (isBatchMode || newItems.length > 1) {
+                _batchSelectedCanvases.push(...newItems);
+                openBatchReviewModal();
+            } else if (newItems.length === 1) {
+                _pendingCropQueue = [newItems[0].canvas];
+                _totalCropBatchCount = 1;
+                _currentCropBatchIndex = 0;
+                processNextInCropQueue();
+            }
         });
     }
+
+    // --- Batch Review Modal Controls ---
+    document.getElementById("btn-cancel-batch")?.addEventListener("click", () => {
+        _batchSelectedCanvases = [];
+        document.getElementById("modal-batch-review")?.classList.add("hidden");
+    });
+
+    document.getElementById("btn-batch-add-more")?.addEventListener("click", () => {
+        document.getElementById("receipt-file-input")?.click();
+    });
+
+    document.getElementById("btn-skip-crop-all")?.addEventListener("click", async () => {
+        document.getElementById("modal-batch-review")?.classList.add("hidden");
+        if (_batchSelectedCanvases.length === 0) return;
+
+        for (const item of _batchSelectedCanvases) {
+            const blob = await canvasToBlob(item.canvas, 0.75);
+            _receiptItems.push({
+                blob: blob,
+                sourceCanvas: item.canvas,
+                corners: null
+            });
+        }
+        _batchSelectedCanvases = [];
+        renderReceiptThumbnails();
+        showToast("Attached all batch pictures", "success");
+    });
+
+    document.getElementById("btn-start-batch-crop")?.addEventListener("click", () => {
+        document.getElementById("modal-batch-review")?.classList.add("hidden");
+        if (_batchSelectedCanvases.length === 0) return;
+
+        _pendingCropQueue = _batchSelectedCanvases.map(item => item.canvas);
+        _totalCropBatchCount = _pendingCropQueue.length;
+        _currentCropBatchIndex = 0;
+        _batchSelectedCanvases = [];
+        processNextInCropQueue();
+    });
+
+    document.getElementById("btn-skip-crop")?.addEventListener("click", async () => {
+        if (_currentCropSource) {
+            const blob = await canvasToBlob(_currentCropSource, 0.75);
+            _receiptItems.push({
+                blob: blob,
+                sourceCanvas: _currentCropSource,
+                corners: null
+            });
+            renderReceiptThumbnails();
+            removeCropHandles();
+
+            if (_pendingCropQueue.length > 0) {
+                processNextInCropQueue();
+            } else {
+                document.getElementById("modal-receipt-crop")?.classList.add("hidden");
+                showToast("Skipped crop and attached picture", "info");
+            }
+        }
+    });
 
     // --- Crop Modal Controls ---
     const cropModal = document.getElementById("modal-receipt-crop");
@@ -1046,6 +1163,50 @@ function rotateCanvas90(sourceCanvas) {
     ctx.rotate((90 * Math.PI) / 180);
     ctx.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2);
     return rotated;
+}
+
+// ─────────────────────────────────────────────────────────
+// Batch Pictures Review Modal Logic
+// ─────────────────────────────────────────────────────────
+
+function openBatchReviewModal() {
+    const modal = document.getElementById("modal-batch-review");
+    const grid = document.getElementById("batch-review-grid");
+    const countBadge = document.getElementById("batch-review-count");
+    if (!modal || !grid) return;
+
+    if (_batchSelectedCanvases.length === 0) {
+        modal.classList.add("hidden");
+        return;
+    }
+
+    if (countBadge) {
+        countBadge.textContent = `${_batchSelectedCanvases.length} Picture${_batchSelectedCanvases.length > 1 ? 's' : ''}`;
+    }
+
+    grid.innerHTML = "";
+    _batchSelectedCanvases.forEach((item, index) => {
+        const card = document.createElement("div");
+        card.className = "relative group rounded-xl overflow-hidden border border-gray-200 bg-gray-100 h-28 flex items-center justify-center shadow-sm";
+        const thumbUrl = item.canvas.toDataURL("image/jpeg", 0.6);
+        card.innerHTML = `
+            <img src="${thumbUrl}" class="w-full h-full object-cover">
+            <div class="absolute top-1.5 left-1.5 bg-black bg-opacity-70 text-white text-[10px] font-black px-1.5 py-0.5 rounded backdrop-blur-sm">
+                #${index + 1}
+            </div>
+            <button type="button" class="btn-remove-batch-item absolute top-1.5 right-1.5 bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center shadow transition" title="Remove this photo">✕</button>
+        `;
+
+        card.querySelector('.btn-remove-batch-item').addEventListener('click', (e) => {
+            e.stopPropagation();
+            _batchSelectedCanvases.splice(index, 1);
+            openBatchReviewModal();
+        });
+
+        grid.appendChild(card);
+    });
+
+    modal.classList.remove("hidden");
 }
 
 // ─────────────────────────────────────────────────────────
