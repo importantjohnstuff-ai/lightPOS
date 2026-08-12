@@ -186,9 +186,10 @@ export async function loadExpensesView() {
             <div class="flex items-center justify-between p-4 text-white shrink-0">
                 <h3 id="crop-modal-title" class="text-lg font-bold">📐 Adjust Corners</h3>
                 <div class="flex gap-2">
-                    <button id="btn-reset-corners" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold transition">Reset</button>
-                    <button id="btn-cancel-crop" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold transition">Cancel</button>
-                    <button id="btn-apply-crop" class="px-4 py-1.5 bg-green-600 hover:bg-green-500 rounded text-xs font-bold transition">✓ Apply Crop</button>
+                    <button type="button" id="btn-rotate-crop" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold transition flex items-center gap-1">🔄 Rotate 90°</button>
+                    <button type="button" id="btn-reset-corners" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold transition">Reset</button>
+                    <button type="button" id="btn-cancel-crop" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded text-xs font-bold transition">Cancel</button>
+                    <button type="button" id="btn-apply-crop" class="px-4 py-1.5 bg-green-600 hover:bg-green-500 rounded text-xs font-bold transition">✓ Apply Crop</button>
                 </div>
             </div>
             <div id="crop-canvas-container" class="flex-1 relative overflow-hidden flex items-center justify-center">
@@ -202,8 +203,9 @@ export async function loadExpensesView() {
             <div class="w-full flex items-center justify-between z-10">
                 <span id="viewer-title" class="font-bold text-xs bg-gray-800 text-gray-200 px-3 py-1.5 rounded-full border border-gray-700">Receipt 1 of 1</span>
                 <div class="flex gap-2">
-                    <button id="btn-download-receipt" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-bold transition">⬇ Download</button>
-                    <button id="btn-close-viewer" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-bold transition">✕ Close</button>
+                    <button type="button" id="btn-rotate-viewer" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-bold transition">🔄 Rotate</button>
+                    <button type="button" id="btn-download-receipt" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-bold transition">⬇ Download</button>
+                    <button type="button" id="btn-close-viewer" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-bold transition">✕ Close</button>
                 </div>
             </div>
             
@@ -857,9 +859,10 @@ function setupReceiptListeners() {
     });
 
     document.getElementById("btn-reset-corners")?.addEventListener("click", () => {
-        if (_currentCropSource) {
-            const w = _currentCropSource.width;
-            const h = _currentCropSource.height;
+        const canvas = document.getElementById("crop-canvas");
+        if (canvas) {
+            const w = canvas.width;
+            const h = canvas.height;
             const margin = 0.1;
             _receiptCorners = [
                 { x: w * margin, y: h * margin },
@@ -868,6 +871,7 @@ function setupReceiptListeners() {
                 { x: w * margin, y: h * (1 - margin) }
             ];
             drawCropOverlay();
+            createCropHandles(canvas);
         }
     });
 
@@ -986,6 +990,41 @@ function setupReceiptListeners() {
         }
     });
 
+    document.getElementById("btn-rotate-crop")?.addEventListener("click", () => {
+        if (_currentCropSource) {
+            _currentCropSource = rotateCanvas90(_currentCropSource);
+            openCropModal(_currentCropSource);
+            showToast("Image rotated 90°", "info");
+        }
+    });
+
+    document.getElementById("btn-rotate-viewer")?.addEventListener("click", async () => {
+        if (_viewerBlobs && _viewerBlobs[_viewerIndex]) {
+            try {
+                const img = await loadImageFromFile(_viewerBlobs[_viewerIndex]);
+                const c = document.createElement("canvas");
+                c.width = img.naturalWidth || img.width;
+                c.height = img.naturalHeight || img.height;
+                const ctx = c.getContext("2d");
+                ctx.drawImage(img, 0, 0);
+
+                const rotated = rotateCanvas90(c);
+                const rotatedBlob = await canvasToBlob(rotated, 0.85);
+
+                _viewerBlobs[_viewerIndex] = rotatedBlob;
+                if (_receiptItems[_viewerIndex]) {
+                    _receiptItems[_viewerIndex].blob = rotatedBlob;
+                    _receiptItems[_viewerIndex].sourceCanvas = rotated;
+                    renderReceiptThumbnails();
+                }
+                renderViewerState();
+                showToast("Image rotated 90°", "info");
+            } catch (err) {
+                console.error("Rotate failed:", err);
+            }
+        }
+    });
+
     document.getElementById("btn-download-receipt")?.addEventListener("click", () => {
         if (_viewerBlobs && _viewerBlobs[_viewerIndex]) {
             const url = URL.createObjectURL(_viewerBlobs[_viewerIndex]);
@@ -996,6 +1035,17 @@ function setupReceiptListeners() {
             setTimeout(() => URL.revokeObjectURL(url), 1000);
         }
     });
+}
+
+function rotateCanvas90(sourceCanvas) {
+    const rotated = document.createElement("canvas");
+    rotated.width = sourceCanvas.height;
+    rotated.height = sourceCanvas.width;
+    const ctx = rotated.getContext("2d");
+    ctx.translate(rotated.width / 2, rotated.height / 2);
+    ctx.rotate((90 * Math.PI) / 180);
+    ctx.drawImage(sourceCanvas, -sourceCanvas.width / 2, -sourceCanvas.height / 2);
+    return rotated;
 }
 
 // ─────────────────────────────────────────────────────────
@@ -1038,7 +1088,18 @@ function openCropModal(sourceCanvas, existingCorners = null) {
         ctx.drawImage(sourceCanvas, 0, 0, displayW, displayH);
 
         if (existingCorners && existingCorners.length === 4) {
-            _receiptCorners = existingCorners.map(c => ({ ...c }));
+            const isOutOfBounds = existingCorners.some(c => c.x > displayW || c.y > displayH || c.x < 0 || c.y < 0);
+            if (isOutOfBounds) {
+                const margin = 0.1;
+                _receiptCorners = [
+                    { x: displayW * margin, y: displayH * margin },
+                    { x: displayW * (1 - margin), y: displayH * margin },
+                    { x: displayW * (1 - margin), y: displayH * (1 - margin) },
+                    { x: displayW * margin, y: displayH * (1 - margin) }
+                ];
+            } else {
+                _receiptCorners = existingCorners.map(c => ({ ...c }));
+            }
         } else {
             const margin = 0.1;
             _receiptCorners = [
@@ -1101,7 +1162,6 @@ function createCropHandles(canvas) {
     const container = document.getElementById("crop-canvas-container");
     if (!container || !_receiptCorners) return;
 
-    const canvasRect = canvas.getBoundingClientRect();
     const labels = ["TL", "TR", "BR", "BL"];
     const colors = ["#ef4444", "#3b82f6", "#22c55e", "#f59e0b"];
 
@@ -1128,8 +1188,14 @@ function createCropHandles(canvas) {
         const updateHandlePosition = () => {
             const cr = canvas.getBoundingClientRect();
             const containerR = container.getBoundingClientRect();
-            handle.style.left = (cr.left - containerR.left + corner.x - 14) + "px";
-            handle.style.top = (cr.top - containerR.top + corner.y - 14) + "px";
+            const scaleX = cr.width > 0 ? (cr.width / canvas.width) : 1;
+            const scaleY = cr.height > 0 ? (cr.height / canvas.height) : 1;
+
+            const cssX = corner.x * scaleX;
+            const cssY = corner.y * scaleY;
+
+            handle.style.left = (cr.left - containerR.left + cssX - 14) + "px";
+            handle.style.top = (cr.top - containerR.top + cssY - 14) + "px";
         };
         updateHandlePosition();
 
@@ -1138,10 +1204,17 @@ function createCropHandles(canvas) {
             handle.style.cursor = "grabbing";
             const moveHandler = (mx, my) => {
                 const cr = canvas.getBoundingClientRect();
-                let nx = mx - cr.left;
-                let ny = my - cr.top;
+                if (cr.width <= 0 || cr.height <= 0) return;
+
+                const cssX = mx - cr.left;
+                const cssY = my - cr.top;
+
+                let nx = cssX * (canvas.width / cr.width);
+                let ny = cssY * (canvas.height / cr.height);
+
                 nx = Math.max(0, Math.min(canvas.width, nx));
                 ny = Math.max(0, Math.min(canvas.height, ny));
+
                 corner.x = nx;
                 corner.y = ny;
                 updateHandlePosition();
@@ -1150,7 +1223,7 @@ function createCropHandles(canvas) {
 
             const onMouseMove = (e) => moveHandler(e.clientX, e.clientY);
             const onTouchMove = (e) => {
-                e.preventDefault();
+                if (e.cancelable) e.preventDefault();
                 const t = e.touches[0];
                 moveHandler(t.clientX, t.clientY);
             };
@@ -1172,7 +1245,7 @@ function createCropHandles(canvas) {
             startDrag(e.clientX, e.clientY);
         });
         handle.addEventListener("touchstart", (e) => {
-            e.preventDefault();
+            if (e.cancelable) e.preventDefault();
             const t = e.touches[0];
             startDrag(t.clientX, t.clientY);
         }, { passive: false });
