@@ -272,6 +272,7 @@ async function renderPosInterface(content) {
                         <div class="flex gap-2 shrink-0">
                             <button id="btn-view-suspended" class="text-[9px] bg-yellow-600 hover:bg-yellow-700 px-1.5 py-1 rounded font-bold" title="Suspended Sales">SUSP</button>
                             <button id="btn-pos-history" class="text-[9px] bg-indigo-600 hover:bg-indigo-700 px-1.5 py-1 rounded font-bold" title="History">HIST</button>
+                            <button id="btn-pos-remit" class="text-[9px] bg-purple-600 hover:bg-purple-700 px-1.5 py-1 rounded font-bold" title="Remit Cash">REMIT</button>
                             <button id="btn-suspend-sale" class="text-[9px] bg-orange-500 hover:bg-orange-600 px-1.5 py-1 rounded font-bold" title="Hold">HOLD</button>
                             <button id="btn-pos-close-shift" class="text-[9px] bg-red-500 hover:bg-red-600 px-1.5 py-1 rounded font-bold" title="Close Shift">CLOSE</button>
                             <button id="btn-clear-posCart" class="text-[9px] bg-blue-800 hover:bg-blue-900 px-1.5 py-1 rounded font-bold" title="Clear Cart">CLR</button>
@@ -647,23 +648,28 @@ async function renderPosInterface(content) {
         <!-- Remittance Modal -->
         <div id="modal-remittance" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50">
             <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
-                <h3 class="text-xl font-bold mb-4 text-gray-800">Cash Remittance (Cashout)</h3>
-                <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-2">Amount to Remit</label>
-                    <input type="number" id="remit-amount" class="w-full p-2 border rounded text-lg focus:ring-2 focus:ring-blue-500 outline-none" step="0.01" placeholder="0.00">
+                <div class="flex justify-between items-center mb-4 border-b pb-3">
+                    <h3 class="text-xl font-bold text-gray-800">Cash Remittance (Cashout)</h3>
+                    <button id="btn-close-remit-x" class="text-gray-400 hover:text-gray-600 text-2xl font-bold">&times;</button>
                 </div>
-                <div class="mb-4">
-                    <label class="block text-gray-700 text-sm font-bold mb-2">Reason / Reference</label>
-                    <input type="text" id="remit-reason" class="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="e.g. Mid-day turnover">
-                </div>
-                <div class="mb-4">
-                    <h4 class="text-xs font-bold text-gray-400 uppercase mb-2">Remittance History</h4>
-                    <div id="remittance-history-list" class="max-h-32 overflow-y-auto border rounded p-2 text-xs space-y-1 bg-gray-50"></div>
-                </div>
-                <div class="flex gap-2">
-                    <button id="btn-cancel-remit" class="w-1/2 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 rounded">Cancel</button>
-                    <button id="btn-save-remit" class="w-1/2 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 rounded">Record Remittance</button>
-                </div>
+                <form id="form-pos-remittance" class="space-y-4">
+                    <div>
+                        <label class="block text-gray-700 text-xs font-bold mb-1 uppercase tracking-wider">Amount to Remit (PHP)</label>
+                        <input type="number" id="remit-amount" class="w-full p-2.5 border rounded-lg text-xl font-bold text-gray-800 focus:ring-2 focus:ring-purple-500 outline-none" step="0.01" min="0.01" placeholder="0.00" required>
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 text-xs font-bold mb-1 uppercase tracking-wider">Reason / Reference</label>
+                        <input type="text" id="remit-reason" class="w-full p-2.5 border rounded-lg text-sm text-gray-800 focus:ring-2 focus:ring-purple-500 outline-none" placeholder="e.g. Mid-day turnover / Safe drop" required>
+                    </div>
+                    <div>
+                        <h4 class="text-xs font-bold text-gray-400 uppercase mb-2 tracking-wider">Shift Remittance History</h4>
+                        <div id="remittance-history-list" class="max-h-36 overflow-y-auto border rounded-lg p-2.5 text-xs space-y-1 bg-gray-50"></div>
+                    </div>
+                    <div class="flex gap-2 pt-2">
+                        <button type="button" id="btn-cancel-remit" class="w-1/2 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2.5 rounded-lg transition">Cancel</button>
+                        <button type="submit" id="btn-save-remit" class="w-1/2 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 rounded-lg shadow-md transition">Record Remittance</button>
+                    </div>
+                </form>
             </div>
         </div>
 
@@ -913,6 +919,27 @@ async function renderPosInterface(content) {
     // History Logic
     document.getElementById("btn-pos-history").addEventListener("click", openHistoryModal);
     document.getElementById("btn-close-history").addEventListener("click", () => document.getElementById("modal-pos-history").classList.add("hidden"));
+
+    // Remittance Logic
+    const btnPosRemit = document.getElementById("btn-pos-remit");
+    if (btnPosRemit) {
+        btnPosRemit.addEventListener("click", openRemittanceModal);
+    }
+    const btnCancelRemit = document.getElementById("btn-cancel-remit");
+    if (btnCancelRemit) {
+        btnCancelRemit.addEventListener("click", closeRemittanceModal);
+    }
+    const btnCloseRemitX = document.getElementById("btn-close-remit-x");
+    if (btnCloseRemitX) {
+        btnCloseRemitX.addEventListener("click", closeRemittanceModal);
+    }
+    const formRemittance = document.getElementById("form-pos-remittance");
+    if (formRemittance) {
+        formRemittance.addEventListener("submit", (e) => {
+            e.preventDefault();
+            saveRemittance();
+        });
+    }
 
     const btnCloseTxDetails = document.getElementById("btn-close-tx-details");
     if (btnCloseTxDetails) {
@@ -2732,6 +2759,79 @@ function getLocalDateString(date) {
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const day = String(d.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+}
+
+async function openRemittanceModal() {
+    const activeShift = await checkActiveShift();
+    if (!activeShift) {
+        showGlobalToast("No active shift found. Please start a shift first.", "error");
+        return;
+    }
+
+    const modal = document.getElementById("modal-remittance");
+    const amountInput = document.getElementById("remit-amount");
+    const reasonInput = document.getElementById("remit-reason");
+    const historyList = document.getElementById("remittance-history-list");
+
+    if (amountInput) amountInput.value = "";
+    if (reasonInput) reasonInput.value = "";
+
+    renderRemittanceHistoryList(activeShift, historyList);
+
+    if (modal) modal.classList.remove("hidden");
+    if (amountInput) amountInput.focus();
+}
+
+function closeRemittanceModal() {
+    const modal = document.getElementById("modal-remittance");
+    if (modal) modal.classList.add("hidden");
+}
+
+function renderRemittanceHistoryList(shift, container) {
+    if (!container) return;
+    const remittances = shift.remittances || [];
+    if (remittances.length === 0) {
+        container.innerHTML = `<div class="text-gray-400 italic text-center py-2">No remittances recorded yet for this shift.</div>`;
+        return;
+    }
+
+    const sorted = [...remittances].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    container.innerHTML = sorted.map(r => `
+        <div class="flex justify-between items-center py-1.5 border-b border-gray-100 last:border-0">
+            <div>
+                <div class="font-bold text-gray-700 text-xs">${r.reason || 'Remittance'}</div>
+                <div class="text-[10px] text-gray-400">${new Date(r.timestamp).toLocaleTimeString()} · ${r.user || 'User'}</div>
+            </div>
+            <div class="font-mono font-bold text-purple-700 text-xs">₱${(r.amount || 0).toFixed(2)}</div>
+        </div>
+    `).join("");
+}
+
+async function saveRemittance() {
+    const amountInput = document.getElementById("remit-amount");
+    const reasonInput = document.getElementById("remit-reason");
+
+    const amount = parseFloat(amountInput?.value);
+    const reason = reasonInput?.value ? reasonInput.value.trim() : "";
+
+    if (isNaN(amount) || amount <= 0) {
+        showGlobalToast("Please enter a valid positive remittance amount.", "error");
+        return;
+    }
+
+    if (!reason) {
+        showGlobalToast("Please enter a reason or reference.", "error");
+        return;
+    }
+
+    try {
+        await recordRemittance(amount, reason);
+        showGlobalToast(`Cash remittance of ₱${amount.toFixed(2)} recorded!`, "success");
+        closeRemittanceModal();
+    } catch (err) {
+        console.error("Remittance failed:", err);
+        showGlobalToast("Failed to record remittance: " + err.message, "error");
+    }
 }
 
 let currentHistoryPage = 1;
