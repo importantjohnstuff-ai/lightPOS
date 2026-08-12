@@ -1,0 +1,670 @@
+<?php
+// Start output buffering early to capture any stray PHP warnings/notices
+// that would otherwise corrupt JSON responses (especially during schema init)
+ob_start();
+
+ini_set('serialize_precision', -1);
+ini_set('precision', 14);
+ini_set('memory_limit', '1024M');
+ini_set('max_execution_time', 300);
+
+header("Access-Control-Allow-Origin: *");
+header("Content-Type: application/json; charset=UTF-8");
+header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
+header("Access-Control-Allow-Headers: Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With");
+
+// Log errors to server log instead of outputting them into the response body
+ini_set('display_errors', 0);
+ini_set('display_startup_errors', 0);
+ini_set('log_errors', 1);
+error_reporting(E_ALL);
+
+// Register shutdown function to flush clean output and catch fatal errors
+register_shutdown_function(function () {
+    // Capture any stray output (PHP warnings, notices, etc.)
+    $strayOutput = ob_get_clean();
+    if ($strayOutput !== false && strlen(trim($strayOutput)) > 0) {
+        // Check if the output is valid JSON already
+        json_decode($strayOutput);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            // Clean JSON — send it as-is
+            echo $strayOutput;
+        } else {
+            // Output contains non-JSON content (PHP warnings mixed in)
+            // Try to extract just the JSON portion
+            $jsonStart = strpos($strayOutput, '{');
+            $jsonEnd = strrpos($strayOutput, '}');
+            if ($jsonStart !== false && $jsonEnd !== false) {
+                $jsonCandidate = substr($strayOutput, $jsonStart, $jsonEnd - $jsonStart + 1);
+                json_decode($jsonCandidate);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    // Log the stray non-JSON output for debugging
+                    $strayPart = substr($strayOutput, 0, $jsonStart);
+                    if (trim($strayPart)) {
+                        error_log("Stray PHP output captured (before JSON): " . trim($strayPart));
+                    }
+                    echo $jsonCandidate;
+                    return;
+                }
+            }
+            // Could not extract valid JSON — log the stray output and send an error
+            error_log("Stray PHP output captured (no valid JSON found): " . $strayOutput);
+            http_response_code(500);
+            echo json_encode(["error" => "Server produced invalid output. Check server logs."]);
+        }
+    }
+    // Check for fatal errors
+    $error = error_get_last();
+    if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        error_log("Fatal PHP error: " . $error['message'] . " in " . $error['file'] . ":" . $error['line']);
+        // Only send response if nothing was already sent
+        if (!headers_sent()) {
+            http_response_code(500);
+            echo json_encode(["error" => "Server Error: " . $error['message']]);
+        }
+    }
+});
+
+// Add a special action to clear OPcache for debugging
+if (isset($_GET['action']) && $_GET['action'] === 'clear_opcache') {
+    if (function_exists('opcache_reset')) {
+        opcache_reset();
+        echo json_encode(["success" => true, "message" => "PHP OPcache has been cleared."]);
+    } else {
+        echo json_encode(["success" => false, "message" => "OPcache is not enabled."]);
+    }
+    exit;
+}
+
+require_once __DIR__ . '/core/SQLiteStore.php';
+
+// --- START Schema Initialization Logic ---
+function ensureSchema($pdo)
+{
+    $pdo->exec("PRAGMA busy_timeout = 5000;");
+
+    // Check if the 'settings' table exists
+    $stmt = $pdo->prepare("PRAGMA table_info(settings)");
+    $stmt->execute();
+    $tableInfo = $stmt->fetchAll();
+
+    if (empty($tableInfo)) {
+        // If 'settings' table does not exist, execute the full schema
+        $schemaSql = file_get_contents(__DIR__ . '/schema/schema.sql');
+        if ($schemaSql === false) {
+            error_log("Error: Could not read schema.sql file.");
+            // Depending on desired behavior, you might want to throw an exception or die here
+            return;
+        }
+        $pdo->exec($schemaSql);
+        error_log("SQLite database schema initialized successfully.");
+    }
+
+    // Check if 'inventory_metrics' (PO module) exists
+    $stmt1 = $pdo->prepare("PRAGMA table_info(inventory_metrics)");
+    $stmt1->execute();
+    $stmt2 = $pdo->prepare("PRAGMA table_info(purchase_orders)");
+    $stmt2->execute();
+    if (empty($stmt1->fetchAll()) || empty($stmt2->fetchAll())) {
+        $schemaPo = file_get_contents(__DIR__ . '/schema/schema_po.sql');
+        if ($schemaPo) {
+            $pdo->exec($schemaPo);
+            error_log("PO Module schema initialized successfully.");
+        }
+    }
+
+    // Check if 'sync_metadata' exists (Critical for sync)
+    $stmtMeta = $pdo->prepare("PRAGMA table_info(sync_metadata)");
+    $stmtMeta->execute();
+    $metaCols = $stmtMeta->fetchAll(PDO::FETCH_COLUMN, 1);
+
+    if (empty($metaCols)) {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS sync_metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            _updatedAt INTEGER,
+            _deleted INTEGER DEFAULT 0
+        )");
+        error_log("DB Migration: Created sync_metadata table.");
+    } else {
+        // Fix for missing _deleted column if created by previous broken patch
+        if (!in_array('_deleted', $metaCols)) {
+            $pdo->exec("ALTER TABLE sync_metadata ADD COLUMN _deleted INTEGER DEFAULT 0");
+            error_log("DB Migration: Added _deleted column to sync_metadata.");
+        }
+    }
+
+    // V1.1 Migration: Add is_active to users table
+    $userCols = $pdo->query("PRAGMA table_info(users)")->fetchAll(PDO::FETCH_COLUMN, 1);
+    if (!in_array('is_active', $userCols)) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN is_active INTEGER DEFAULT 1");
+        error_log("DB Migration: Added is_active column to users table.");
+    }
+
+    // Fix for missing permissions_json and password_hash
+    if (!in_array('permissions_json', $userCols)) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN permissions_json TEXT");
+        error_log("DB Migration: Added permissions_json column to users table.");
+    }
+    if (!in_array('password_hash', $userCols)) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN password_hash TEXT");
+        error_log("DB Migration: Added password_hash column to users table.");
+    }
+
+    // Auto-repair Admin if password_hash is missing
+    $pdo->exec("UPDATE users SET password_hash = '" . md5('admin123') . "' WHERE email = 'admin@lightpos.com' AND (password_hash IS NULL OR password_hash = '')");
+
+    // Seed Default Admin if users table is empty (Deployment Initialization)
+    $stmt = $pdo->query("SELECT COUNT(*) FROM users");
+    if ($stmt && $stmt->fetchColumn() == 0) {
+        $defaultPermissions = json_encode([
+            "pos" => ["read" => true, "write" => true],
+            "customers" => ["read" => true, "write" => true],
+            "items" => ["read" => true, "write" => true],
+            "suppliers" => ["read" => true, "write" => true],
+            "stockin" => ["read" => true, "write" => true],
+            "stock-count" => ["read" => true, "write" => true],
+            "reports" => ["read" => true, "write" => true],
+            "expenses" => ["read" => true, "write" => true],
+            "users" => ["read" => true, "write" => true],
+            "shifts" => ["read" => true, "write" => true],
+            "migrate" => ["read" => true, "write" => true],
+            "returns" => ["read" => true, "write" => true],
+            "settings" => ["read" => true, "write" => true],
+            "purchase_orders" => ["read" => true, "write" => true]
+        ]);
+        $passwordHash = md5('admin123');
+        $now = round(microtime(true) * 1000);
+
+        $sql = "INSERT INTO users (email, name, password_hash, is_active, permissions_json, _version, _updatedAt, _deleted) 
+                VALUES ('admin@lightpos.com', 'Administrator', '$passwordHash', 1, '$defaultPermissions', 1, $now, 0)";
+        $pdo->exec($sql);
+        $pdo->exec("INSERT OR IGNORE INTO sync_metadata (key, value, _updatedAt) VALUES ('db_initialized', '1', $now)");
+        error_log("Seeded default admin user via router.php");
+    }
+}
+// --- END Schema Initialization Logic ---
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit;
+}
+
+// Ensure data directory exists before initializing SQLiteStore
+$dataDir = __DIR__ . '/../data';
+if (!is_dir($dataDir)) {
+    @mkdir($dataDir, 0777, true);
+}
+
+// Ensure data directory is writable
+if (!is_dir($dataDir) || !is_writable($dataDir)) {
+    http_response_code(500);
+    echo json_encode(["error" => "Server Data Directory is not writable. Please check permissions. Path: " . realpath(__DIR__ . '/..')]);
+    exit;
+}
+
+$store = new SQLiteStore();
+// Call the schema check after the store is initialized and PDO is available
+ensureSchema($store->pdo);
+$allowedFiles = ['items', 'users', 'suppliers', 'customers', 'transactions', 'shifts', 'expenses', 'stock_in_history', 'stockins', 'adjustments', 'suspended_transactions', 'returns', 'sync_metadata', 'last_sync', 'stock_movements', 'valuation_history', 'stock_logs', 'notifications', 'settings', 'inventory_metrics', 'supplier_config', 'purchase_orders', 'discount_codes', 'spatial_shelves', 'spatial_placements'];
+
+$action = $_GET['action'] ?? null;
+$file = $_GET['file'] ?? null;
+$mode = $_GET['mode'] ?? 'overwrite';
+$dryRun = isset($_GET['dry_run']) && $_GET['dry_run'] === 'true';
+$fields = $_GET['fields'] ?? null;
+
+if ($file && !in_array($file, $allowedFiles)) {
+    http_response_code(400);
+    echo json_encode(["error" => "Invalid file"]);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    if ($file) {
+        if ($fields) {
+            $cols = explode(',', $fields);
+            // Simple sanitization: only allow alphanumeric and underscores
+            $cols = array_filter($cols, function($c) { return preg_match('/^[a-zA-Z0-9_]+$/', trim($c)); });
+            if (empty($cols)) {
+                http_response_code(400);
+                echo json_encode(["error" => "Invalid fields"]);
+                exit;
+            }
+            $sql = "SELECT " . implode(',', $cols) . " FROM $file WHERE _deleted = 0";
+            $stmt = $store->pdo->prepare($sql);
+            $stmt->execute();
+            $data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            $data = $store->getAll($file);
+        }
+        // Decode permissions_json for the frontend
+        if ($file === 'users') {
+            foreach ($data as &$row) {
+                if (isset($row['permissions_json']) && is_string($row['permissions_json'])) {
+                    $row['permissions'] = json_decode($row['permissions_json'], true);
+                }
+            }
+        }
+        echo json_encode($data);
+    } elseif ($action === 'debug_data') { // Temporary debug endpoint
+        $usersData = $store->getAll('users');
+        $settingsData = $store->getAll('settings');
+        echo json_encode(["users" => $usersData, "settings" => $settingsData]);
+    } elseif ($action === 'get_counts') {
+        $counts = [];
+        foreach ($allowedFiles as $col) {
+            try {
+                $stmt = $store->pdo->query("SELECT COUNT(*) FROM $col");
+                $counts[$col] = $stmt ? (int)$stmt->fetchColumn() : 0;
+            } catch (Exception $e) {
+                $counts[$col] = 0;
+            }
+        }
+        echo json_encode($counts);
+    } elseif ($action === 'fix_admin') {
+        $defaultAdmin = [
+            "email" => "admin@lightpos.com",
+            "name" => "Super Admin",
+            "password_hash" => md5("admin123"),
+            "is_active" => true,
+            "_version" => 1,
+            "_updatedAt" => round(microtime(true) * 1000),
+            "_deleted" => false,
+            "permissions_json" => json_encode([
+                "pos" => ["read" => true, "write" => true],
+                "customers" => ["read" => true, "write" => true],
+                "items" => ["read" => true, "write" => true],
+                "suppliers" => ["read" => true, "write" => true],
+                "stockin" => ["read" => true, "write" => true],
+                "stock-count" => ["read" => true, "write" => true],
+                "reports" => ["read" => true, "write" => true],
+                "expenses" => ["read" => true, "write" => true],
+                "users" => ["read" => true, "write" => true],
+                "shifts" => ["read" => true, "write" => true],
+                "migrate" => ["read" => true, "write" => true],
+                "returns" => ["read" => true, "write" => true],
+                "settings" => ["read" => true, "write" => true]
+            ])
+        ];
+        $store->upsert('users', $defaultAdmin);
+        echo json_encode(["success" => true, "message" => "Admin user reset to default (admin@lightpos.com / admin123) with full permissions."]);
+    } else {
+        echo json_encode(["message" => "API Ready"]);
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $rawInput = file_get_contents("php://input");
+    $input = json_decode($rawInput, true);
+
+    if ($file && !is_array($input)) {
+        http_response_code(400);
+        $contentLength = isset($_SERVER['CONTENT_LENGTH']) ? (int)$_SERVER['CONTENT_LENGTH'] : 0;
+        $actualLength = strlen($rawInput);
+        $jsonError = json_last_error_msg();
+        
+        $errorMsg = "Invalid payload received.";
+        if ($contentLength > 0 && $actualLength === 0) {
+            $errorMsg = "Payload was empty. This usually means the request size ($contentLength bytes) exceeded PHP's post_max_size or memory limits.";
+        } elseif ($jsonError && $jsonError !== 'No error') {
+            $errorMsg = "JSON decoding failed: " . $jsonError . ". Input length: $actualLength bytes, Content-Length header: $contentLength.";
+        }
+        
+        error_log("Restore error on collection '$file': $errorMsg");
+        echo json_encode(["error" => $errorMsg]);
+        exit;
+    }
+
+    if ($file) {
+        if (!$dryRun) {
+            // Helper to process records before insertion
+            $processRecord = function (&$record) use ($file) {
+                // Map 'password' to 'password_hash'
+                if ($file === 'users' && isset($record['password']) && !isset($record['password_hash'])) {
+                    $record['password_hash'] = $record['password'];
+                    unset($record['password']);
+                }
+
+                // Auto-hash passwords for users if they look like plain text (legacy migration)
+                if ($file === 'users' && isset($record['password_hash'])) {
+                    // MD5 hex is 32 chars. If length differs, or it contains non-hex chars, assume plain text.
+                    if (strlen($record['password_hash']) !== 32 || !ctype_xdigit($record['password_hash'])) {
+                        $record['password_hash'] = md5($record['password_hash']);
+                    }
+                }
+            };
+
+            try {
+                $failedRows = [];
+                $store->beginTransaction();
+                
+                if ($mode === 'append') {
+                    if (is_array($input)) {
+                        foreach ($input as $record) {
+                            try {
+                                $processRecord($record);
+                                $store->upsert($file, $record);
+                            } catch (Exception $e) {
+                                error_log("Failed to insert record in $file: " . $e->getMessage());
+                                $record['_import_error'] = $e->getMessage();
+                                $failedRows[] = $record;
+                            }
+                        }
+                    }
+                } else {
+                    $store->wipe($file);
+                    foreach ($input as $record) {
+                        try {
+                            $processRecord($record);
+                            $store->upsert($file, $record);
+                        } catch (Exception $e) {
+                            error_log("Failed to insert record in $file: " . $e->getMessage());
+                            $record['_import_error'] = $e->getMessage();
+                            $failedRows[] = $record;
+                        }
+                    }
+                }
+                $store->commit();
+                
+                if (!empty($failedRows)) {
+                    // Return 207 Multi-Status to indicate some rows failed
+                    http_response_code(207);
+                    echo json_encode([
+                        "success" => true, 
+                        "partial" => true, 
+                        "message" => "Import completed with " . count($failedRows) . " failed records.",
+                        "failedRows" => $failedRows
+                    ]);
+                    exit;
+                }
+            } catch (Exception $e) {
+                if ($store->inTransaction()) {
+                    $store->rollBack();
+                }
+                http_response_code(500);
+                echo json_encode(["error" => "Import fundamentally failed: " . $e->getMessage()]);
+                exit;
+            }
+        }
+        echo json_encode(["success" => true]);
+    } elseif ($action === 'login') {
+        try {
+            // Ensure we wait for locks on login too
+            $store->pdo->exec("PRAGMA busy_timeout = 5000;");
+
+            $email = $input['email'] ?? '';
+            $password = $input['password'] ?? '';
+
+            $users = $store->getAll('users');
+            if (empty($users)) {
+                $defaultAdmin = [
+                    "email" => "admin@lightpos.com",
+                    "name" => "Super Admin",
+                    "password_hash" => md5("admin123"),
+                    "is_active" => true,
+                    "_version" => 1,
+                    "_updatedAt" => round(microtime(true) * 1000),
+                    "_deleted" => false,
+                    "permissions_json" => json_encode([
+                        "pos" => ["read" => true, "write" => true],
+                        "customers" => ["read" => true, "write" => true],
+                        "items" => ["read" => true, "write" => true],
+                        "suppliers" => ["read" => true, "write" => true],
+                        "stockin" => ["read" => true, "write" => true],
+                        "stock-count" => ["read" => true, "write" => true],
+                        "reports" => ["read" => true, "write" => true],
+                        "expenses" => ["read" => true, "write" => true],
+                        "users" => ["read" => true, "write" => true],
+                        "shifts" => ["read" => true, "write" => true],
+                        "migrate" => ["read" => true, "write" => true],
+                        "returns" => ["read" => true, "write" => true],
+                        "settings" => ["read" => true, "write" => true]
+                    ])
+                ];
+                $store->upsert('users', $defaultAdmin);
+                $users = [$defaultAdmin];
+            }
+
+            error_log("LOGIN attempt for $email. Users in DB: " . count($users));
+
+            $foundUser = null;
+            foreach ($users as $u) {
+                if ($u['email'] === $email && $u['password_hash'] === md5($password)) {
+                    $foundUser = $u;
+                    break;
+                }
+            }
+
+            if ($foundUser) {
+                if (isset($foundUser['is_active']) && !$foundUser['is_active']) {
+                    error_log("LOGIN failed for $email: account inactive");
+                    http_response_code(403);
+                    echo json_encode(["error" => "Account inactive"]);
+                } else {
+                    error_log("LOGIN success for $email");
+                    unset($foundUser['password_hash']); // Don't send hash back
+                    if (isset($foundUser['permissions_json']) && is_string($foundUser['permissions_json'])) {
+                        $foundUser['permissions'] = json_decode($foundUser['permissions_json'], true);
+                    }
+                    echo json_encode(["success" => true, "user" => $foundUser]);
+                }
+            } else {
+                error_log("LOGIN failed for $email: invalid credentials");
+                http_response_code(401);
+                echo json_encode(["error" => "Invalid credentials"]);
+            }
+        } catch (Exception $e) {
+            error_log("LOGIN CRASH: " . $e->getMessage());
+            http_response_code(500);
+            echo json_encode(["error" => "Server Error: " . $e->getMessage()]);
+        }
+    } elseif ($action === 'repair_users') {
+        // Utility to fix existing users with plain text passwords
+        $users = $store->getAll('users');
+        $count = 0;
+        foreach ($users as $u) {
+            // Check if password_hash is NOT a 32-char hex string (MD5)
+            if (isset($u['password_hash']) && (strlen($u['password_hash']) !== 32 || !ctype_xdigit($u['password_hash']))) {
+                $u['password_hash'] = md5($u['password_hash']);
+                $store->upsert('users', $u);
+                $count++;
+            }
+        }
+        echo json_encode(["success" => true, "message" => "Repaired $count user passwords."]);
+    } elseif ($action === 'reset_all') {
+        $toWipe = [
+            'items',
+            'transactions',
+            'shifts',
+            'expenses',
+            'stock_movements',
+            'adjustments',
+            'customers',
+            'suppliers',
+            'stockins',
+            'suspended_transactions',
+            'returns',
+            'notifications',
+            'stock_logs',
+            'settings',
+            'users',
+            'sync_metadata'
+        ];
+        try {
+            $store->beginTransaction();
+            foreach ($toWipe as $col) {
+                $store->wipe($col);
+            }
+
+            // Re-seed Admin
+            $defaultAdmin = [
+                "email" => "admin@lightpos.com",
+                "name" => "Super Admin",
+                "password_hash" => md5("admin123"),
+                "is_active" => true,
+                "_version" => 1,
+                "_updatedAt" => round(microtime(true) * 1000),
+                "_deleted" => false,
+                "permissions_json" => json_encode([
+                    "pos" => ["read" => true, "write" => true],
+                    "customers" => ["read" => true, "write" => true],
+                    "items" => ["read" => true, "write" => true],
+                    "suppliers" => ["read" => true, "write" => true],
+                    "stockin" => ["read" => true, "write" => true],
+                    "stock-count" => ["read" => true, "write" => true],
+                    "reports" => ["read" => true, "write" => true],
+                    "expenses" => ["read" => true, "write" => true],
+                    "users" => ["read" => true, "write" => true],
+                    "shifts" => ["read" => true, "write" => true],
+                    "migrate" => ["read" => true, "write" => true],
+                    "returns" => ["read" => true, "write" => true],
+                    "settings" => ["read" => true, "write" => true]
+                ])
+            ];
+            $store->upsert('users', $defaultAdmin);
+            $store->upsert('sync_metadata', ['key' => 'db_initialized', 'value' => '1']);
+
+            $store->commit();
+            echo json_encode(['status' => 'success', 'message' => 'System fully reset to factory defaults.']);
+        } catch (Exception $e) {
+            $store->rollBack();
+            http_response_code(500);
+            echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+        }
+    } elseif ($action === 'restore_from_client') {
+        $toWipe = [
+            'items',
+            'transactions',
+            'users',
+            'customers',
+            'suppliers',
+            'shifts',
+            'expenses',
+            'returns',
+            'stock_movements',
+            'adjustments',
+            'stockins',
+            'suspended_transactions',
+            'sync_metadata',
+            'stock_logs',
+            'settings',
+            'notifications'
+        ];
+        $dataDir = __DIR__ . '/../data/';
+        $restoreLockFile = $dataDir . 'restore.lock';
+
+        try {
+            $store->beginTransaction();
+
+            // 1. Wipe all tables
+            foreach ($toWipe as $col) {
+                if ($col !== 'sync_metadata') { // Don't wipe sync_metadata yet
+                    $store->wipe($col);
+                }
+            }
+            // Clear metadata separately
+            $store->wipe('sync_metadata');
+
+            // 2. Insert data from client
+            foreach ($input as $collection => $records) {
+                if (!in_array($collection, $toWipe))
+                    continue;
+                foreach ($records as $record) {
+                    $store->upsert($collection, $record);
+                }
+            }
+
+            // 3. Mark database as initialized
+            $store->upsert('sync_metadata', ['key' => 'db_initialized', 'value' => '1']);
+
+            $store->commit();
+
+            // 4. Remove restore lock
+            if (file_exists($restoreLockFile)) {
+                unlink($restoreLockFile);
+            }
+
+            echo json_encode(["success" => true, "message" => "Restore from client complete."]);
+
+        } catch (Exception $e) {
+            $store->rollBack();
+            http_response_code(500);
+            echo json_encode(['status' => 'error', 'message' => 'Restore failed: ' . $e->getMessage()]);
+        }
+
+    } elseif ($action === 'backup_db') {
+        $dbPath = __DIR__ . '/../data/database.sqlite';
+        $backupFile = __DIR__ . '/../data/backup.sql';
+        $command = "sqlite3 " . escapeshellarg($dbPath) . " .dump > " . escapeshellarg($backupFile);
+        shell_exec($command);
+
+        if (file_exists($backupFile)) {
+            header('Content-Description: File Transfer');
+            header('Content-Type: application/octet-stream');
+            header('Content-Disposition: attachment; filename="' . basename($backupFile) . '"');
+            header('Expires: 0');
+            header('Cache-Control: must-revalidate');
+            header('Pragma: public');
+            header('Content-Length: ' . filesize($backupFile));
+            readfile($backupFile);
+            unlink($backupFile);
+            exit;
+        } else {
+            http_response_code(500);
+            echo json_encode(["error" => "Backup failed."]);
+        }
+    } elseif ($action === 'restore_backup') {
+        if (isset($_FILES['backup_file'])) {
+            $backupFile = $_FILES['backup_file'];
+            if ($backupFile['error'] !== UPLOAD_ERR_OK) {
+                http_response_code(500);
+                echo json_encode(["error" => "File upload error: " . $backupFile['error']]);
+                exit;
+            }
+
+            $sql = file_get_contents($backupFile['tmp_name']);
+            if ($sql) {
+                try {
+                    // Wipe all data first
+                    $toWipe = [
+                        'items',
+                        'transactions',
+                        'users',
+                        'customers',
+                        'suppliers',
+                        'shifts',
+                        'expenses',
+                        'returns',
+                        'stock_movements',
+                        'adjustments',
+                        'stockins',
+                        'suspended_transactions',
+                        'sync_metadata',
+                        'stock_logs',
+                        'settings',
+                        'notifications'
+                    ];
+                    $store->beginTransaction();
+                    foreach ($toWipe as $col) {
+                        $store->wipe($col);
+                    }
+                    $store->pdo->exec($sql);
+                    $store->commit();
+                    echo json_encode(["success" => true, "message" => "Restore complete."]);
+                } catch (Exception $e) {
+                    $store->rollBack();
+                    http_response_code(500);
+                    echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+                }
+            } else {
+                http_response_code(400);
+                echo json_encode(["error" => "Invalid backup file."]);
+            }
+        } else {
+            http_response_code(400);
+            echo json_encode(["error" => "No backup file received."]);
+        }
+    }
+}
+?>

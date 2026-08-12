@@ -1,0 +1,1266 @@
+import { checkPermission } from "../auth.js";
+import { generateUUID, showToast } from "../utils.js";
+import { dbRepository as Repository } from "../db.js";
+import { dbPromise } from "../db.js";
+
+let itemsData = [];
+let suppliersList = [];
+let sortState = { key: 'pareto_rank', dir: 'asc' };
+let filterState = { search: '', lowStock: false, category: '', supplierId: '' };
+let selectedItemId = null;
+let itemSalesChart = null;
+let chartDays = 30;
+let compareMode = false;
+let selectedForCompare = [];
+let comparisonCharts = [];
+
+let selectedItemIds = new Set();
+
+export async function loadItemsView() {
+    const db = await dbPromise;
+    const content = document.getElementById("main-content");
+    const canWrite = checkPermission("items", "write");
+    selectedItemIds.clear(); // Reset selection on load
+
+    content.innerHTML = `
+        <div class="max-w-7xl mx-auto lg:h-[calc(100vh-140px)] flex flex-col">
+            <div class="flex flex-col lg:flex-row gap-0 flex-1 min-h-0 relative" id="items-split-container">
+                <!-- Left Column: Items List -->
+                <div id="items-list-panel" class="flex flex-col h-full min-h-[400px] lg:min-h-0 w-full lg:w-[45%] pr-4 transition-all duration-75">
+                    <div class="flex flex-col mb-4 flex-shrink-0">
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="text-2xl font-bold text-gray-800">Items</h2>
+                            <div class="flex gap-2">
+                                <button id="btn-compare-mode" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2 px-4 rounded transition duration-150 whitespace-nowrap text-xs">
+                                    Compare
+                                </button>
+                                <button id="btn-bulk-edit" class="hidden bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded transition duration-150 whitespace-nowrap text-xs">
+                                    Bulk Edit
+                                </button>
+                                <button id="btn-add-item" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-150 whitespace-nowrap text-xs ${canWrite ? '' : 'hidden'}">
+                                    + Add
+                                </button>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <input type="text" id="search-items" placeholder="Search..." class="shadow appearance-none border rounded w-full py-2 px-3 text-xs text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <select id="filter-items-category" class="shadow border rounded w-full py-2 px-3 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">All Categories</option>
+                            </select>
+                            <select id="filter-items-supplier" class="shadow border rounded w-full py-2 px-3 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">All Suppliers</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="bg-white shadow-md rounded flex flex-col flex-1 border min-h-0">
+                        <div class="overflow-y-auto flex-1">
+                            <table class="min-w-full table-auto">
+                                <thead class="sticky top-0 z-10 bg-gray-100">
+                                    <tr class="bg-gray-100 text-gray-600 uppercase text-[10px] leading-normal">
+                                        <th class="py-3 px-4 text-left w-10"><input type="checkbox" id="check-all-items"></th>
+                                        <th class="py-3 px-4 text-center cursor-pointer" data-sort="pareto_rank">Rank</th>
+                                        <th class="py-3 px-4 text-left cursor-pointer" data-sort="name">Name</th>
+                                        <th class="py-3 px-4 text-right cursor-pointer" data-sort="cost_price">Cost</th>
+                                        <th class="py-3 px-4 text-right cursor-pointer" data-sort="selling_price">Price</th>
+                                        <th class="py-3 px-4 text-left">Parent Item</th>
+                                        <th class="py-3 px-4 text-left">Supplier</th>
+                                        <th class="py-3 px-4 text-right cursor-pointer" data-sort="stock_level">Stock</th>
+                                        <th class="py-3 px-4 text-center">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="items-table-body" class="text-gray-600 text-sm font-light">
+                                    <tr><td colspan="3" class="py-3 px-6 text-center">Loading...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="items-pagination-info" class="p-2 bg-gray-50 text-[10px] text-center text-gray-400 italic border-t"></div>
+                    </div>
+                </div>
+
+                <!-- Resize Handle -->
+                <div id="items-resize-handle" class="hidden lg:flex w-4 cursor-col-resize items-center justify-center hover:bg-blue-50 group">
+                    <div class="w-1 h-12 bg-gray-300 rounded group-hover:bg-blue-400 transition-colors"></div>
+                </div>
+
+                <!-- Right Column: Item Insights -->
+                <div id="item-insights-panel" class="hidden lg:flex flex-col h-full min-h-[400px] lg:min-h-0 overflow-y-auto space-y-6 flex-1 pl-4">
+                    <!-- Header & Quadrant -->
+                    <div class="bg-white shadow-md rounded p-6 border-t-4 border-blue-500 flex-shrink-0">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <h3 id="insight-item-name" class="text-xl font-bold text-gray-800"></h3>
+                                <p id="insight-item-barcode" class="text-xs font-mono text-gray-500"></p>
+                            </div>
+                            <div id="item-quadrant-badge" class="px-3 py-1 rounded-full text-[10px] font-bold uppercase"></div>
+                        </div>
+
+                        <!-- Sales Chart -->
+                        <div class="mt-6">
+                            <div class="flex justify-between items-center mb-2">
+                                <h4 class="text-xs font-bold text-gray-400 uppercase">Daily Sales Trend</h4>
+                                <div class="flex gap-1">
+                                    <button class="btn-chart-range text-[10px] px-2 py-1 rounded bg-gray-100 hover:bg-gray-200" data-days="7">7D</button>
+                                    <button class="btn-chart-range text-[10px] px-2 py-1 rounded bg-blue-600 text-white" data-days="30">30D</button>
+                                </div>
+                            </div>
+                            <div class="h-48">
+                                <canvas id="item-sales-chart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Inventory Stats -->
+                    <div class="bg-white shadow-md rounded p-4 flex-shrink-0">
+                        <h4 class="text-xs font-bold text-gray-400 uppercase mb-3">Inventory Intelligence</h4>
+                        <table class="min-w-full text-sm">
+                            <tbody id="item-stats-body" class="divide-y divide-gray-100">
+                                <!-- Stats Rows -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Affinity -->
+                    <div class="bg-white shadow-md rounded overflow-hidden flex-shrink-0">
+                        <div class="bg-gray-50 px-4 py-2 border-b">
+                            <h4 class="text-xs font-bold text-gray-500 uppercase">Frequently Bought Together</h4>
+                        </div>
+                        <table class="min-w-full table-auto">
+                            <thead>
+                                <tr class="text-[10px] text-gray-500 uppercase bg-gray-100">
+                                    <th class="py-2 px-4 text-left">Related Item</th>
+                                    <th class="py-2 px-4 text-right">Attach Rate</th>
+                                </tr>
+                            </thead>
+                            <tbody id="item-affinity-body" class="text-xs text-gray-600">
+                                <!-- Affinity Rows -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Comparison Modal -->
+        <div id="modal-compare-items" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden overflow-y-auto h-full w-full z-[60]">
+            <div class="relative top-5 mx-auto p-5 border w-full max-w-6xl shadow-2xl rounded-xl bg-gray-50">
+                <div class="flex justify-between items-center mb-6 px-4">
+                    <h3 class="text-2xl font-bold text-gray-800">Product Comparison</h3>
+                    <button id="btn-close-compare" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" id="comparison-container">
+                    <!-- Columns injected here -->
+                </div>
+                <div class="mt-8 flex justify-center">
+                    <button class="bg-gray-800 text-white px-8 py-3 rounded-lg font-bold shadow-lg hover:bg-black transition close-compare-btn">Close Comparison</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Item Modal -->
+        <div id="modal-add-item" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full z-50">
+            <div class="relative top-10 mx-auto p-5 border w-96 md:w-[500px] shadow-lg rounded-md bg-white">
+                <div class="mt-3">
+                    <h3 id="item-modal-title" class="text-lg leading-6 font-medium text-gray-900 text-center mb-4">Add New Item</h3>
+                    <form id="form-add-item">
+                        <input type="hidden" id="item-id">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="mb-4 col-span-2">
+                                <label class="block text-gray-700 text-sm font-bold mb-2">Item Name</label>
+                                <input type="text" id="item-name" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2">Barcode</label>
+                                <div class="flex gap-2">
+                                    <input type="text" id="item-barcode" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                                    <button type="button" id="btn-gen-barcode" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold px-3 py-2 rounded text-xs transition whitespace-nowrap" title="Generate Random Hex Barcode">Generate</button>
+                                </div>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2">Category</label>
+                                <input type="text" id="item-category" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. Beverages">
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2">Supplier</label>
+                                <select id="item-supplier" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="">Select Supplier</option>
+                                </select>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2">Cost Price</label>
+                                <input type="number" step="0.01" id="item-cost" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2">Selling Price</label>
+                                <input type="number" step="0.01" id="item-price" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2">Initial Stock</label>
+                                <input type="number" id="item-stock" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" value="0">
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2">Min Stock Alert</label>
+                                <input type="number" id="item-min-stock" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" value="10">
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2">Base Unit (e.g. Can)</label>
+                                <input type="text" id="item-unit" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2">Parent Item (Bulk)</label>
+                                <input type="text" id="item-parent-search" placeholder="Search parent item..." autocomplete="off" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <input type="hidden" id="item-parent-id">
+                                <div id="parent-dropdown-list" class="hidden absolute z-50 bg-white border border-gray-300 mt-1 w-full rounded shadow-lg max-h-48 overflow-y-auto"></div>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2">Conversion Factor</label>
+                                <input type="number" id="item-conv" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="e.g. 12">
+                            </div>
+                        </div>
+        
+                        <div class="flex items-center justify-between mt-6">
+                            <button type="button" id="btn-cancel-item" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded focus:outline-none">Cancel</button>
+                            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none">Save Item</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bulk Edit Modal -->
+        <div id="modal-bulk-edit" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <div class="mt-3">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900 text-center mb-4">Bulk Edit Items</h3>
+                    <p class="text-xs text-gray-500 text-center mb-4" id="bulk-edit-count">Editing 0 items</p>
+                    <form id="form-bulk-edit">
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Cost Price (Leave empty to keep)</label>
+                            <input type="number" step="0.01" id="bulk-cost" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="No Change">
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Selling Price (Leave empty to keep)</label>
+                            <input type="number" step="0.01" id="bulk-price" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="No Change">
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Supplier (Select to change)</label>
+                            <select id="bulk-supplier" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">No Change</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center justify-between mt-6">
+                            <button type="button" id="btn-cancel-bulk" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded focus:outline-none">Cancel</button>
+                            <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded focus:outline-none">Apply Changes</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        </div>
+    `;
+
+    // Parent Search Logic
+    const parentSearchInput = document.getElementById("item-parent-search");
+    const parentIdInput = document.getElementById("item-parent-id");
+    const parentList = document.getElementById("parent-dropdown-list");
+
+    const renderParentOptions = (items) => {
+        parentList.innerHTML = "";
+        if (items.length === 0) {
+            parentList.classList.add("hidden");
+            return;
+        }
+        parentList.classList.remove("hidden");
+        items.forEach(item => {
+            const div = document.createElement("div");
+            div.className = "p-2 hover:bg-blue-100 cursor-pointer border-b last:border-b-0 text-sm";
+            div.textContent = item.name;
+            div.addEventListener("click", () => {
+                parentSearchInput.value = item.name;
+                parentIdInput.value = item.id;
+                parentList.classList.add("hidden");
+            });
+            parentList.appendChild(div);
+        });
+    };
+
+    parentSearchInput?.addEventListener("input", (e) => {
+        const term = e.target.value.toLowerCase();
+        parentIdInput.value = ""; // Reset ID on type
+        const currentId = document.getElementById("item-id")?.value;
+        const filtered = itemsData.filter(i =>
+            i.id !== currentId && i.name.toLowerCase().includes(term)
+        );
+        renderParentOptions(filtered);
+    });
+
+    parentSearchInput?.addEventListener("focus", () => {
+        const currentId = document.getElementById("item-id").value;
+        const filtered = itemsData.filter(i => i.id !== currentId);
+        renderParentOptions(filtered);
+    });
+
+    document.addEventListener("click", (e) => {
+        if (parentSearchInput && parentList && !parentSearchInput.contains(e.target) && !parentList.contains(e.target)) {
+            parentList.classList.add("hidden");
+        }
+    });
+
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+            document.getElementById("modal-add-item")?.classList.add("hidden");
+            document.getElementById("modal-bulk-edit")?.classList.add("hidden");
+            document.getElementById("modal-compare-items")?.classList.add("hidden");
+        }
+    });
+
+    // Resizable Split View Logic
+    const handle = document.getElementById("items-resize-handle");
+    const leftPanel = document.getElementById("items-list-panel");
+    const container = document.getElementById("items-split-container");
+
+    let isResizing = false;
+
+    if (handle) {
+        handle.addEventListener("mousedown", (e) => {
+            isResizing = true;
+            document.body.style.cursor = "col-resize";
+            document.body.style.userSelect = "none"; // Prevent text selection
+        });
+
+        document.addEventListener("mousemove", (e) => {
+            if (!isResizing) return;
+
+            const containerRect = container.getBoundingClientRect();
+            const newLeftWidth = e.clientX - containerRect.left;
+
+            // Constrain width (min 20%, max 80%)
+            const minWidth = containerRect.width * 0.2;
+            const maxWidth = containerRect.width * 0.8;
+
+            if (newLeftWidth >= minWidth && newLeftWidth <= maxWidth) {
+                leftPanel.style.width = `${newLeftWidth}px`;
+                leftPanel.style.flex = "none"; // Disable flex grow/shrink to respect width
+            }
+        });
+
+        document.addEventListener("mouseup", () => {
+            if (isResizing) {
+                isResizing = false;
+                document.body.style.cursor = "";
+                document.body.style.userSelect = "";
+            }
+        });
+    }
+
+    // Bulk Edit Handlers
+    document.getElementById("check-all-items")?.addEventListener("change", (e) => {
+        const checkboxes = document.querySelectorAll(".item-check");
+        if (e.target.checked) {
+            checkboxes.forEach(cb => {
+                cb.checked = true;
+                selectedItemIds.add(cb.dataset.id);
+            });
+        } else {
+            checkboxes.forEach(cb => {
+                cb.checked = false;
+            });
+            selectedItemIds.clear(); // Clear local state only for visible? Or global? Assuming visible for now.
+            // Actually, "Select All" usually implies visible items.
+            // Let's iterate visible inputs to be safe.
+        }
+        updateBulkButton();
+    });
+
+    document.getElementById("btn-bulk-edit")?.addEventListener("click", () => {
+        if (selectedItemIds.size === 0) return;
+        document.getElementById("bulk-edit-count").textContent = `Editing ${selectedItemIds.size} items`;
+
+        // Populate bulk supplier dropdown
+        const select = document.getElementById("bulk-supplier");
+        select.innerHTML = '<option value="">No Change</option>';
+        suppliersList.forEach(sup => {
+            const option = document.createElement("option");
+            option.value = sup.id;
+            option.textContent = sup.name;
+            select.appendChild(option);
+        });
+
+        document.getElementById("form-bulk-edit").reset();
+        document.getElementById("modal-bulk-edit").classList.remove("hidden");
+    });
+
+    document.getElementById("btn-cancel-bulk")?.addEventListener("click", () => {
+        document.getElementById("modal-bulk-edit").classList.add("hidden");
+    });
+
+    document.getElementById("form-bulk-edit")?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const costInput = document.getElementById("bulk-cost").value;
+        const priceInput = document.getElementById("bulk-price").value;
+        const supplierInput = document.getElementById("bulk-supplier").value;
+
+        if (!costInput && !priceInput && !supplierInput) {
+            document.getElementById("modal-bulk-edit").classList.add("hidden");
+            return;
+        }
+
+        const updates = {};
+        if (costInput) updates.cost_price = parseFloat(costInput);
+        if (priceInput) updates.selling_price = parseFloat(priceInput);
+        if (supplierInput) updates.supplier_id = supplierInput;
+
+        try {
+            const updatePromises = Array.from(selectedItemIds).map(async (id) => {
+                const item = await Repository.get('items', id);
+                if (item) {
+                    await Repository.upsert('items', { ...item, ...updates });
+                }
+            });
+
+            await Promise.all(updatePromises);
+
+            showToast(`Updated ${selectedItemIds.size} items successfully.`);
+            selectedItemIds.clear();
+            document.getElementById("check-all-items").checked = false;
+            document.getElementById("modal-bulk-edit").classList.add("hidden");
+            fetchItems();
+        } catch (err) {
+            console.error(err);
+            alert("Failed to update items.");
+        }
+    });
+
+
+    // Event Listeners
+    const modal = document.getElementById("modal-add-item");
+    if (canWrite) {
+        document.getElementById("btn-add-item")?.addEventListener("click", () => {
+            document.getElementById("form-add-item")?.reset();
+            const itemIdEl = document.getElementById("item-id");
+            if (itemIdEl) itemIdEl.value = ""; // Empty ID means new item
+            const parentIdEl = document.getElementById("item-parent-id");
+            if (parentIdEl) parentIdEl.value = "";
+            const titleEl = document.getElementById("item-modal-title");
+            if (titleEl) titleEl.textContent = "Add New Item";
+            const stockEl = document.getElementById("item-stock");
+            if (stockEl) stockEl.disabled = false;
+            modal?.classList.remove("hidden");
+            populateSupplierDropdown();
+        });
+    }
+    document.getElementById("btn-cancel-item")?.addEventListener("click", () => modal?.classList.add("hidden"));
+
+    // Generate Barcode Logic
+    const generateUniqueBarcode = () => {
+        const hexChars = "0123456789ABCDEF";
+        let code = "";
+        let isUnique = false;
+        let attempts = 0;
+
+        while (!isUnique && attempts < 100) {
+            code = "";
+            for (let i = 0; i < 6; i++) {
+                code += hexChars[Math.floor(Math.random() * 16)];
+            }
+            if (!itemsData.some(i => i.barcode === code)) {
+                isUnique = true;
+            }
+            attempts++;
+        }
+        return isUnique ? code : ""; // Fallback if super unlucky
+    };
+
+    document.getElementById("btn-gen-barcode")?.addEventListener("click", () => {
+        const unique = generateUniqueBarcode();
+        if (unique) {
+            document.getElementById("item-barcode").value = unique;
+        } else {
+            alert("Could not generate a unique barcode. Please try again.");
+        }
+    });
+
+    // Search & Filter Listeners
+    document.getElementById("search-items")?.addEventListener("input", (e) => {
+        filterState.search = e.target.value;
+        applyFiltersAndSort();
+    });
+
+    document.getElementById("filter-items-category")?.addEventListener("change", (e) => {
+        filterState.category = e.target.value;
+        applyFiltersAndSort();
+    });
+
+    document.getElementById("filter-items-supplier")?.addEventListener("change", (e) => {
+        filterState.supplierId = e.target.value;
+        applyFiltersAndSort();
+    });
+
+    document.getElementById("btn-compare-mode")?.addEventListener("click", (e) => {
+        compareMode = !compareMode;
+        selectedForCompare = [];
+        const btn = e.target;
+        if (compareMode) {
+            btn.textContent = "Select 2 items...";
+            btn.className = "bg-blue-100 text-blue-700 font-bold py-2 px-4 rounded border border-blue-300 animate-pulse text-xs";
+        } else {
+            btn.textContent = "Compare";
+            btn.className = "bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2 px-4 rounded transition duration-150 text-xs";
+            fetchItems(); // Refresh to clear highlights
+        }
+    });
+
+    document.getElementById("btn-close-compare")?.addEventListener("click", closeComparison);
+    document.querySelector(".close-compare-btn")?.addEventListener("click", closeComparison);
+
+    // Chart Range Toggles
+    content.addEventListener("click", (e) => {
+        const btn = e.target.closest(".btn-chart-range");
+        if (btn) {
+            chartDays = parseInt(btn.dataset.days);
+            content.querySelectorAll(".btn-chart-range").forEach(b => {
+                b.classList.remove("bg-blue-600", "text-white");
+                b.classList.add("bg-gray-100", "hover:bg-gray-200");
+            });
+            btn.classList.add("bg-blue-600", "text-white");
+            btn.classList.remove("bg-gray-100", "hover:bg-gray-200");
+            refreshItemInsights();
+        }
+    });
+
+    // Sorting Listener
+    content.addEventListener("click", (e) => {
+        const th = e.target.closest("th[data-sort]");
+        if (th) {
+            const key = th.dataset.sort;
+            if (sortState.key === key) {
+                sortState.dir = sortState.dir === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortState.key = key;
+                sortState.dir = 'asc';
+            }
+            applyFiltersAndSort();
+        }
+    });
+
+    // Form Submit
+    document.getElementById("form-add-item")?.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const db = await dbPromise;
+
+        const itemId = document.getElementById("item-id").value;
+        const barcode = document.getElementById("item-barcode").value.trim();
+        const name = document.getElementById("item-name").value.trim();
+        const category = document.getElementById("item-category").value.trim();
+
+        const itemData = {
+            name: name,
+            barcode: barcode,
+            category: category,
+            supplier_id: document.getElementById("item-supplier").value,
+            cost_price: parseFloat(document.getElementById("item-cost").value),
+            selling_price: parseFloat(document.getElementById("item-price").value),
+            stock_level: parseInt(document.getElementById("item-stock").value),
+            min_stock: parseInt(document.getElementById("item-min-stock").value),
+            base_unit: document.getElementById("item-unit").value,
+            parent_id: document.getElementById("item-parent-id").value || null,
+            conv_factor: document.getElementById("item-conv").value ? parseFloat(document.getElementById("item-conv").value) : 1
+        };
+
+        // 1. Check for duplicate/deleted barcodes
+        const existingBarcode = await db.items.where('barcode').equals(barcode).first();
+        if (existingBarcode && existingBarcode.id !== itemId) {
+            if (existingBarcode._deleted) {
+                if (confirm(`An item with barcode "${barcode}" ("${existingBarcode.name}") was previously deleted. Would you like to restore it with these new details?`)) {
+                    await Repository.upsert('items', { ...itemData, id: existingBarcode.id, _deleted: false });
+                    modal.classList.add("hidden");
+                    fetchItems();
+                }
+                return;
+            } else {
+                alert(`Validation Error: Barcode "${barcode}" is already assigned to "${existingBarcode.name}".`);
+                return;
+            }
+        }
+
+        // 2. Check for duplicate/deleted names (case-insensitive)
+        const existingName = await db.items.where('name').equalsIgnoreCase(name).first();
+        if (existingName && existingName.id !== itemId) {
+            if (existingName._deleted) {
+                if (confirm(`An item named "${name}" was previously deleted. Would you like to restore it?`)) {
+                    await Repository.upsert('items', { ...itemData, id: existingName.id, _deleted: false });
+                    modal.classList.add("hidden");
+                    fetchItems();
+                }
+                return;
+            } else {
+                alert(`Validation Error: An item named "${name}" already exists.`);
+                return;
+            }
+        }
+
+        try {
+            const finalData = itemId ? { ...itemData, id: itemId } : { ...itemData, id: generateUUID() };
+
+            // Use Repository for versioned, offline-first write
+            await Repository.upsert('items', finalData);
+
+            // Record Initial Stock Movement if new item
+            if (!itemId && finalData.stock_level > 0) {
+                const movement = {
+                    id: generateUUID(),
+                    item_id: finalData.id,
+                    item_name: finalData.name,
+                    timestamp: Math.floor(Date.now() / 1000),
+                    type: 'Initial Stock',
+                    qty: finalData.stock_level,
+                    user: JSON.parse(localStorage.getItem('pos_user'))?.email || 'unknown',
+                    reason: 'Initial Inventory'
+                };
+                await Repository.upsert('stock_movements', movement);
+            }
+
+            modal.classList.add("hidden");
+            e.target.reset();
+            document.getElementById("item-id").value = "";
+            fetchItems();
+        } catch (error) {
+            console.error("Error saving item:", error);
+            alert("Failed to save item.");
+        }
+    });
+
+    // Sync Chart Range Buttons with current state
+    content.querySelectorAll(".btn-chart-range").forEach(b => {
+        if (parseInt(b.dataset.days) === chartDays) {
+            b.classList.add("bg-blue-600", "text-white");
+            b.classList.remove("bg-gray-100", "hover:bg-gray-200");
+        } else {
+            b.classList.remove("bg-blue-600", "text-white");
+            b.classList.add("bg-gray-100", "hover:bg-gray-200");
+        }
+    });
+
+    // Initial Load
+    selectedItemId = null;
+    await Promise.all([fetchItems(), fetchSuppliers()]);
+}
+
+function applyFiltersAndSort() {
+    let filtered = [...itemsData];
+
+    // Filter
+    if (filterState.search) {
+        const term = filterState.search.toLowerCase();
+        filtered = filtered.filter(item =>
+            (item.name || "").toLowerCase().includes(term) ||
+            (item.barcode || "").toLowerCase().includes(term) ||
+            (item.category || "").toLowerCase().includes(term)
+        );
+    }
+    if (filterState.lowStock) {
+        filtered = filtered.filter(item => item.stock_level <= (item.min_stock || 10));
+    }
+    if (filterState.category) {
+        filtered = filtered.filter(item => item.category === filterState.category);
+    }
+    if (filterState.supplierId) {
+        filtered = filtered.filter(item => item.supplier_id === filterState.supplierId);
+    }
+
+    // Sort
+    filtered.sort((a, b) => {
+        let valA = a[sortState.key];
+        let valB = b[sortState.key];
+        if (typeof valA === 'string') valA = valA.toLowerCase();
+        if (typeof valB === 'string') valB = valB.toLowerCase();
+
+        // Handle pareto_rank specific logic (always maintain some order for equal ranks if needed)
+
+        if (valA < valB) return sortState.dir === 'asc' ? -1 : 1;
+        if (valA > valB) return sortState.dir === 'asc' ? 1 : -1;
+        return 0;
+    });
+
+    // Limit items for performance
+    const limit = 50;
+    const totalCount = filtered.length;
+    const limited = filtered.slice(0, limit);
+    renderItems(limited, totalCount);
+
+    const pagInfo = document.getElementById("items-pagination-info");
+    if (pagInfo) pagInfo.textContent = `Showing ${limited.length} of ${totalCount} items`;
+}
+
+async function fetchSuppliers() {
+    try {
+        const data = await Repository.getAll('suppliers');
+        suppliersList = Array.isArray(data) ? data : [];
+        populateFilterDropdowns();
+    } catch (error) {
+        console.error("Error loading suppliers:", error);
+        suppliersList = [];
+    }
+}
+
+function populateSupplierDropdown() {
+    const select = document.getElementById("item-supplier");
+    select.innerHTML = '<option value="">Select Supplier</option>';
+    suppliersList.forEach(sup => {
+        const option = document.createElement("option");
+        option.value = sup.id;
+        option.textContent = sup.name;
+        select.appendChild(option);
+    });
+}
+
+function populateFilterDropdowns() {
+    // Category Filter
+    const catSelect = document.getElementById("filter-items-category");
+    if (catSelect) {
+        const categories = [...new Set(itemsData.map(i => i.category).filter(c => c))].sort();
+        const currentVal = catSelect.value;
+        catSelect.innerHTML = '<option value="">All Categories</option>';
+        categories.forEach(cat => {
+            const opt = document.createElement("option");
+            opt.value = cat;
+            opt.textContent = cat;
+            catSelect.appendChild(opt);
+        });
+        catSelect.value = currentVal || filterState.category;
+    }
+
+    // Supplier Filter
+    const supSelect = document.getElementById("filter-items-supplier");
+    if (supSelect) {
+        const currentVal = supSelect.value;
+        supSelect.innerHTML = '<option value="">All Suppliers</option>';
+        suppliersList.forEach(sup => {
+            const opt = document.createElement("option");
+            opt.value = sup.id;
+            opt.textContent = sup.name;
+            supSelect.appendChild(opt);
+        });
+        supSelect.value = currentVal || filterState.supplierId;
+    }
+}
+
+async function fetchItems() {
+    const tbody = document.getElementById("items-table-body");
+    tbody.innerHTML = `<tr><td colspan="3" class="py-3 px-6 text-center">Loading...</td></tr>`;
+    try {
+        const data = await Repository.getAll('items');
+        itemsData = Array.isArray(data) ? data : [];
+        populateFilterDropdowns();
+        applyFiltersAndSort();
+        // Trigger background analysis
+        calculateItemPriorities();
+    } catch (error) {
+        console.error("Error fetching items:", error);
+        tbody.innerHTML = `<tr><td colspan="3" class="py-3 px-6 text-center text-red-500">Error loading items.</td></tr>`;
+    }
+}
+
+async function calculateItemPriorities() {
+    const db = await dbPromise;
+    try {
+        // Fetch all non-deleted, non-voided transactions with items
+        const allTxs = await db.transactions
+            .filter(t => !t._deleted && !t.is_voided && t.items && t.items.length > 0)
+            .toArray();
+
+        const itemProfits = {};
+
+        allTxs.forEach(t => {
+            t.items.forEach(i => {
+                // Determine cost: use transaction snapshot or fallback to current item cost (from itemsData) if 0/undefined
+                let cost = i.cost_price;
+                if (!cost) {
+                    const currentItem = itemsData.find(d => d.id === i.id);
+                    cost = currentItem ? currentItem.cost_price : 0;
+                }
+                const price = i.selling_price || 0;
+                const qty = i.qty || 0;
+                const profit = (price - (cost || 0)) * qty;
+
+                if (!itemProfits[i.id]) itemProfits[i.id] = 0;
+                itemProfits[i.id] += profit;
+            });
+        });
+
+        // Convert to array and sort by profit descending
+        const rankedItems = Object.entries(itemProfits)
+            .map(([id, profit]) => ({ id, profit }))
+            .sort((a, b) => b.profit - a.profit);
+
+        const totalProfit = rankedItems.reduce((sum, i) => sum + i.profit, 0);
+        let runningProfit = 0;
+        const priorities = {};
+
+        rankedItems.forEach((item, index) => {
+            runningProfit += item.profit;
+            const pct = totalProfit > 0 ? (runningProfit / totalProfit) * 100 : 100;
+
+            let category = 'Low';
+            if (pct <= 80) category = 'High';
+            else if (pct <= 95) category = 'Medium';
+
+            priorities[item.id] = { category, rank: index + 1 };
+        });
+
+        // Merge into itemsData
+        let updatedCount = 0;
+        itemsData.forEach(item => {
+            const p = priorities[item.id];
+            if (p) {
+                item.pareto_category = p.category;
+                item.pareto_rank = p.rank;
+            } else {
+                item.pareto_category = 'Low';
+                item.pareto_rank = 999999; // End of list
+            }
+            updatedCount++;
+        });
+
+        console.log(`Pareto analysis complete. Ranked ${rankedItems.length} items.`);
+
+        // Refresh view to show tags and apply new sort
+        applyFiltersAndSort();
+
+    } catch (err) {
+        console.error("Error calculating Pareto priorities:", err);
+    }
+}
+
+
+function renderItems(items, totalCount) {
+    const tbody = document.getElementById("items-table-body");
+    if (!tbody) return;
+    const canWrite = checkPermission("items", "write");
+    tbody.innerHTML = "";
+
+    if (items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="3" class="py-3 px-6 text-center">No items found.</td></tr>`;
+        return;
+    }
+
+    items.forEach(item => {
+        const row = document.createElement("tr");
+        const isSelected = selectedItemIds.has(item.id);
+        row.className = `border-b border-gray-200 hover:bg-blue-50 cursor-pointer transition-colors ${selectedItemId === item.id ? 'bg-blue-50' : ''}`;
+
+        const supplier = suppliersList.find(s => s.id === item.supplier_id)?.name || '-';
+        const parent = itemsData.find(i => i.id === item.parent_id)?.name || '-';
+
+        row.innerHTML = `
+            <td class="py-3 px-4 text-left"><input type="checkbox" class="item-check" data-id="${item.id}" ${isSelected ? 'checked' : ''}></td>
+            <td class="py-3 px-4 text-center font-mono text-xs text-gray-400">${item.pareto_rank < 999999 ? '#' + item.pareto_rank : '-'}</td>
+            <td class="py-3 px-4 text-left font-medium">
+                ${item.name}
+                ${item.pareto_category === 'High' ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-800 border border-green-200">High Priority</span>' : ''}
+                ${item.pareto_category === 'Medium' ? '<span class="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800 border border-yellow-200">Med Priority</span>' : ''}
+            </td>
+            <td class="py-3 px-4 text-right">₱${(item.cost_price || 0).toFixed(2)}</td>
+            <td class="py-3 px-4 text-right">₱${(item.selling_price || 0).toFixed(2)}</td>
+            <td class="py-3 px-4 text-left text-xs">${parent}</td>
+            <td class="py-3 px-4 text-left text-xs">${supplier}</td>
+            <td class="py-3 px-4 text-right ${item.stock_level <= item.min_stock ? 'text-red-600 font-bold' : ''}">${item.stock_level}</td>
+            <td class="py-3 px-4 text-center">
+                <button class="text-blue-500 hover:text-blue-700 edit-btn ${canWrite ? '' : 'hidden'}" data-id="${item.id}">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                </button>
+                <button class="text-red-500 hover:text-red-700 delete-btn ${canWrite ? '' : 'hidden'}" data-id="${item.id}">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
+            </td>
+        `;
+
+        const openEditModal = () => {
+            if (!canWrite) return;
+            // ... (keep existing openEditModal logic)
+            // WE NEED TO RE-IMPLEMENT THIS because I can't match "..."
+            document.getElementById("item-modal-title").textContent = "Edit Item";
+            document.getElementById("item-stock").disabled = true;
+            document.getElementById("item-id").value = item.id;
+            document.getElementById("item-name").value = item.name;
+            document.getElementById("item-barcode").value = item.barcode;
+            document.getElementById("item-category").value = item.category || "";
+            document.getElementById("item-cost").value = item.cost_price;
+            document.getElementById("item-price").value = item.selling_price;
+            document.getElementById("item-stock").value = item.stock_level;
+            document.getElementById("item-min-stock").value = item.min_stock;
+            document.getElementById("item-unit").value = item.base_unit || "";
+            document.getElementById("item-conv").value = item.conv_factor || "";
+
+            populateSupplierDropdown();
+
+            document.getElementById("item-supplier").value = item.supplier_id || "";
+
+            // Populate Parent Search
+            const parentItem = itemsData.find(p => p.id === item.parent_id);
+            document.getElementById("item-parent-search").value = parentItem ? parentItem.name : "";
+            document.getElementById("item-parent-id").value = item.parent_id || "";
+
+            document.getElementById("modal-add-item").classList.remove("hidden");
+        };
+
+        row.addEventListener("click", (e) => {
+            if (e.target.closest("button") || e.target.classList.contains("item-check")) return;
+
+            // Handle clicking checkboxes
+            if (e.target.tagName === 'INPUT' && e.target.type === 'checkbox') {
+                // Let the change event handler handle it (attached below)
+                return;
+            }
+
+            if (compareMode) {
+                const idx = selectedForCompare.findIndex(i => i.id === item.id);
+                if (idx > -1) {
+                    selectedForCompare.splice(idx, 1);
+                    row.classList.remove("bg-blue-100", "ring-2", "ring-blue-500");
+                } else if (selectedForCompare.length < 2) {
+                    selectedForCompare.push(item);
+                    row.classList.add("bg-blue-100", "ring-2", "ring-blue-500");
+                    if (selectedForCompare.length === 2) openComparisonModal();
+                }
+            } else {
+                selectItem(item);
+            }
+        });
+
+        // Checkbox listener
+        row.querySelector(".item-check").addEventListener("change", (e) => {
+            if (e.target.checked) {
+                selectedItemIds.add(item.id);
+            } else {
+                selectedItemIds.delete(item.id);
+            }
+            updateBulkButton();
+        });
+
+        row.querySelector(".edit-btn").addEventListener("click", (e) => {
+            e.stopPropagation();
+            openEditModal();
+        });
+
+        row.querySelector(".delete-btn").addEventListener("click", async (e) => {
+            e.stopPropagation();
+            if (confirm(`Delete item "${item.name}"?`)) {
+                const id = e.currentTarget.getAttribute("data-id");
+                try {
+                    await Repository.remove('items', id);
+                    selectedItemIds.delete(id); // Remove from selection
+                    updateBulkButton();
+                    await fetchItems();
+                } catch (error) {
+                    console.error("Error deleting item:", error);
+                    alert("Failed to delete item.");
+                }
+            }
+        });
+
+        tbody.appendChild(row);
+    });
+}
+
+function updateBulkButton() {
+    const btn = document.getElementById("btn-bulk-edit");
+    if (!btn) return;
+    if (selectedItemIds.size > 0) {
+        btn.classList.remove("hidden");
+        btn.textContent = `Bulk Edit (${selectedItemIds.size})`;
+    } else {
+        btn.classList.add("hidden");
+    }
+}
+
+async function selectItem(item) {
+    selectedItemId = item.id;
+    document.getElementById("item-insights-panel").classList.remove("hidden");
+    document.getElementById("insight-item-name").textContent = item.name;
+    document.getElementById("insight-item-barcode").textContent = item.barcode;
+
+    // Highlight selected row
+    document.querySelectorAll("#items-table-body tr").forEach(row => row.classList.remove("bg-blue-50"));
+    const rows = document.querySelectorAll("#items-table-body tr");
+    const idx = itemsData.findIndex(i => i.id === item.id);
+    if (idx !== -1 && rows[idx]) rows[idx].classList.add("bg-blue-50");
+
+    await refreshItemInsights();
+}
+
+async function refreshItemInsights() {
+    const db = await dbPromise;
+    const item = itemsData.find(i => i.id === selectedItemId);
+    if (!item) return;
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - chartDays);
+    const startStr = startDate.toISOString();
+
+    // 1. Fetch Transactions for this item
+    // Note: Query both string and integer ranges to handle mixed formats
+    const [salesStr, salesInt] = await Promise.all([
+        db.transactions
+            .where('timestamp').aboveOrEqual(startStr)
+            .filter(t => !t._deleted && !t.is_voided && t.items.some(it => it.id === item.id))
+            .toArray(),
+        db.transactions
+            .where('timestamp').aboveOrEqual(startDate.getTime())
+            .filter(t => !t._deleted && !t.is_voided && t.items.some(it => it.id === item.id))
+            .toArray()
+    ]);
+
+    const itemSales = [...salesStr, ...salesInt];
+
+    // 1b. Fetch Total Sold All Time & First Sale Date
+    let totalSoldAllTime = 0;
+    let firstSaleDate = null;
+
+    await db.transactions
+        .filter(t => !t._deleted && !t.is_voided && t.items.some(it => it.id === item.id))
+        .each(t => {
+            const entry = t.items.find(it => it.id === item.id);
+            if (entry) {
+                totalSoldAllTime += entry.qty;
+                const tDate = new Date(t.timestamp);
+                if (!firstSaleDate || tDate < firstSaleDate) {
+                    firstSaleDate = tDate;
+                }
+            }
+        });
+
+    // 2. Render Chart
+    renderItemSalesChart(itemSales, item.id, chartDays);
+
+    // 3. Calculate Stats
+    const totalQty = itemSales.reduce((sum, t) => sum + (t.items.find(i => i.id === item.id)?.qty || 0), 0);
+
+    let effectiveDays = chartDays;
+    if (firstSaleDate) {
+        const now = new Date();
+        const daysSinceFirstSale = (now - firstSaleDate) / (1000 * 60 * 60 * 24);
+        if (daysSinceFirstSale < chartDays) {
+            effectiveDays = Math.max(1, Math.ceil(daysSinceFirstSale));
+        }
+    }
+
+    const avgDaily = totalQty / effectiveDays;
+    const duration = avgDaily > 0 ? Math.floor(item.stock_level / avgDaily) : Infinity;
+
+    // Forecasted Monthly Sales
+    const forecastedMonthly = Math.ceil(avgDaily * 30);
+
+    // Last Stock Count
+    const lastAudit = await db.adjustments.where('item_id').equals(item.id).last();
+
+    // Quadrant Classification (From Reports V2)
+    const badge = document.getElementById("item-quadrant-badge");
+    const tag = item.performance_tag || 'Uncategorized';
+
+    badge.textContent = tag;
+
+    // Reset classes
+    badge.className = "px-3 py-1 rounded-full text-[10px] font-bold uppercase border";
+
+    if (tag === 'Winner') {
+        badge.classList.add("bg-green-100", "text-green-700", "border-green-200");
+    } else if (tag === 'Traffic Builder') { // equivalent to old Cash Cow
+        badge.classList.add("bg-blue-100", "text-blue-700", "border-blue-200");
+    } else if (tag === 'Sleeper') {
+        badge.classList.add("bg-yellow-100", "text-yellow-700", "border-yellow-200");
+    } else if (tag === 'Bleeder') { // equivalent to old Dog
+        badge.classList.add("bg-red-100", "text-red-700", "border-red-200");
+    } else {
+        badge.classList.add("bg-gray-100", "text-gray-500", "border-gray-200");
+    }
+
+    document.getElementById("item-stats-body").innerHTML = `
+            <tr><td class="py-2 text-gray-500">Total Sold (All Time)</td><td class="py-2 text-right font-bold">${totalSoldAllTime} units</td></tr>
+        <tr><td class="py-2 text-gray-500">Avg. Daily Sales</td><td class="py-2 text-right font-bold">${avgDaily.toFixed(2)} units</td></tr>
+        <tr><td class="py-2 text-gray-500">Stock Duration</td><td class="py-2 text-right font-bold ${duration < 7 ? 'text-red-600' : ''}">${duration === Infinity ? 'N/A' : duration + ' days'}</td></tr>
+        <tr><td class="py-2 text-gray-500">Forecasted Monthly Sales</td><td class="py-2 text-right font-bold text-blue-600">${forecastedMonthly} units</td></tr>
+        <tr><td class="py-2 text-gray-500">Last Stock Count</td><td class="py-2 text-right font-bold">${lastAudit ? new Date(lastAudit.timestamp).toLocaleDateString() : 'Never'}</td></tr>
+        `;
+
+    // 4. Affinity
+    const itemMap = {};
+    itemSales.forEach(t => {
+        t.items.forEach(i => {
+            if (i.id !== item.id) itemMap[i.name] = (itemMap[i.name] || 0) + 1;
+        });
+    });
+    const topAffinity = Object.entries(itemMap).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    document.getElementById("item-affinity-body").innerHTML = topAffinity.map(([name, count]) => `
+            <tr class="border-b"><td class="py-2 px-4">${name}</td><td class="py-2 px-4 text-right font-bold text-blue-600">${((count / itemSales.length) * 100).toFixed(1)}%</td></tr>
+                `).join('') || '<tr><td colspan="2" class="py-4 text-center text-gray-400 italic">No data</td></tr>';
+}
+
+function renderItemSalesChart(transactions, itemId, days) {
+    const ctx = document.getElementById('item-sales-chart').getContext('2d');
+    if (itemSalesChart) itemSalesChart.destroy();
+
+    const dailyData = {};
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Normalize to start of day local time
+
+    for (let i = 0; i < days; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const key = d.toISOString().split('T')[0];
+        dailyData[key] = 0;
+    }
+
+    transactions.forEach(t => {
+        const dateObj = new Date(t.timestamp);
+        const day = dateObj.toISOString().split('T')[0];
+        if (dailyData[day] !== undefined) {
+            dailyData[day] += t.items.find(i => i.id === itemId)?.qty || 0;
+        }
+    });
+
+    const labels = Object.keys(dailyData).reverse();
+    const values = Object.values(dailyData).reverse();
+
+    itemSalesChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [{
+                label: 'Units Sold',
+                data: values,
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                fill: true,
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 10 } } },
+                x: { ticks: { font: { size: 8 }, maxRotation: 45, minRotation: 45 } }
+            }
+        }
+    });
+}
+
+async function openComparisonModal() {
+    const modal = document.getElementById("modal-compare-items");
+    const container = document.getElementById("comparison-container");
+    container.innerHTML = `<div class="col-span-2 text-center py-20 text-gray-500 italic">Analyzing data...</div>`;
+    modal.classList.remove("hidden");
+
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - chartDays);
+    const startStr = startDate.toISOString();
+
+    const db = await dbPromise;
+    const [txsStr, txsInt, allMovements, allAdjustments] = await Promise.all([
+        db.transactions.where('timestamp').aboveOrEqual(startStr).and(t => !t._deleted && !t.is_voided).toArray(),
+        db.transactions.where('timestamp').aboveOrEqual(startDate.getTime()).and(t => !t._deleted && !t.is_voided).toArray(),
+        db.stock_movements.toArray(),
+        db.adjustments.toArray()
+    ]);
+
+    const txs = [...txsStr, ...txsInt];
+
+    // Use stored performance tags (from Reports V2)
+    const allItemStats = {}; // Kept only if needed for other stats, but derived below logic removed.
+
+    container.innerHTML = "";
+    comparisonCharts.forEach(c => c.destroy());
+    comparisonCharts = [];
+
+    for (let i = 0; i < 2; i++) {
+        const item = selectedForCompare[i];
+        const itemSales = txs.filter(t => t.items.some(it => it.id === item.id));
+
+        // Use stored tag or fallback
+        const quadrant = item.performance_tag || 'Uncategorized';
+
+        let badgeClass = "bg-gray-100 text-gray-700";
+        let borderClass = "border-gray-500";
+
+        if (quadrant === 'Winner') {
+            badgeClass = "bg-green-100 text-green-700"; borderClass = "border-green-500";
+        } else if (quadrant === 'Traffic Builder') {
+            badgeClass = "bg-blue-100 text-blue-700"; borderClass = "border-blue-500";
+        } else if (quadrant === 'Sleeper') {
+            badgeClass = "bg-yellow-100 text-yellow-700"; borderClass = "border-yellow-500";
+        } else if (quadrant === 'Bleeder') {
+            badgeClass = "bg-red-100 text-red-700"; borderClass = "border-red-500";
+        }
+
+        const totalQty = itemSales.reduce((sum, t) => sum + t.items.find(it => it.id === item.id).qty, 0);
+        const avgDaily = totalQty / chartDays;
+        const duration = avgDaily > 0 ? Math.floor(item.stock_level / avgDaily) : Infinity;
+
+        const col = document.createElement("div");
+        col.className = `bg-white shadow-xl rounded-xl p-6 border-t-8 ${borderClass} space-y-6`;
+        col.innerHTML = `
+    <div class="flex justify-between items-start">
+                <div>
+                    <h4 class="text-xl font-bold text-gray-800">${item.name}</h4>
+                    <p class="text-xs font-mono text-gray-400">${item.barcode}</p>
+                </div>
+                <span class="px-3 py-1 rounded-full text-[10px] font-bold uppercase ${badgeClass}">${quadrant}</span>
+            </div>
+            <div class="h-40"><canvas id="compare-chart-${i}"></canvas></div>
+            <div class="bg-gray-50 rounded-lg p-4">
+                <table class="w-full text-sm">
+                    <tr class="border-b border-gray-200"><td class="py-2 text-gray-500">Avg Daily Sales</td><td class="py-2 text-right font-bold">${avgDaily.toFixed(2)}</td></tr>
+                    <tr class="border-b border-gray-200"><td class="py-2 text-gray-500">Stock Duration</td><td class="py-2 text-right font-bold">${duration === Infinity ? 'N/A' : duration + ' days'}</td></tr>
+                    <tr class="border-b border-gray-200"><td class="py-2 text-gray-500">Current Stock</td><td class="py-2 text-right font-bold">${item.stock_level}</td></tr>
+                    <tr><td class="py-2 text-gray-500">Selling Price</td><td class="py-2 text-right font-bold text-green-600">₱${item.selling_price.toFixed(2)}</td></tr>
+                </table>
+            </div>
+        `;
+        container.appendChild(col);
+
+        // Render Chart
+        const ctx = document.getElementById(`compare-chart-${i}`).getContext('2d');
+        const dailyData = {};
+        for (let j = 0; j < chartDays; j++) {
+            const d = new Date(); d.setDate(d.getDate() - j);
+            dailyData[d.toISOString().split('T')[0]] = 0;
+        }
+        itemSales.forEach(t => {
+            const dateObj = new Date(t.timestamp);
+            const day = dateObj.toISOString().split('T')[0];
+            if (dailyData[day] !== undefined) dailyData[day] += t.items.find(it => it.id === item.id).qty;
+        });
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: Object.keys(dailyData).reverse(),
+                datasets: [{
+                    data: Object.values(dailyData).reverse(),
+                    borderColor: i === 0 ? '#3b82f6' : '#8b5cf6',
+                    backgroundColor: i === 0 ? 'rgba(59, 130, 246, 0.1)' : 'rgba(139, 92, 246, 0.1)',
+                    fill: true, tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true, ticks: { font: { size: 8 } } }, x: { ticks: { display: false } } }
+            }
+        });
+        comparisonCharts.push(chart);
+    }
+}
+
+function closeComparison() {
+    document.getElementById("modal-compare-items").classList.add("hidden");
+    compareMode = false;
+    selectedForCompare = [];
+    const btn = document.getElementById("btn-compare-mode");
+    if (btn) {
+        btn.textContent = "Compare";
+        btn.className = "bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-2 px-4 rounded transition duration-150 text-xs";
+    }
+    fetchItems();
+}

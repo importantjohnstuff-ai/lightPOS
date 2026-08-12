@@ -1,0 +1,3571 @@
+import { checkPermission, requestManagerApproval } from "../auth.js";
+import { checkActiveShift, requireShift, showCloseShiftModal, recordRemittance, getShiftFinancials, showNonCashPaymentsModal, showRemittanceHistoryModal } from "./shift.js";
+import { addNotification } from "../services/notification-service.js";
+import { getSystemSettings } from "./settings.js";
+import { generateUUID, showToast as showGlobalToast, handleError } from "../utils.js";
+import { dbRepository as Repository } from "../db.js";
+import { SyncEngine } from "../services/SyncEngine.js";
+
+let activeCartIndex = null;
+let qtyBuffer = "";
+let currentSuspendedId = null;
+let currentSuspendedCreatedAt = null;
+
+let audioCtx = null;
+function playBeep(freq, dur, type = 'sine') {
+    try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + dur);
+        osc.start();
+        osc.stop(audioCtx.currentTime + dur);
+    } catch (e) { console.warn("Audio feedback failed", e); }
+}
+
+// Global shortcut listener for POS
+document.addEventListener("keydown", (e) => {
+    const searchInput = document.getElementById("pos-search");
+    const custInput = document.getElementById("pos-customer-search");
+
+    // Only run if POS elements are present
+    if (!searchInput || !custInput) return;
+
+    // Cart Navigation Mode (F3)
+    if (activeCartIndex !== null && posCart.length > 0) {
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            activeCartIndex = (activeCartIndex + 1) % posCart.length;
+            qtyBuffer = "";
+            renderCart();
+            return;
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            activeCartIndex = (activeCartIndex - 1 + posCart.length) % posCart.length;
+            qtyBuffer = "";
+            renderCart();
+            return;
+        } else if (e.key >= "0" && e.key <= "9") {
+            e.preventDefault();
+            qtyBuffer += e.key;
+            renderCart();
+            return;
+        } else if (e.key === "Backspace") {
+            e.preventDefault();
+            if (qtyBuffer.length > 0) {
+                qtyBuffer = qtyBuffer.slice(0, -1);
+                renderCart();
+            } else {
+                removeFromCart(activeCartIndex);
+                activeCartIndex = null;
+                renderCart();
+                searchInput.focus();
+            }
+            return;
+        } else if (e.key === "Delete") {
+            e.preventDefault();
+            removeFromCart(activeCartIndex);
+            activeCartIndex = null;
+            qtyBuffer = "";
+            renderCart();
+            searchInput.focus();
+            return;
+        } else if (e.key === "Escape" || e.key === "Enter") {
+            e.preventDefault();
+            if (e.key === "Enter" && qtyBuffer !== "") {
+                updateQty(activeCartIndex, parseInt(qtyBuffer));
+            }
+            activeCartIndex = null;
+            qtyBuffer = "";
+            renderCart();
+            searchInput.focus();
+            return;
+        }
+    }
+
+    if (e.key === "F1") {
+        e.preventDefault();
+        searchInput.value = "";
+        filterItems("");
+        searchInput.focus();
+
+        // Visual highlight flash effect
+        searchInput.classList.add("ring-4", "ring-blue-400", "bg-blue-50");
+        setTimeout(() => {
+            searchInput.classList.remove("ring-4", "ring-blue-400", "bg-blue-50");
+        }, 300);
+    } else if (e.key === "F2") {
+        e.preventDefault();
+        custInput.focus();
+
+        // Visual highlight flash effect
+        custInput.classList.add("ring-4", "ring-blue-400", "bg-blue-50");
+        setTimeout(() => {
+            custInput.classList.remove("ring-4", "ring-blue-400", "bg-blue-50");
+        }, 300);
+    } else if (e.key === "F3") {
+        e.preventDefault();
+        if (posCart.length > 0) {
+            activeCartIndex = 0;
+            qtyBuffer = "";
+            renderCart();
+            // Scroll to top of posCart
+            document.getElementById("pos-cart-items").scrollTop = 0;
+        }
+    } else if (e.key === "F4") {
+        e.preventDefault();
+        const btnCheckout = document.getElementById("btn-checkout");
+        if (btnCheckout && !btnCheckout.disabled) {
+            btnCheckout.click();
+        }
+    } else if (e.key === "F8") {
+        e.preventDefault();
+        const btnPrint = document.getElementById("btn-print-last-receipt");
+        if (btnPrint) btnPrint.click();
+    } else if (e.key === "Escape") {
+        e.preventDefault();
+
+        const modals = [
+            "modal-suspended",
+            "modal-pos-history",
+            "modal-pos-tx-details",
+            "modal-checkout",
+            "modal-quick-customer",
+            "modal-remittance",
+            "modal-close-shift",
+            "mobile-pos-camera-overlay",
+            "mobile-payment-overlay",
+            "mobile-change-overlay"
+        ];
+
+        let modalClosed = false;
+        modals.forEach(id => {
+            const el = document.getElementById(id);
+            if (el && !el.classList.contains("hidden")) {
+                el.classList.add("hidden");
+                modalClosed = true;
+            }
+        });
+
+        if (!modalClosed) {
+            document.getElementById("btn-clear-posCart")?.click();
+        }
+    }
+});
+
+let isResizing = false;
+
+/**
+ * Resizing logic for the POS posCart
+ */
+document.addEventListener('mousemove', (e) => {
+    if (!isResizing) return;
+    const posCart = document.getElementById('pos-cart-container');
+    const container = posCart?.parentElement;
+    if (!posCart || !container) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const newWidth = containerRect.right - e.clientX;
+    const minWidth = 320;
+    const maxWidth = containerRect.width * 0.6;
+
+    if (newWidth >= minWidth && newWidth <= maxWidth) {
+        const widthStr = `${newWidth}px`;
+        posCart.style.width = widthStr;
+        localStorage.setItem('pos_cart_width', widthStr);
+    }
+});
+
+document.addEventListener('mouseup', () => {
+    if (isResizing) {
+        isResizing = false;
+        document.body.style.cursor = 'default';
+        document.body.classList.remove('select-none');
+    }
+});
+
+let allItems = [];
+let barcodeMap = new Map(); // Fast lookup for scanner
+let allCustomers = [];
+let posCart = [];
+let lastTransactionData = null;
+let selectedCustomer = { id: "Guest", name: "Guest" };
+
+let mobilePosStream = null;
+let isPosCameraRunning = false;
+let posBarcodeDetector = null;
+let posScanDebounce = false;
+
+export async function loadPosView() {
+    const content = document.getElementById("main-content");
+    content.innerHTML = ""; // Clear content while checking
+
+    await checkActiveShift();
+
+    requireShift(async () => {
+        renderPosInterface(content);
+    });
+}
+
+async function renderPosInterface(content) {
+    const savedCartWidth = localStorage.getItem('pos_cart_width') || '33.33%';
+    const savedCols = localStorage.getItem('pos_grid_cols') || '3';
+    const savedCompact = localStorage.getItem('pos_compact_mode') || 'false';
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+    // Full height layout minus header padding
+    content.innerHTML = `
+        <div class="flex flex-col md:flex-row h-[calc(100vh-100px)] gap-0 overflow-hidden">
+            <!-- Left Column: Item Grid -->
+            <div id="pos-grid-container" class="flex-1 flex flex-col bg-white rounded-l-lg shadow-md overflow-hidden">
+                <!-- Search Bar -->
+                <div class="p-4 border-b bg-gray-50 flex gap-4 items-center">
+                    <div class="relative flex-1">
+                        <input type="text" id="pos-search" placeholder="Search items (F1)..." 
+                            class="w-full pl-10 p-3 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg transition-all duration-300"
+                            autocomplete="off">
+                        <svg class="w-6 h-6 absolute left-3 top-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    </div>
+                    <button id="btn-pos-mobile-mode" class="${isMobile ? '' : 'md:hidden'} bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg shadow transition shrink-0" title="Mobile View">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                    </button>
+                    <div class="flex items-center gap-2 shrink-0 ml-2">
+                        <label class="text-[10px] font-bold text-gray-400 uppercase cursor-pointer select-none" for="pos-compact-mode">Compact:</label>
+                        <input type="checkbox" id="pos-compact-mode" ${savedCompact === 'true' ? 'checked' : ''} class="form-checkbox h-4 w-4 text-blue-600 cursor-pointer">
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <label class="text-[10px] font-bold text-gray-400 uppercase">Cols:</label>
+                        <select id="pos-grid-cols" class="border rounded p-1 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+                            <option value="1" ${savedCols === '1' ? 'selected' : ''}>1</option>
+                            <option value="2" ${savedCols === '2' ? 'selected' : ''}>2</option>
+                            <option value="3" ${savedCols === '3' ? 'selected' : ''}>3</option>
+                            <option value="4" ${savedCols === '4' ? 'selected' : ''}>4</option>
+                            <option value="5" ${savedCols === '5' ? 'selected' : ''}>5</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Grid -->
+                <div id="pos-grid" class="flex-1 p-4 overflow-y-auto grid gap-2 content-start bg-gray-100">
+                    <!-- Items injected here -->
+                    <div class="col-span-full text-center text-gray-500 mt-10">Loading items from local database...</div>
+                </div>
+            </div>
+
+            <!-- Resize Handle -->
+            <div id="pos-resizer" class="hidden md:block w-1.5 bg-gray-200 hover:bg-blue-400 cursor-col-resize transition-colors z-10"></div>
+
+            <!-- Right Column: Cart -->
+            <div id="pos-cart-container" class="w-full md:flex flex-col bg-white rounded-r-lg shadow-md overflow-hidden border-l h-full" style="width: ${savedCartWidth}">
+                <div class="p-2 bg-blue-700 text-white shadow-md flex flex-col gap-1">
+                    <div class="flex justify-between items-center">
+                        <div class="flex flex-col">
+                            <span class="text-[10px] uppercase font-bold opacity-75 leading-none">Total Amount</span>
+                            <div id="cart-total" class="text-2xl font-black leading-tight">₱0.00</div>
+                        </div>
+                        <div class="flex gap-2 shrink-0">
+                            <button id="btn-view-suspended" class="text-[9px] bg-yellow-600 hover:bg-yellow-700 px-1.5 py-1 rounded font-bold" title="Suspended Sales">SUSP</button>
+                            <button id="btn-pos-history" class="text-[9px] bg-indigo-600 hover:bg-indigo-700 px-1.5 py-1 rounded font-bold" title="History">HIST</button>
+                            <button id="btn-pos-remit" class="text-[9px] bg-purple-600 hover:bg-purple-700 px-1.5 py-1 rounded font-bold" title="Remit Cash">REMIT</button>
+                            <button id="btn-suspend-sale" class="text-[9px] bg-orange-500 hover:bg-orange-600 px-1.5 py-1 rounded font-bold" title="Hold">HOLD</button>
+                            <button id="btn-pos-close-shift" class="text-[9px] bg-red-500 hover:bg-red-600 px-1.5 py-1 rounded font-bold" title="Close Shift">CLOSE</button>
+                            <button id="btn-clear-posCart" class="text-[9px] bg-blue-800 hover:bg-blue-900 px-1.5 py-1 rounded font-bold" title="Clear Cart">CLR</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Customer Selection -->
+                <div class="p-3 bg-blue-50 border-b border-blue-100 relative">
+                    <div class="relative">
+                        <div class="flex items-center bg-white border rounded-md shadow-sm">
+                            <div class="pl-3 text-gray-500">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                            </div>
+                            <input type="text" id="pos-customer-search" placeholder="Customer (F2)..." 
+                                class="w-full p-2 text-sm focus:outline-none rounded-md transition-all duration-300" autocomplete="off">
+                            <button id="btn-reset-customer" class="p-2 text-gray-400 hover:text-red-500 hidden" title="Reset to Guest">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                            </button>
+                        </div>
+                        <div id="pos-customer-results" class="hidden absolute z-20 w-full bg-white shadow-lg border rounded-b-md max-h-48 overflow-y-auto mt-1"></div>
+                    </div>
+                    <div id="selected-customer-display" class="text-xs text-blue-800 mt-1 font-semibold px-1">
+                        Customer: Guest
+                    </div>
+                </div>
+                
+                <!-- Last Transaction Summary -->
+                <div id="last-transaction" class="hidden bg-green-50 border-b border-green-200 p-2 md:p-4">
+                    <div class="text-center">
+                        <div class="text-xs text-green-600 uppercase font-bold">Change Due</div>
+                        <div id="last-change-amount" class="text-xl md:text-3xl font-bold text-green-700">₱0.00</div>
+                    </div>
+                    <div class="flex justify-between mt-1 md:mt-2 text-[10px] md:text-xs text-green-600 border-t border-green-200 pt-1 md:pt-2">
+                        <div>Tot: <span id="last-total" class="font-bold"></span></div>
+                        <div>Paid: <span id="last-tendered" class="font-bold"></span></div>
+                    </div>
+                    <button id="btn-print-last-receipt" class="w-full mt-3 bg-gray-800 text-white py-2 rounded font-bold text-sm flex items-center justify-center gap-2 hover:bg-black transition">Print Receipt (F8)</button>
+                </div>
+
+                <!-- Cart Items List -->
+                <div id="pos-cart-items" class="flex-1 overflow-y-auto p-2 space-y-2 bg-gray-50">
+                    <div class="flex flex-col items-center justify-center h-full text-gray-400">
+                        <svg class="w-16 h-16 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                        <p>Cart is empty</p>
+                    </div>
+                </div>
+
+                <!-- Footer / Totals -->
+                <div class="p-2 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-10">
+                    <button id="btn-checkout" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg text-lg shadow-lg transition duration-150 disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2" disabled>
+                        <span>PAY NOW (F4)</span>
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                    </button>
+
+                    <!-- Shortcut Legend -->
+                    <div class="mt-2 pt-2 border-t flex justify-between items-center text-[9px] font-bold text-gray-400 uppercase tracking-tighter">
+                        <span><b class="text-blue-500">F1</b> Search</span>
+                        <span><b class="text-blue-500">F2</b> Cust</span>
+                        <span><b class="text-blue-500">F3</b> Cart</span>
+                        <span><b class="text-blue-500">F4</b> Pay</span>
+                        <span><b class="text-blue-500">F8</b> Print</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile POS UI -->
+        <div id="mobile-pos-ui" class="fixed inset-0 bg-gray-100 z-[60] hidden flex flex-col">
+            <!-- Header -->
+            <div class="bg-blue-700 p-4 text-white shadow-md shrink-0">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="font-bold text-xl">Mobile POS</h2>
+                    <div class="flex gap-3">
+                        <button id="btn-mobile-scan" class="bg-white text-blue-700 px-4 py-2 rounded-full font-bold text-sm flex items-center gap-2 shadow-sm active:scale-95 transition">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 16h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
+                            Scan
+                        </button>
+                        <button id="btn-exit-mobile-pos" class="text-white hover:bg-blue-600 p-2 rounded-full">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="flex justify-between items-end">
+                    <span class="text-blue-200 text-sm font-bold uppercase">Total Due</span>
+                    <span id="mobile-cart-total" class="text-4xl font-black leading-none">₱0.00</span>
+                </div>
+            </div>
+
+            <!-- Mobile Search -->
+            <div class="p-3 bg-white shadow-sm shrink-0 z-10 border-b">
+                <div class="relative">
+                    <input type="text" id="mobile-pos-search" placeholder="Search items..." class="w-full pl-10 p-3 border rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg" autocomplete="off">
+                    <svg class="w-6 h-6 absolute left-3 top-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    <div id="mobile-pos-search-results" class="hidden absolute w-full bg-white border mt-1 rounded-lg shadow-xl max-h-60 overflow-y-auto z-30"></div>
+                </div>
+            </div>
+
+            <!-- Cart List -->
+            <div id="mobile-pos-cart-items" class="flex-1 overflow-y-auto p-3 space-y-3 pb-24">
+                <!-- Items injected here -->
+            </div>
+
+            <!-- Footer -->
+            <div class="absolute bottom-0 left-0 right-0 p-4 bg-white border-t shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-20">
+                <button id="btn-mobile-checkout" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl text-xl shadow-lg transition transform active:scale-95 flex justify-center items-center gap-2">
+                    <span>Checkout</span>
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                </button>
+            </div>
+
+            <!-- Camera Overlay -->
+            <div id="mobile-pos-camera-overlay" class="fixed inset-0 bg-black z-[70] hidden flex flex-col">
+                <div class="relative flex-1 bg-black overflow-hidden flex items-center justify-center">
+                    <video id="mobile-pos-video" class="absolute inset-0 w-full h-full object-cover" autoplay playsinline muted></video>
+                    <div class="absolute inset-0 border-2 border-red-500 opacity-50 pointer-events-none">
+                        <div class="absolute top-1/2 left-0 right-0 h-0.5 bg-red-600 shadow-[0_0_10px_rgba(255,0,0,0.8)]"></div>
+                    </div>
+                    <div id="pos-scan-success" class="absolute inset-0 bg-green-500 opacity-0 z-30 pointer-events-none transition-opacity duration-300 flex items-center justify-center">
+                        <svg class="w-24 h-24 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    </div>
+                    <div id="pos-scan-error" class="absolute inset-0 bg-red-500 opacity-0 z-30 pointer-events-none transition-opacity duration-300 flex items-center justify-center flex-col">
+                        <svg class="w-24 h-24 text-white mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        <span class="text-white font-bold text-xl">Not Found</span>
+                    </div>
+                    <button id="btn-pos-toggle-flash" class="absolute top-4 left-4 bg-gray-800 bg-opacity-50 text-white p-2 rounded-full z-20 hidden">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    </button>
+                    <button id="btn-close-pos-camera" class="absolute top-4 right-4 bg-gray-800 bg-opacity-50 text-white p-2 rounded-full z-20">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+                <div class="p-4 bg-black text-white text-center">
+                    <p class="text-sm font-bold">Point camera at barcode</p>
+                </div>
+            </div>
+
+            <!-- Mobile Payment Overlay -->
+            <div id="mobile-payment-overlay" class="fixed inset-0 bg-white z-[65] hidden flex flex-col">
+                <div class="bg-blue-700 p-4 text-white shadow-md shrink-0 flex justify-between items-center">
+                    <h2 class="font-bold text-xl">Payment</h2>
+                    <button id="btn-close-mobile-payment" class="text-white hover:bg-blue-600 p-2 rounded-full">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                    </button>
+                </div>
+                <div class="flex-1 flex flex-col items-center justify-center p-6 space-y-6">
+                    <div class="text-center">
+                        <div class="text-gray-500 text-sm uppercase font-bold">Total Due</div>
+                        <div id="mobile-payment-total" class="text-5xl font-black text-gray-800">₱0.00</div>
+                    </div>
+                    <div class="w-full max-w-xs">
+                        <label class="block text-gray-700 text-sm font-bold mb-2">Amount Tendered</label>
+                        <input type="number" id="mobile-input-tendered" class="w-full p-4 text-3xl text-center border-2 border-blue-500 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-200 transition-all" placeholder="0.00" step="0.01">
+                    </div>
+                    <div class="grid grid-cols-3 gap-3 w-full max-w-xs">
+                        <button class="mobile-quick-cash bg-gray-100 hover:bg-gray-200 py-3 rounded-lg font-bold text-gray-700" data-amount="100">100</button>
+                        <button class="mobile-quick-cash bg-gray-100 hover:bg-gray-200 py-3 rounded-lg font-bold text-gray-700" data-amount="500">500</button>
+                        <button class="mobile-quick-cash bg-gray-100 hover:bg-gray-200 py-3 rounded-lg font-bold text-gray-700" data-amount="1000">1000</button>
+                        <button class="mobile-quick-cash bg-gray-100 hover:bg-gray-200 py-3 rounded-lg font-bold text-gray-700" data-amount="exact">Exact</button>
+                    </div>
+                    <button id="btn-mobile-confirm-pay" class="w-full max-w-xs bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl text-xl shadow-lg transition transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        Pay Now
+                    </button>
+                </div>
+            </div>
+
+            <!-- Mobile Change Overlay -->
+            <div id="mobile-change-overlay" class="fixed inset-0 bg-green-600 z-[66] hidden flex flex-col items-center justify-center text-white p-6">
+                <div class="text-center mb-8">
+                    <div class="w-24 h-24 bg-white rounded-full flex items-center justify-center mx-auto mb-6 text-green-600 shadow-xl">
+                        <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
+                    </div>
+                    <h2 class="text-3xl font-bold mb-2">Payment Successful!</h2>
+                    <p class="opacity-90">Change Due</p>
+                    <div id="mobile-change-amount" class="text-6xl font-black mt-2">₱0.00</div>
+                </div>
+                <button id="btn-mobile-new-sale" class="w-full max-w-xs bg-white text-green-700 font-bold py-4 rounded-xl text-xl shadow-lg transition transform active:scale-95">
+                    New Sale
+                </button>
+            </div>
+        </div>
+
+
+
+        <!-- Checkout Modal -->
+        <div id="modal-checkout" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-lg p-6 w-96">
+                <h3 class="text-xl font-bold mb-4 text-gray-800">Checkout</h3>
+                <div class="mb-4 text-center">
+                    <div class="text-sm text-gray-600">Total Amount</div>
+                    <div id="checkout-total" class="text-3xl font-bold text-blue-600">₱0.00</div>
+                    <div id="discount-display" class="hidden text-sm text-green-600 font-bold mt-1"></div>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Discount Code</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="discount-code-input" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 uppercase" placeholder="Enter code">
+                        <button id="btn-apply-discount" class="bg-purple-100 hover:bg-purple-200 text-purple-700 font-bold px-3 py-2 rounded text-xs transition whitespace-nowrap">Apply</button>
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Payment Method</label>
+                    <select id="select-payment-method" class="w-full p-2 border rounded focus:ring-2 focus:ring-blue-500 outline-none">
+                        <option value="Cash">Cash</option>
+                        <option value="Points">Loyalty Points</option>
+                        <option value="Card">Card</option>
+                        <option value="E-Wallet">E-Wallet</option>
+                    </select>
+                </div>
+                <div id="loyalty-points-section" class="hidden mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="text-xs font-bold text-blue-900">Loyalty Points (1 pt = ₱1.00)</label>
+                        <span class="text-xs text-blue-700">Available: <span id="available-points-display" class="font-bold">0</span> pts</span>
+                    </div>
+                    <div class="flex gap-2 items-center">
+                        <input type="number" id="input-points-to-use" min="0" step="1" class="shadow appearance-none border rounded w-full py-1.5 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 font-bold" placeholder="0">
+                        <button type="button" id="btn-use-max-points" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-3 py-1.5 rounded text-xs transition whitespace-nowrap">Max</button>
+                    </div>
+                    <div id="points-applied-summary" class="hidden mt-2 text-xs flex justify-between items-center text-blue-800 font-medium border-t border-blue-200 pt-1.5">
+                        <span>Points Applied: <strong id="points-applied-value" class="text-green-700">-₱0.00</strong></span>
+                        <span>Remaining Due: <strong id="remaining-balance-value" class="text-blue-900 font-bold">₱0.00</strong></span>
+                    </div>
+                </div>
+                <div class="mb-4" id="tendered-container">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">Amount Tendered</label>
+                    <input type="number" id="input-tendered" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 text-xl text-center" step="0.01">
+                </div>
+                <div class="flex justify-between gap-2">
+                    <button id="btn-cancel-checkout" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded w-1/2">Cancel</button>
+                    <button id="btn-confirm-pay" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded w-1/2 disabled:opacity-50 disabled:cursor-not-allowed" disabled>Confirm Pay</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Suspended Transactions Modal -->
+        <div id="modal-suspended" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-lg">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-bold text-gray-800">Suspended Transactions</h3>
+                    <div class="flex gap-2">
+                        <button id="btn-delete-all-suspended" class="text-red-600 hover:text-red-800 text-sm font-bold">Delete All</button>
+                        <button id="btn-refresh-suspended" class="text-blue-600 hover:text-blue-800 text-sm font-bold">Refresh</button>
+                        <button id="btn-close-suspended" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+                    </div>
+                </div>
+                <div id="suspended-list-container" class="max-h-96 overflow-y-auto">
+                    <!-- List injected here -->
+                </div>
+                <div class="mt-6 flex justify-end">
+                    <button id="btn-cancel-suspended" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transaction History Modal -->
+        <div id="modal-pos-history" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-2xl flex flex-col h-[80vh]">
+                <div class="flex justify-between items-center mb-4 shrink-0 border-b pb-4">
+                    <h3 class="text-xl font-bold text-gray-800">Recent Transactions</h3>
+                    <div class="flex gap-2 items-center">
+                        <input type="date" id="history-date-filter" class="border rounded p-1 text-sm bg-gray-50 focus:ring-2 focus:ring-blue-500 outline-none">
+                        <button id="btn-clear-history-date" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-1 px-2 rounded" title="Clear Date Filter">Clear</button>
+                        <button id="btn-close-history" class="text-gray-500 hover:text-gray-700 text-2xl ml-2">&times;</button>
+                    </div>
+                </div>
+                <div class="overflow-y-auto flex-1 border rounded-lg">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-gray-50 sticky top-0">
+                            <tr class="border-b shadow-sm">
+                                <th class="text-left p-2">Time</th>
+                                <th class="text-left p-2">Customer</th>
+                                <th class="text-right p-2">Total</th>
+                                <th class="text-center p-2">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pos-history-body" class="divide-y divide-gray-100"></tbody>
+                    </table>
+                </div>
+                <div class="mt-4 pt-4 border-t flex justify-between items-center shrink-0">
+                    <button id="btn-history-prev" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded font-bold text-sm disabled:opacity-50" disabled>Previous</button>
+                    <span id="pos-history-page-info" class="text-sm font-bold text-gray-600">Page 1 of 1</span>
+                    <button id="btn-history-next" class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2 rounded font-bold text-sm disabled:opacity-50" disabled>Next</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transaction Details Modal -->
+        <div id="modal-pos-tx-details" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-[60]">
+            <div class="bg-white rounded-lg shadow-lg w-full max-w-3xl flex flex-col h-[80vh]">
+                <!-- Header -->
+                <div class="p-4 border-b bg-gray-50 flex justify-between items-center shrink-0 rounded-t-lg">
+                    <div>
+                        <h3 class="text-lg font-bold text-gray-800">Transaction Details</h3>
+                        <p id="tx-details-header-info" class="text-xs text-gray-500 font-mono"></p>
+                    </div>
+                    <button id="btn-close-tx-details" class="text-gray-500 hover:text-gray-700 text-2xl font-bold">&times;</button>
+                </div>
+                
+                <!-- Content -->
+                <div class="flex-1 overflow-y-auto p-4 bg-gray-50">
+                    <table class="min-w-full text-sm border bg-white rounded shadow-sm">
+                        <thead class="bg-gray-100 text-gray-600 text-[10px] uppercase">
+                            <tr>
+                                <th class="py-2 px-3 text-left">Item Name</th>
+                                <th class="py-2 px-3 text-center">Qty</th>
+                                <th class="py-2 px-3 text-right">Unit Price</th>
+                                <th class="py-2 px-3 text-right">Total</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tx-details-items-body" class="text-gray-700 text-xs">
+                            <!-- Items injected here -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Footer / Summary -->
+                <div class="p-4 border-t bg-white shrink-0 rounded-b-lg">
+                    <div class="flex justify-end">
+                        <div class="w-64 space-y-2 text-sm">
+                            <div class="flex justify-between text-gray-600">
+                                <span>Subtotal:</span>
+                                <span id="tx-details-subtotal" class="font-mono">₱0.00</span>
+                            </div>
+                            <div class="flex justify-between text-red-500">
+                                <span>Discount:</span>
+                                <span id="tx-details-discount" class="font-mono">-₱0.00</span>
+                            </div>
+                            <div id="tx-details-points-container" class="hidden flex justify-between text-blue-600">
+                                <span>Points Applied:</span>
+                                <span id="tx-details-points" class="font-mono">-₱0.00</span>
+                            </div>
+                            <div class="flex justify-between font-bold text-gray-800 text-lg border-t pt-2">
+                                <span>Total:</span>
+                                <span id="tx-details-total" class="font-mono">₱0.00</span>
+                            </div>
+                            <div class="flex justify-between text-gray-600 text-xs pt-2">
+                                <span>Amount Tendered:</span>
+                                <span id="tx-details-tendered" class="font-mono font-bold">₱0.00</span>
+                            </div>
+                            <div class="flex justify-between text-green-600 text-xs font-bold">
+                                <span>Change:</span>
+                                <span id="tx-details-change" class="font-mono">₱0.00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Customer Modal -->
+        <div id="modal-quick-customer" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-[60]">
+            <div class="bg-white rounded-lg shadow-lg p-6 w-96">
+                <h3 class="text-xl font-bold mb-2 text-gray-800">Customer Details</h3>
+                <p class="text-xs text-gray-600 mb-4">Provide customer information for this receipt.</p>
+                
+                <div class="mb-3 relative">
+                    <label class="block text-gray-700 text-xs font-bold mb-1">Name</label>
+                    <input type="text" id="quick-cust-name" placeholder="Search or enter name..." class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" autocomplete="off">
+                    <div id="quick-cust-results" class="hidden absolute z-[70] w-full bg-white shadow-lg border rounded-b-md max-h-40 overflow-y-auto mt-1"></div>
+                </div>
+                <div class="mb-6">
+                    <label class="block text-gray-700 text-xs font-bold mb-1">Phone Number</label>
+                    <input type="text" id="quick-cust-phone" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" autocomplete="off">
+                </div>
+
+                <div class="flex gap-2">
+                    <button id="btn-cancel-quick-customer" class="w-1/2 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded shadow-md transition">Cancel</button>
+                    <button id="btn-save-quick-customer" class="w-1/2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded shadow-md transition">Save & Print</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Remittance Modal -->
+        <div id="modal-remittance" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+                <div class="flex justify-between items-center mb-4 border-b pb-3">
+                    <h3 class="text-xl font-bold text-gray-800">Cash Remittance (Cashout)</h3>
+                    <button id="btn-close-remit-x" class="text-gray-400 hover:text-gray-600 text-2xl font-bold">&times;</button>
+                </div>
+                <form id="form-pos-remittance" class="space-y-4">
+                    <div>
+                        <label class="block text-gray-700 text-xs font-bold mb-1 uppercase tracking-wider">Amount to Remit (PHP)</label>
+                        <input type="number" id="remit-amount" class="w-full p-2.5 border rounded-lg text-xl font-bold text-gray-800 focus:ring-2 focus:ring-purple-500 outline-none" step="0.01" min="0.01" placeholder="0.00" required>
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 text-xs font-bold mb-1 uppercase tracking-wider">Reason / Reference</label>
+                        <input type="text" id="remit-reason" class="w-full p-2.5 border rounded-lg text-sm text-gray-800 focus:ring-2 focus:ring-purple-500 outline-none" placeholder="e.g. Mid-day turnover / Safe drop" required>
+                    </div>
+                    <div>
+                        <h4 class="text-xs font-bold text-gray-400 uppercase mb-2 tracking-wider">Shift Remittance History</h4>
+                        <div id="remittance-history-list" class="max-h-36 overflow-y-auto border rounded-lg p-2.5 text-xs space-y-1 bg-gray-50"></div>
+                    </div>
+                    <div class="flex gap-2 pt-2">
+                        <button type="button" id="btn-cancel-remit" class="w-1/2 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2.5 rounded-lg transition">Cancel</button>
+                        <button type="submit" id="btn-save-remit" class="w-1/2 bg-purple-600 hover:bg-purple-700 text-white font-bold py-2.5 rounded-lg shadow-md transition">Record Remittance</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Close Shift Modal -->
+        <div id="modal-close-shift" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-5xl h-[85vh] flex flex-col">
+                <div class="flex justify-between items-center mb-6 border-b pb-4">
+                    <div>
+                        <h3 class="text-2xl font-bold text-gray-800">End Shift</h3>
+                        <p class="text-sm text-gray-500">Perform cash count and verify turnover.</p>
+                    </div>
+                    <button id="btn-cancel-close-shift-x" class="text-gray-400 hover:text-gray-600 text-3xl">&times;</button>
+                </div>
+
+                <div class="flex-1 overflow-hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <!-- Column 1: Cash Counter (4 cols) -->
+                    <div class="lg:col-span-4 flex flex-col h-full overflow-hidden border-r pr-4">
+                        <div class="flex justify-between items-center mb-2">
+                            <h4 class="font-bold text-gray-700 uppercase text-xs tracking-wider">Cash Denominations</h4>
+                            <span class="text-xs text-gray-400">Enter count</span>
+                        </div>
+                        
+                        <div class="flex-1 overflow-y-auto bg-gray-50 rounded-lg border p-4">
+                            <div class="grid grid-cols-3 gap-2 mb-3 font-bold text-xs text-gray-500 uppercase border-b pb-2">
+                                <div>Denom</div>
+                                <div class="text-center">Count</div>
+                                <div class="text-right">Total</div>
+                            </div>
+                            <div class="space-y-2" id="cash-counter-grid">
+                                <!-- Denominations injected here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Column 2: Inputs (4 cols) -->
+                    <div class="lg:col-span-4 flex flex-col h-full overflow-y-auto border-r pr-4 space-y-4">
+                        <!-- Other Cash -->
+                        <div class="bg-gray-50 p-4 rounded-lg border">
+                            <h4 class="font-bold text-gray-700 mb-3 uppercase text-xs tracking-wider border-b pb-1">Other Cash</h4>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-500 mb-1">Precounted Bills</label>
+                                    <input type="number" id="precounted-bills" min="0" step="0.01" class="w-full border rounded p-2 text-right focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm" placeholder="0.00">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-bold text-gray-500 mb-1">Precounted Coins</label>
+                                    <input type="number" id="precounted-coins" min="0" step="0.01" class="w-full border rounded p-2 text-right focus:ring-2 focus:ring-blue-500 outline-none font-mono text-sm" placeholder="0.00">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Cashout -->
+                        <div class="bg-gray-50 p-4 rounded-lg border">
+                            <h4 class="font-bold text-gray-700 mb-3 uppercase text-xs tracking-wider border-b pb-1">Remittance (Cashout)</h4>
+                            <div class="flex items-center gap-2">
+                                <label class="text-sm text-gray-600 flex-1">Total Remitted:</label>
+                                <input type="number" id="shift-cashout" min="0" step="0.01" class="w-32 border rounded p-2 text-right bg-gray-100 font-bold text-gray-700 cursor-not-allowed text-sm" readonly placeholder="0.00">
+                            </div>
+                        </div>
+
+                        <!-- Expenses -->
+                        <div class="flex-1 flex flex-col bg-gray-50 p-4 rounded-lg border min-h-[150px]">
+                            <div class="flex justify-between items-center mb-2 border-b pb-1">
+                                <h4 class="font-bold text-gray-700 uppercase text-xs tracking-wider">Expense Receipts</h4>
+                                <div class="flex gap-1">
+                                    <button id="btn-pick-shift-receipt" class="text-[10px] bg-purple-100 text-purple-600 px-2 py-1 rounded font-bold hover:bg-purple-200 transition uppercase tracking-wide">Pick Exp</button>
+                                    <button id="btn-add-shift-receipt" class="text-[10px] bg-blue-100 text-blue-600 px-2 py-1 rounded font-bold hover:bg-blue-200 transition uppercase tracking-wide">+ Add</button>
+                                </div>
+                            </div>
+                            <div class="flex-1 overflow-y-auto max-h-40 space-y-2 pr-2" id="shift-receipts-list">
+                                <!-- Receipts injected here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Column 3: Summary (4 cols) -->
+                    <div class="lg:col-span-4 flex flex-col h-full overflow-y-auto pl-2">
+                        <h4 class="font-bold text-gray-700 uppercase text-xs tracking-wider mb-4 border-b pb-2">Shift Summary</h4>
+                        
+                        <!-- Totals Breakdown -->
+                        <div class="space-y-3">
+                            <div class="flex justify-between items-center p-3 bg-blue-50 rounded border border-blue-100">
+                                <span class="text-xs font-bold text-blue-500 uppercase">Physical Cash</span>
+                                <span id="summary-physical-total" class="font-mono font-bold text-blue-700">₱0.00</span>
+                            </div>
+                            
+                            <div class="flex justify-between items-center p-3 bg-gray-50 rounded border border-gray-200">
+                                <span class="text-xs font-bold text-gray-500 uppercase">Precounted</span>
+                                <span id="summary-precounted-total" class="font-mono font-bold text-gray-700">₱0.00</span>
+                            </div>
+
+                            <div id="row-summary-remittance" class="flex justify-between items-center p-3 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded cursor-pointer transition-colors">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="text-xs font-bold text-purple-700 uppercase">Remittance</span>
+                                    <svg class="w-3.5 h-3.5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                </div>
+                                <span id="summary-remittance-total" class="font-mono font-bold text-purple-800">₱0.00</span>
+                            </div>
+
+                            <div class="flex justify-between items-center p-3 bg-red-50 rounded border border-red-100">
+                                <span class="text-xs font-bold text-red-500 uppercase">Expenses</span>
+                                <span id="summary-expenses-total" class="font-mono font-bold text-red-700">₱0.00</span>
+                            </div>
+
+                            <div id="row-summary-non-cash" class="flex justify-between items-center p-3 bg-teal-50 hover:bg-teal-100 border border-teal-200 rounded cursor-pointer transition-colors">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="text-xs font-bold text-teal-700 uppercase">Non-Cash Payments</span>
+                                    <svg class="w-3.5 h-3.5 text-teal-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                                </div>
+                                <span id="summary-non-cash-total" class="font-mono font-bold text-teal-800">₱0.00</span>
+                            </div>
+                        </div>
+
+                        <!-- Final Summary -->
+                        <div class="mt-auto pt-6">
+                            <div class="flex justify-between items-end mb-1">
+                                <span class="text-gray-600 font-medium">Total Turnover</span>
+                                <span id="shift-total-turnover" class="text-4xl font-bold text-gray-800 leading-none">₱0.00</span>
+                            </div>
+                            <p class="text-[10px] text-gray-400 text-right mb-6">Sum of Physical + Precounted + Remittance + Expenses</p>
+                            
+                            <div class="grid grid-cols-2 gap-4">
+                                <button id="btn-cancel-close-shift" class="w-full bg-white border border-gray-300 text-gray-700 font-bold py-3 rounded-lg hover:bg-gray-50 transition">Cancel</button>
+                                <button id="btn-confirm-close-shift" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg shadow-lg transition transform hover:scale-105">Confirm Close</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pick Expense Modal -->
+        <div id="modal-pick-expense" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden flex items-center justify-center z-[60]">
+            <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-lg h-[60vh] flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-bold text-gray-800">Pick Today's Expenses</h3>
+                    <button id="btn-close-pick-expense" class="text-gray-400 hover:text-gray-600 text-2xl">&times;</button>
+                </div>
+                <div class="mb-2">
+                     <input type="text" id="pick-expense-search" placeholder="Search expenses..." class="w-full p-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-purple-500">
+                </div>
+                <div class="flex-1 overflow-y-auto border rounded bg-gray-50 p-2" id="pick-expense-list">
+                    <!-- Expenses injected here -->
+                    <div class="text-center text-gray-400 italic mt-4">Loading...</div>
+                </div>
+                <div class="mt-4 flex justify-end gap-2">
+                    <button id="btn-cancel-pick-expense" class="bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                    <button id="btn-confirm-pick-expense" class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded shadow">Add Selected</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Load Items from Dexie
+    await Promise.all([fetchItemsFromDexie(), fetchCustomersFromDexie(), SyncEngine.sync()]);
+
+    // Render initial posCart state (if persisting between views)
+    renderCart();
+    updateSuspendedCount();
+
+    // Event Listeners
+    const searchInput = document.getElementById("pos-search");
+    let searchTimeout;
+
+    searchInput.addEventListener("input", (e) => {
+        activeCartIndex = null;
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            const { term } = parseSearchTerm(e.target.value);
+            filterItems(term);
+        }, 150); // Debounce to handle rapid scanner input
+    });
+
+    searchInput.addEventListener("focus", () => {
+        if (activeCartIndex !== null) {
+            activeCartIndex = null;
+            renderCart();
+        }
+    });
+
+    searchInput.addEventListener("keydown", async (e) => {
+        if (activeCartIndex !== null) return;
+
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            const firstCard = document.querySelector("#pos-grid > div[tabindex='0']");
+            if (firstCard) firstCard.focus();
+            return;
+        }
+        if (e.key === "Enter") {
+            clearTimeout(searchTimeout);
+            e.preventDefault();
+            const { qty, term } = parseSearchTerm(e.target.value);
+            if (!term.trim()) return;
+
+            // 1. Exact Barcode
+            let item = barcodeMap.get(term);
+            // 2. Exact Name
+            if (!item) item = allItems.find(i => (i.name || "").toLowerCase() === term.toLowerCase());
+            // 3. Single result
+            if (!item) {
+                const lowerTerm = term.toLowerCase();
+                const terms = lowerTerm.split(/\s+/).filter(t => t.length > 0);
+                const filtered = allItems.filter(i => {
+                    const name = (i.name || "").toLowerCase();
+                    const barcode = (i.barcode || "").toLowerCase();
+                    return terms.every(t => name.includes(t) || barcode.includes(t));
+                });
+                if (filtered.length === 1) item = filtered[0];
+            }
+
+            if (item) {
+                await addToCart(item, qty);
+                e.target.value = "";
+                filterItems("");
+                e.target.focus();
+            } else {
+                playBeep(220, 0.3, 'sawtooth'); // Bad beep
+                showToast("Item not found", 'error');
+            }
+        }
+    });
+
+    document.getElementById("btn-print-last-receipt").addEventListener("click", async () => {
+        if (lastTransactionData) {
+            const isReprint = !!lastTransactionData.was_printed;
+            await printReceipt(lastTransactionData, isReprint);
+        }
+    });
+
+    document.getElementById("btn-clear-posCart").addEventListener("click", () => {
+        if (posCart.length > 0 && confirm("Are you sure you want to clear the current sale?")) {
+            posCart = [];
+            currentSuspendedId = null;
+            currentSuspendedCreatedAt = null;
+            renderCart();
+        }
+    });
+
+    // Suspend Logic
+    document.getElementById("btn-suspend-sale").addEventListener("click", suspendCurrentTransaction);
+    document.getElementById("btn-view-suspended").addEventListener("click", openSuspendedModal);
+    document.getElementById("btn-close-suspended").addEventListener("click", closeSuspendedModal);
+    document.getElementById("btn-cancel-suspended").addEventListener("click", closeSuspendedModal);
+    document.getElementById("btn-refresh-suspended").addEventListener("click", openSuspendedModal);
+
+    // History Logic
+    document.getElementById("btn-pos-history").addEventListener("click", openHistoryModal);
+    document.getElementById("btn-close-history").addEventListener("click", () => document.getElementById("modal-pos-history").classList.add("hidden"));
+
+    // Remittance Logic
+    const btnPosRemit = document.getElementById("btn-pos-remit");
+    if (btnPosRemit) {
+        btnPosRemit.addEventListener("click", openRemittanceModal);
+    }
+    const btnCancelRemit = document.getElementById("btn-cancel-remit");
+    if (btnCancelRemit) {
+        btnCancelRemit.addEventListener("click", closeRemittanceModal);
+    }
+    const btnCloseRemitX = document.getElementById("btn-close-remit-x");
+    if (btnCloseRemitX) {
+        btnCloseRemitX.addEventListener("click", closeRemittanceModal);
+    }
+    const formRemittance = document.getElementById("form-pos-remittance");
+    if (formRemittance) {
+        formRemittance.addEventListener("submit", (e) => {
+            e.preventDefault();
+            saveRemittance();
+        });
+    }
+
+    const btnCloseTxDetails = document.getElementById("btn-close-tx-details");
+    if (btnCloseTxDetails) {
+        btnCloseTxDetails.addEventListener("click", () => document.getElementById("modal-pos-tx-details").classList.add("hidden"));
+    }
+
+    // Customer Search Logic
+    const custInput = document.getElementById("pos-customer-search");
+    const custResults = document.getElementById("pos-customer-results");
+    const btnResetCust = document.getElementById("btn-reset-customer");
+
+    const renderCustomerDropdown = (list) => {
+        custResults.innerHTML = "";
+        const limit = 50; // Limit results for performance
+        const displayList = list.slice(0, limit);
+
+        if (displayList.length > 0) {
+            custResults.classList.remove("hidden");
+            displayList.forEach(c => {
+                const div = document.createElement("div");
+                div.className = "p-2 hover:bg-blue-50 cursor-pointer text-sm border-b last:border-0 focus:bg-blue-100 focus:outline-none";
+                div.setAttribute("tabindex", "0");
+                div.innerHTML = `<div class="font-bold text-gray-700">${c.name}</div><div class="text-xs text-gray-500">${c.phone}</div>`;
+
+                const selectAction = () => selectCustomer(c);
+                div.addEventListener("click", selectAction);
+                div.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        selectAction();
+                    } else if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        const next = div.nextElementSibling;
+                        if (next && next.getAttribute("tabindex")) next.focus();
+                    } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        const prev = div.previousElementSibling;
+                        if (prev && prev.getAttribute("tabindex")) prev.focus();
+                        else custInput.focus();
+                    }
+                });
+
+                custResults.appendChild(div);
+            });
+            if (list.length > limit) {
+                const moreDiv = document.createElement("div");
+                moreDiv.className = "p-2 text-xs text-gray-500 text-center italic";
+                moreDiv.textContent = `Showing ${limit} of ${list.length} customers...`;
+                custResults.appendChild(moreDiv);
+            }
+        } else {
+            custResults.innerHTML = `<div class="p-2 text-sm text-gray-500 text-center">No customers found</div>`;
+            custResults.classList.remove("hidden");
+        }
+    };
+
+    custInput.addEventListener("focus", async () => {
+        await fetchCustomersFromDexie();
+        const term = custInput.value.toLowerCase();
+        const filtered = term ? allCustomers.filter(c =>
+            (c.name || "").toLowerCase().includes(term) ||
+            (c.phone || "").includes(term)
+        ) : allCustomers;
+        renderCustomerDropdown(filtered);
+    });
+
+    custInput.addEventListener("focus", () => {
+        if (activeCartIndex !== null) {
+            activeCartIndex = null;
+            renderCart();
+        }
+    });
+
+    custInput.addEventListener("blur", () => {
+        // Delay hiding to allow click event to register
+        setTimeout(() => {
+            if (!custResults.contains(document.activeElement)) {
+                custResults.classList.add("hidden");
+            }
+        }, 200);
+    });
+
+    custInput.addEventListener("keydown", (e) => {
+        if (activeCartIndex !== null) return;
+
+        if (e.key === "ArrowDown") {
+            const first = custResults.querySelector("div[tabindex='0']");
+            if (first) {
+                e.preventDefault();
+                first.focus();
+            }
+        }
+    });
+
+    custInput.addEventListener("input", (e) => {
+        const term = e.target.value.toLowerCase();
+        const filtered = allCustomers.filter(c =>
+            (c.name || "").toLowerCase().includes(term) ||
+            (c.phone || "").includes(term)
+        );
+        renderCustomerDropdown(filtered);
+    });
+
+    btnResetCust.addEventListener("click", () => {
+        selectCustomer({ id: "Guest", name: "Guest" });
+        custInput.value = "";
+        custResults.classList.add("hidden");
+    });
+
+    const openCloseShiftModal = async () => {
+        const modal = document.getElementById("modal-close-shift");
+        const grid = document.getElementById("cash-counter-grid");
+        const receiptsList = document.getElementById("shift-receipts-list");
+        const denoms = [1000, 500, 200, 100, 50, 20, 10, 5, 1, 0.01];
+        const labels = ["1000", "500", "200", "100", "50", "20", "10", "5", "1", "Cents"];
+
+        receiptsList.innerHTML = ""; // Clear receipts
+        document.getElementById("precounted-bills").value = "";
+        document.getElementById("precounted-coins").value = "";
+
+        // Fetch active shift for remittance & non-cash total
+        let totalRemittance = 0;
+        let activeShiftObj = null;
+        try {
+            const user = JSON.parse(localStorage.getItem('pos_user'));
+            if (user) {
+                const shifts = await Repository.getAll('shifts');
+                activeShiftObj = shifts.find(s => s.user_id === user.email && s.status === 'open');
+                if (activeShiftObj && activeShiftObj.remittances) {
+                    totalRemittance = activeShiftObj.remittances.reduce((sum, r) => sum + (r.amount || 0), 0);
+                }
+            }
+        } catch (e) { console.error(e); }
+
+        if (activeShiftObj) {
+            getShiftFinancials(activeShiftObj).then(financials => {
+                const el = document.getElementById("summary-non-cash-total");
+                if (el) el.textContent = `₱${(financials.non_cash || 0).toFixed(2)}`;
+            });
+            const nonCashRow = document.getElementById("row-summary-non-cash");
+            if (nonCashRow) {
+                nonCashRow.onclick = () => showNonCashPaymentsModal(activeShiftObj);
+            }
+            const remittanceRow = document.getElementById("row-summary-remittance");
+            if (remittanceRow) {
+                remittanceRow.onclick = () => showRemittanceHistoryModal(activeShiftObj);
+            }
+        }
+
+        const cashoutInput = document.getElementById("shift-cashout");
+        cashoutInput.value = totalRemittance.toFixed(2);
+        cashoutInput.readOnly = true;
+        cashoutInput.classList.add("bg-gray-100", "cursor-not-allowed");
+
+        grid.innerHTML = denoms.map((d, i) => `
+            <div class="grid grid-cols-3 gap-4 items-center py-2 border-b border-gray-200 last:border-0 hover:bg-white transition px-2 rounded">
+                <label class="text-sm font-bold text-gray-600">${labels[i]}</label>
+                <input type="number" min="0" step="1" 
+                    class="w-full border rounded p-2 text-sm text-center denom-input focus:ring-2 focus:ring-blue-500 outline-none font-mono" 
+                    data-denom="${d}" 
+                    value=""
+                    placeholder="0"
+                    ${i === 0 ? 'id="first-denom-input"' : ''}>
+                <div class="text-right text-sm font-mono text-gray-800 font-bold denom-subtotal">₱0.00</div>
+            </div>
+        `).join('');
+
+        const updateTotals = () => {
+            let cashTotal = 0;
+            grid.querySelectorAll(".denom-input").forEach(input => {
+                const denom = parseFloat(input.dataset.denom);
+                const count = parseInt(input.value) || 0;
+                const subtotal = denom * count;
+                cashTotal += subtotal;
+                input.nextElementSibling.textContent = `₱${subtotal.toFixed(2)}`;
+            });
+
+            // Update Physical Cash (Denoms only) on UI
+            document.getElementById("summary-physical-total").textContent = `₱${cashTotal.toFixed(2)}`;
+
+            const preBills = parseFloat(document.getElementById("precounted-bills").value) || 0;
+            const preCoins = parseFloat(document.getElementById("precounted-coins").value) || 0;
+            const precountedTotal = preBills + preCoins;
+            document.getElementById("summary-precounted-total").textContent = `₱${precountedTotal.toFixed(2)}`;
+
+            let receiptTotal = 0;
+            receiptsList.querySelectorAll(".receipt-row").forEach(row => {
+                const amt = parseFloat(row.querySelector(".receipt-amount").value) || 0;
+                receiptTotal += amt;
+            });
+            document.getElementById("summary-expenses-total").textContent = `₱${receiptTotal.toFixed(2)}`;
+
+            const cashout = parseFloat(document.getElementById("shift-cashout").value) || 0;
+            document.getElementById("summary-remittance-total").textContent = `₱${cashout.toFixed(2)}`;
+
+            const grandTotal = cashTotal + precountedTotal + receiptTotal + cashout;
+
+            document.getElementById("shift-total-turnover").textContent = `₱${grandTotal.toFixed(2)}`;
+
+            // Store raw values for save
+            modal.dataset.cashTotal = (cashTotal + precountedTotal); // Legacy expectation might range, but usually physical incl precounted
+            modal.dataset.cashout = cashout;
+            modal.dataset.grandTotal = grandTotal;
+        };
+
+        // Helper to add receipt row
+        const addReceiptRow = (desc = "", amount = "") => {
+            const row = document.createElement("div");
+            row.className = "flex gap-2 receipt-row";
+            row.innerHTML = `
+                <input type="text" placeholder="Description" class="flex-1 border rounded p-1 text-xs receipt-desc outline-none focus:ring-1 focus:ring-blue-500" value="${desc}">
+                <input type="number" placeholder="Amount" class="w-24 border rounded p-1 text-xs text-right receipt-amount outline-none focus:ring-1 focus:ring-blue-500" step="0.01" value="${amount}">
+                <button class="text-red-500 hover:text-red-700 btn-remove-receipt">&times;</button>
+            `;
+            row.querySelector(".btn-remove-receipt").onclick = () => {
+                row.remove();
+                updateTotals();
+            };
+            row.querySelector(".receipt-amount").oninput = updateTotals;
+            receiptsList.appendChild(row);
+            return row;
+        };
+
+        // Add Receipt Button Click
+        document.getElementById("btn-add-shift-receipt").onclick = () => {
+            const row = addReceiptRow();
+            row.querySelector(".receipt-desc").focus();
+        };
+
+        // Pick Expense Logic
+        const pickModal = document.getElementById("modal-pick-expense");
+        const pickList = document.getElementById("pick-expense-list");
+        const pickSearch = document.getElementById("pick-expense-search");
+
+        document.getElementById("btn-pick-shift-receipt").onclick = async () => {
+            pickModal.classList.remove("hidden");
+            pickList.innerHTML = '<div class="text-center text-gray-500 p-4">Loading expenses...</div>';
+
+            let todayExpenses = [];
+            let selectedOrderedIds = [];
+
+            try {
+                const allExpenses = await Repository.getAll('expenses');
+                const today = new Date().toISOString().split('T')[0];
+
+                todayExpenses = allExpenses.filter(e => e.date === today);
+
+                // Sort by creation time (Entry Order)
+                todayExpenses.sort((a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime());
+
+                const renderExpenses = (filterText = "") => {
+                    const term = filterText.toLowerCase();
+                    const filtered = todayExpenses.filter(e =>
+                        e.description.toLowerCase().includes(term) ||
+                        (e.supplier_name && e.supplier_name.toLowerCase().includes(term))
+                    );
+
+                    pickList.innerHTML = "";
+                    if (filtered.length === 0) {
+                        pickList.innerHTML = '<div class="text-center text-gray-400 p-2 text-sm">No matching expenses found for today.</div>';
+                        return;
+                    }
+
+                    filtered.forEach(exp => {
+                        const div = document.createElement("div");
+                        div.className = "flex items-center gap-2 p-2 border-b last:border-0 hover:bg-purple-50 cursor-pointer select-none";
+                        const isChecked = selectedOrderedIds.includes(exp.id);
+
+                        div.innerHTML = `
+                            <input type="checkbox" class="form-checkbox h-4 w-4 text-purple-600 cursor-pointer exp-checkbox" 
+                                data-id="${exp.id}"
+                                data-desc="${exp.description}" 
+                                data-amt="${exp.amount}" 
+                                data-supplier="${exp.supplier_name || ''}"
+                                ${isChecked ? 'checked' : ''}>
+                            <div class="flex-1 text-sm">
+                                <div class="font-bold text-gray-700">${exp.description}</div>
+                                <div class="text-[10px] text-gray-500">${exp.supplier_name || 'No Supplier'}</div>
+                            </div>
+                            <div class="font-bold text-gray-800">₱${exp.amount.toFixed(2)}</div>
+                        `;
+
+                        const cb = div.querySelector("input[type='checkbox']");
+
+                        // Toggle checkbox on row click
+                        div.addEventListener("click", (e) => {
+                            if (e.target !== cb) {
+                                cb.click(); // Trigger native click/change
+                            }
+                        });
+
+                        // Track selection order
+                        cb.addEventListener("change", (e) => {
+                            if (e.target.checked) {
+                                if (!selectedOrderedIds.includes(exp.id)) {
+                                    selectedOrderedIds.push(exp.id);
+                                }
+                            } else {
+                                selectedOrderedIds = selectedOrderedIds.filter(id => id !== exp.id);
+                            }
+                        });
+
+                        pickList.appendChild(div);
+                    });
+                };
+
+                renderExpenses();
+
+                pickSearch.oninput = (e) => renderExpenses(e.target.value);
+                pickSearch.value = "";
+                pickSearch.focus();
+
+            } catch (err) {
+                console.error(err);
+                pickList.innerHTML = '<div class="text-center text-red-500 p-2">Error loading expenses.</div>';
+            }
+
+            const closePickModal = () => pickModal.classList.add("hidden");
+            document.getElementById("btn-close-pick-expense").onclick = closePickModal;
+            document.getElementById("btn-cancel-pick-expense").onclick = closePickModal;
+
+            document.getElementById("btn-confirm-pick-expense").onclick = () => {
+                // Use selectedOrderedIds to maintain selection order
+                selectedOrderedIds.forEach(id => {
+                    // Find the expense data (from filtered list isn't enough, need from todayExpenses)
+                    const exp = todayExpenses.find(e => e.id === id);
+                    if (exp) {
+                        const supplier = exp.supplier_name;
+                        const finalDesc = supplier ? `${exp.description} (${supplier})` : exp.description;
+                        addReceiptRow(finalDesc, exp.amount);
+                    }
+                });
+                updateTotals();
+                closePickModal();
+            };
+        };
+
+        document.getElementById("precounted-bills").addEventListener("input", updateTotals);
+        document.getElementById("precounted-coins").addEventListener("input", updateTotals);
+
+        grid.querySelectorAll(".denom-input").forEach(input => {
+            input.addEventListener("input", updateTotals);
+            input.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    const next = input.closest('.flex').nextElementSibling?.querySelector('input');
+                    if (next) next.focus();
+                    else document.getElementById("btn-confirm-close-shift").focus();
+                }
+            });
+        });
+
+        modal.classList.remove("hidden");
+        setTimeout(() => document.getElementById("first-denom-input")?.focus(), 100);
+        updateTotals();
+    };
+
+    document.getElementById("btn-pos-close-shift").addEventListener("click", openCloseShiftModal);
+    document.getElementById("btn-cancel-close-shift").addEventListener("click", () => {
+        document.getElementById("modal-close-shift").classList.add("hidden");
+    });
+    document.getElementById("btn-cancel-close-shift-x")?.addEventListener("click", () => {
+        document.getElementById("modal-close-shift").classList.add("hidden");
+    });
+
+    document.getElementById("btn-confirm-close-shift").addEventListener("click", async () => {
+        const modal = document.getElementById("modal-close-shift");
+        const cashTotal = parseFloat(modal.dataset.cashTotal) || 0;
+        const cashout = parseFloat(modal.dataset.cashout) || 0;
+        const grandTotal = parseFloat(modal.dataset.grandTotal) || 0;
+
+        const receipts = [];
+        modal.querySelectorAll(".receipt-row").forEach(row => {
+            const desc = row.querySelector(".receipt-desc").value.trim();
+            const amt = parseFloat(row.querySelector(".receipt-amount").value) || 0;
+            if (desc && amt > 0) receipts.push({ description: desc, amount: amt });
+        });
+
+        const user = JSON.parse(localStorage.getItem('pos_user'));
+        if (!user) return;
+
+        try {
+            const shifts = await Repository.getAll('shifts');
+            const activeShift = shifts.find(s => s.user_id === user.email && s.status === 'open');
+            if (activeShift) {
+                // Calculate financials dynamically at closure
+                const financials = await getShiftFinancials(activeShift);
+
+                activeShift.status = 'closed';
+                activeShift.end_time = new Date().toISOString();
+                activeShift.closing_cash = cashTotal;
+                activeShift.cashout = cashout;
+                activeShift.closing_receipts = receipts;
+                activeShift.total_closing_amount = grandTotal;
+                activeShift.expected_cash = financials.gross_accountability; // Use Gross for accountability
+                activeShift.variance = grandTotal - financials.gross_accountability;
+                activeShift.precounted_bills = parseFloat(document.getElementById("precounted-bills").value) || 0;
+                activeShift.precounted_coins = parseFloat(document.getElementById("precounted-coins").value) || 0;
+
+                const cashBreakdown = {};
+                modal.querySelectorAll(".denom-input").forEach(input => {
+                    const denom = input.dataset.denom;
+                    const count = parseInt(input.value) || 0;
+                    if (count > 0) cashBreakdown[denom] = count;
+                });
+                activeShift.cash_breakdown = cashBreakdown;
+
+                await Repository.upsert('shifts', activeShift);
+
+                modal.classList.add("hidden");
+
+                // Attempt sync but don't block UI if it fails
+                try {
+                    await SyncEngine.sync();
+                } catch (syncErr) {
+                    console.warn("Sync failed during shift close (saved locally):", syncErr);
+                }
+
+                if (confirm("Shift closed successfully. Would you like to print the closing report?")) {
+                    printShiftReport({ ...activeShift, ...financials });
+                }
+
+                // Ask user if they want to go to Shifts module
+                if (confirm("Would you like to go to the Shifts module?")) {
+                    window.location.hash = "#shifts";
+                } else {
+                    loadPosView();
+                }
+            }
+        } catch (error) {
+            console.error("Error closing shift:", error);
+            showToast("Failed to close shift.", true);
+        }
+    });
+
+    async function printShiftReport(shift) {
+        try {
+            const settings = await getSystemSettings();
+            const store = settings.store || { name: "LightPOS", data: "" };
+
+            const defaultPrint = {
+                paper_width: 76,
+                show_dividers: true,
+                header: { text: "", font_size: 14, font_family: "'Courier New', Courier, monospace", bold: true, italic: false },
+                items: { font_size: 12, font_family: "'Courier New', Courier, monospace", bold: false, italic: false },
+                body: { font_size: 12, font_family: "'Courier New', Courier, monospace", bold: false, italic: false },
+                footer: { text: "Thank you for shopping!", font_size: 10, font_family: "'Courier New', Courier, monospace", bold: false, italic: true }
+            };
+
+            const p = {
+                ...defaultPrint,
+                ...(settings.print || {}),
+                header: { ...defaultPrint.header, ...(settings.print?.header || {}) },
+                items: { ...defaultPrint.items, ...(settings.print?.items || {}) },
+                body: { ...defaultPrint.body, ...(settings.print?.body || {}) },
+                footer: { ...defaultPrint.footer, ...(settings.print?.footer || {}) }
+            };
+
+            const pWidth = p.paper_width || 76;
+            const showHR = p.show_dividers !== false;
+
+            const getStyle = (s) => `
+                font-size: ${s.font_size}px; 
+                font-family: ${s.font_family}; 
+                font-weight: ${s.bold ? 'bold' : 'normal'}; 
+                font-style: ${s.italic ? 'italic' : 'normal'};
+            `;
+
+            const headerText = p.header?.text || `${store.name}\n${store.data}`;
+
+            const printWindow = window.open('', '_blank', 'width=300,height=600');
+            if (!printWindow) {
+                throw new Error("Failed to open print window. Pop-up blocker might be enabled.");
+            }
+
+            const receiptsHtml = (shift.closing_receipts || []).map(r => `
+                <tr>
+                    <td style="font-size: 0.9em;">${r.description}</td>
+                    <td style="text-align: right;">${r.amount.toFixed(2)}</td>
+                </tr>
+            `).join('');
+
+            const reportHtml = `
+                <html>
+                <head>
+                    <title>Shift Closing Report</title>
+                    <style>
+                        @page { margin: 0; }
+                        body { 
+                            width: ${pWidth}mm;
+                            ${getStyle(p.body)}
+                            padding: 5mm;
+                            margin: 0;
+                            color: #000;
+                        }
+                        .text-center { text-align: center; }
+                        .text-right { text-align: right; }
+                        .bold { font-weight: bold; }
+                        .hr { border-bottom: 1px dashed #000; margin: 5px 0; }
+                        table { width: 100%; border-collapse: collapse; }
+                        .header-sec { ${getStyle(p.header)} }
+                        .body-sec { ${getStyle(p.body)} }
+                    </style>
+                </head>
+                <body onload="window.print(); window.close();">
+                    <div class="text-center header-sec">
+                        <div class="bold" style="font-size: 1.2em;">SHIFT CLOSING REPORT</div>
+                        ${store.logo ? `<img src="${store.logo}" style="max-width: 40mm; max-height: 20mm; margin-bottom: 5px; filter: grayscale(1);"><br>` : ''}
+                        <div style="white-space: pre-wrap;">${headerText}</div>
+                    </div>
+                    ${showHR ? '<div class="hr"></div>' : ''}
+                    <div class="body-sec">
+                        User: ${shift.user_id}<br>
+                        Opened: ${new Date(shift.start_time).toLocaleString()}<br>
+                        Closed: ${new Date(shift.end_time).toLocaleString()}
+                    </div>
+                    ${showHR ? '<div class="hr"></div>' : ''}
+                    <table>
+                        <tr><td>Opening Cash</td><td class="text-right">₱${(shift.opening || shift.opening_cash || 0).toFixed(2)}</td></tr>
+                        <tr><td>+ Sales (Cash)</td><td class="text-right">₱${(shift.sales || 0).toFixed(2)}</td></tr>
+                        <tr><td>+ Adjustments</td><td class="text-right">₱${(shift.adjustments || 0).toFixed(2)}</td></tr>
+                        <tr><td>+ Net Returns</td><td class="text-right">₱${(shift.returns_net || 0).toFixed(2)}</td></tr>
+                        <tr class="bold"><td>= Gross Account</td><td class="text-right">₱${(shift.gross_accountability || shift.expected_cash || 0).toFixed(2)}</td></tr>
+                        <tr class="hr"><td colspan="2"></td></tr>
+                        <tr class="bold"><td>Physical Cash</td><td class="text-right">₱${(shift.closing_cash || 0).toFixed(2)}</td></tr>
+                        ${shift.precounted_bills ? `
+                            <tr><td style="font-size: 0.9em; padding-left: 10px;">- Precounted Bills</td><td class="text-right" style="font-size: 0.9em;">₱${shift.precounted_bills.toFixed(2)}</td></tr>
+                        ` : ''}
+                        ${shift.precounted_coins ? `
+                            <tr><td style="font-size: 0.9em; padding-left: 10px;">- Precounted Coins</td><td class="text-right" style="font-size: 0.9em;">₱${shift.precounted_coins.toFixed(2)}</td></tr>
+                        ` : ''}
+                        ${shift.cashout ? `
+                            <tr><td>- Remitted</td><td class="text-right">₱${shift.cashout.toFixed(2)}</td></tr>
+                        ` : ''}
+                        ${shift.expenses ? `
+                            <tr><td>- Expenses</td><td class="text-right">₱${shift.expenses.toFixed(2)}</td></tr>
+                        ` : ''}
+                    </table>
+                    ${receiptsHtml ? `
+                        ${showHR ? '<div class="hr"></div>' : ''}
+                        <div class="bold" style="font-size: 0.9em;">EXPENSE RECEIPTS</div>
+                        <table>${receiptsHtml}</table>
+                    ` : ''}
+                    ${showHR ? '<div class="hr"></div>' : ''}
+                    <table>
+                        <tr class="bold" style="font-size: 1.1em;">
+                            <td>TOTAL TURNOVER</td>
+                            <td class="text-right">₱${(shift.total_closing_amount || shift.closing_cash || 0).toFixed(2)}</td>
+                        </tr>
+                        <tr class="bold">
+                            <td>VARIANCE</td>
+                            <td class="text-right">₱${((shift.total_closing_amount || shift.closing_cash || 0) - (shift.expected_cash || 0)).toFixed(2)}</td>
+                        </tr>
+                    </table>
+                    ${showHR ? '<div class="hr" style="margin-top: 20px;"></div>' : ''}
+                    <div class="text-center" style="font-size: 0.8em; margin-top: 10px;">
+                        End of Report
+                    </div>
+                </body>
+                </html>
+            `;
+            printWindow.document.write(reportHtml);
+            printWindow.document.close();
+        } catch (error) {
+            handleError(error, 'Shift Report Printing');
+        }
+    }
+
+    // Checkout Logic
+    document.getElementById("btn-checkout").addEventListener("click", openCheckout);
+    document.getElementById("btn-cancel-checkout").addEventListener("click", closeCheckout);
+
+    document.getElementById("btn-apply-discount").addEventListener("click", async () => {
+        const codeInput = document.getElementById("discount-code-input");
+        const code = codeInput.value.trim().toUpperCase();
+        const modal = document.getElementById("modal-checkout");
+        const totalOriginal = parseFloat(modal.dataset.total);
+        const discountDisplay = document.getElementById("discount-display");
+        const totalEl = document.getElementById("checkout-total");
+
+        try {
+            const allCodes = await Repository.getAll('discount_codes');
+            const discount = allCodes.find(d => d.code === code && d.is_active && !d._deleted);
+
+            if (discount) {
+                // Usage Limit Checks
+                const limit = discount.usage_limit || 'unlimited';
+
+                const customerId = selectedCustomer ? selectedCustomer.id : 'Guest';
+
+                if (limit !== 'unlimited') {
+                    if (!customerId || customerId === 'Guest') {
+                        showToast(`Code '${code}' requires a registered customer.`, true);
+                        return;
+                    }
+
+                    // 2. Check Usage History
+                    const history = await Repository.getAll('transactions');
+                    const customerHistory = history.filter(t => t.customer_id === customerId && !t.is_voided && !t._deleted);
+
+                    // We need to check if they used this code. 
+                    // Transactions need to store the discount code used.
+                    // Currently `modal.dataset.discountCode` sets it for NEW transaction. 
+                    // Old transactions: we verify if they have a field `discount_code`.
+                    // Does schema support `discount_code` in transactions? 
+                    // Schema check: `transactions` table has `json_body`.
+                    // We should verify if we save `discount_code` in `json_body` or a column.
+
+                    const usedCount = customerHistory.filter(t => {
+                        const tCode = t.discount_code || (t.json_body && JSON.parse(t.json_body).discount_code);
+                        if (!tCode) return false;
+
+                        // Check if code matches
+                        if (tCode !== code) return false;
+
+                        if (limit === 'once_forever') return true;
+
+                        if (limit === 'once_per_day') {
+                            const tDate = new Date(t.timestamp).toISOString().split('T')[0];
+                            const today = new Date().toISOString().split('T')[0];
+                            return tDate === today;
+                        }
+                        return false;
+                    }).length;
+
+                    if (usedCount > 0) {
+                        const msg = limit === 'once_per_day' ? 'already used today' : 'already used';
+                        showToast(`Code '${code}' ${msg} by this customer.`, true);
+                        return;
+                    }
+                }
+
+                let discountAmount = 0;
+                if (discount.type === 'percentage') {
+                    discountAmount = totalOriginal * (parseFloat(discount.value) / 100);
+                } else {
+                    discountAmount = parseFloat(discount.value);
+                }
+
+                // Cap discount
+                if (discountAmount > totalOriginal) discountAmount = totalOriginal;
+                if (discountAmount < 0) discountAmount = 0;
+
+                const newTotal = totalOriginal - discountAmount;
+
+                discountDisplay.textContent = `Discount Applied: ${code} (-₱${discountAmount.toFixed(2)})`;
+                discountDisplay.classList.remove("hidden");
+
+                totalEl.innerHTML = `<span class="line-through text-gray-400 text-sm mr-2">₱${totalOriginal.toFixed(2)}</span> ₱${newTotal.toFixed(2)}`;
+
+                modal.dataset.discount = discountAmount;
+                modal.dataset.discountCode = code;
+
+                showToast(`Discount Applied: ${discount.type === 'percentage' ? discount.value + '% Off' : '₱' + discount.value + ' Off'}`);
+            } else {
+                showToast("Invalid or Inactive Discount Code", true);
+                modal.dataset.discount = "0";
+                modal.dataset.discountCode = "";
+                discountDisplay.classList.add("hidden");
+                totalEl.textContent = `₱${totalOriginal.toFixed(2)}`;
+            }
+            updateCheckoutCalculations();
+        } catch (e) {
+            console.error("Discount Error:", e);
+            showToast("Error checking discount code", true);
+        }
+    });
+
+    document.getElementById("discount-code-input").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            document.getElementById("btn-apply-discount").click();
+        }
+    });
+
+    const selectPayment = document.getElementById("select-payment-method");
+    selectPayment.addEventListener("change", (e) => {
+        const method = e.target.value;
+        const inputPoints = document.getElementById("input-points-to-use");
+        if (method === "Points") {
+            const modal = document.getElementById("modal-checkout");
+            const total = parseFloat(modal.dataset.total) || 0;
+            const discount = parseFloat(modal.dataset.discount) || 0;
+            const netTotal = Math.max(0, total - discount);
+            const availablePoints = (selectedCustomer && selectedCustomer.id !== "Guest") ? (selectedCustomer.loyalty_points || 0) : 0;
+            const maxPoints = Math.min(availablePoints, Math.floor(netTotal));
+
+            if (availablePoints === 0) {
+                showToast("Customer has no loyalty points.", true);
+            } else {
+                inputPoints.value = maxPoints > 0 ? maxPoints : "";
+            }
+        }
+        updateCheckoutCalculations();
+    });
+
+    const inputPointsToUse = document.getElementById("input-points-to-use");
+    if (inputPointsToUse) {
+        inputPointsToUse.addEventListener("input", () => {
+            updateCheckoutCalculations();
+        });
+    }
+
+    const btnUseMaxPoints = document.getElementById("btn-use-max-points");
+    if (btnUseMaxPoints) {
+        btnUseMaxPoints.addEventListener("click", () => {
+            const modal = document.getElementById("modal-checkout");
+            const total = parseFloat(modal.dataset.total) || 0;
+            const discount = parseFloat(modal.dataset.discount) || 0;
+            const netTotal = Math.max(0, total - discount);
+            const availablePoints = (selectedCustomer && selectedCustomer.id !== "Guest") ? (selectedCustomer.loyalty_points || 0) : 0;
+            const maxPoints = Math.min(availablePoints, Math.floor(netTotal));
+
+            if (inputPointsToUse) {
+                inputPointsToUse.value = maxPoints > 0 ? maxPoints : "";
+            }
+            updateCheckoutCalculations();
+        });
+    }
+
+    const inputTendered = document.getElementById("input-tendered");
+    inputTendered.addEventListener("input", () => {
+        updateCheckoutCalculations();
+    });
+
+    inputTendered.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            const btnConfirm = document.getElementById("btn-confirm-pay");
+            if (!btnConfirm.disabled) {
+                processTransaction();
+            }
+        }
+    });
+
+    document.getElementById("btn-confirm-pay").addEventListener("click", processTransaction);
+
+    // Auto-focus search on load
+    setTimeout(() => searchInput.focus(), 100);
+    initResizer();
+
+    const gridColsSelect = document.getElementById("pos-grid-cols");
+    gridColsSelect.addEventListener("change", (e) => {
+        const cols = e.target.value;
+        localStorage.setItem('pos_grid_cols', cols);
+        updateGridColumns(cols);
+    });
+
+    const compactToggle = document.getElementById("pos-compact-mode");
+    compactToggle.addEventListener("change", (e) => {
+        localStorage.setItem('pos_compact_mode', e.target.checked);
+        fetchItemsFromDexie(); // Re-render grid
+    });
+
+    updateGridColumns(savedCols);
+    setupMobilePosListeners();
+
+    if (isMobile) {
+        const mobileUI = document.getElementById("mobile-pos-ui");
+        if (mobileUI) {
+            mobileUI.classList.remove("hidden");
+            renderCart();
+        }
+    }
+}
+
+function initResizer() {
+    const resizer = document.getElementById('pos-resizer');
+    if (!resizer) return;
+
+    resizer.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        document.body.style.cursor = 'col-resize';
+        document.body.classList.add('select-none');
+    });
+}
+
+function setupMobilePosListeners() {
+    const btnMobileMode = document.getElementById("btn-pos-mobile-mode");
+    const mobileUI = document.getElementById("mobile-pos-ui");
+    const btnExit = document.getElementById("btn-exit-mobile-pos");
+    const btnScan = document.getElementById("btn-mobile-scan");
+    const btnCloseCamera = document.getElementById("btn-close-pos-camera");
+    const btnCheckout = document.getElementById("btn-mobile-checkout");
+    const btnToggleFlash = document.getElementById("btn-pos-toggle-flash");
+    const mobileSearch = document.getElementById("mobile-pos-search");
+    const mobileResults = document.getElementById("mobile-pos-search-results");
+    const mobilePaymentOverlay = document.getElementById("mobile-payment-overlay");
+    const mobileChangeOverlay = document.getElementById("mobile-change-overlay");
+    const btnClosePayment = document.getElementById("btn-close-mobile-payment");
+    const btnConfirmPay = document.getElementById("btn-mobile-confirm-pay");
+    const inputTendered = document.getElementById("mobile-input-tendered");
+    const btnNewSale = document.getElementById("btn-mobile-new-sale");
+
+    btnMobileMode?.addEventListener("click", () => {
+        mobileUI.classList.remove("hidden");
+        renderCart(); // Refresh mobile posCart
+    });
+
+    btnExit?.addEventListener("click", () => {
+        mobileUI.classList.add("hidden");
+        stopPosCamera();
+    });
+
+    btnScan?.addEventListener("click", startPosCamera);
+    btnCloseCamera?.addEventListener("click", stopPosCamera);
+    btnToggleFlash?.addEventListener("click", togglePosFlash);
+
+    mobileSearch?.addEventListener("input", (e) => {
+        const term = e.target.value.toLowerCase();
+        if (term.length < 1) {
+            mobileResults.classList.add("hidden");
+            return;
+        }
+
+        const terms = term.split(/\s+/).filter(t => t.length > 0);
+        const filtered = allItems.filter(i => {
+            const name = (i.name || "").toLowerCase();
+            const barcode = (i.barcode || "").toLowerCase();
+            return terms.every(t => name.includes(t) || barcode.includes(t));
+        }).slice(0, 20);
+
+        if (filtered.length > 0) {
+            mobileResults.innerHTML = filtered.map(item => `
+                <div class="p-3 border-b hover:bg-gray-100 cursor-pointer mobile-search-item flex justify-between items-center" data-id="${item.id}">
+                    <div>
+                        <div class="font-bold text-gray-800">${item.name}</div>
+                        <div class="text-xs text-gray-500">${item.barcode || 'No Barcode'}</div>
+                    </div>
+                    <div class="font-bold text-blue-600">₱${(item.selling_price || 0).toFixed(2)}</div>
+                </div>
+            `).join('');
+            mobileResults.classList.remove("hidden");
+
+            mobileResults.querySelectorAll(".mobile-search-item").forEach(el => {
+                el.addEventListener("click", async () => {
+                    const item = allItems.find(i => i.id === el.dataset.id);
+                    if (item) {
+                        await addToCart(item, 1);
+                        mobileSearch.value = "";
+                        mobileResults.classList.add("hidden");
+                    }
+                });
+            });
+        } else {
+            mobileResults.innerHTML = `<div class="p-3 text-gray-500 text-center">No items found</div>`;
+            mobileResults.classList.remove("hidden");
+        }
+    });
+
+    btnCheckout?.addEventListener("click", () => {
+        if (posCart.length === 0) {
+            showToast("Cart is empty", true);
+            return;
+        }
+        // Open Mobile Payment Overlay
+        const total = posCart.reduce((sum, item) => sum + (item.selling_price * item.qty), 0);
+        document.getElementById("mobile-payment-total").textContent = `₱${total.toFixed(2)}`;
+        inputTendered.value = "";
+        btnConfirmPay.disabled = true;
+        mobilePaymentOverlay.classList.remove("hidden");
+        inputTendered.focus();
+    });
+
+    btnClosePayment?.addEventListener("click", () => {
+        mobilePaymentOverlay.classList.add("hidden");
+    });
+
+    inputTendered?.addEventListener("input", (e) => {
+        const total = posCart.reduce((sum, item) => sum + (item.selling_price * item.qty), 0);
+        const val = parseFloat(e.target.value) || 0;
+        btnConfirmPay.disabled = val < total;
+    });
+
+    document.querySelectorAll(".mobile-quick-cash").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const total = posCart.reduce((sum, item) => sum + (item.selling_price * item.qty), 0);
+            if (btn.dataset.amount === "exact") {
+                inputTendered.value = total;
+            } else {
+                inputTendered.value = btn.dataset.amount;
+            }
+            inputTendered.dispatchEvent(new Event('input'));
+        });
+    });
+
+    btnConfirmPay?.addEventListener("click", async () => {
+        await processMobileTransaction();
+    });
+
+    btnNewSale?.addEventListener("click", () => {
+        mobileChangeOverlay.classList.add("hidden");
+        mobilePaymentOverlay.classList.add("hidden");
+    });
+}
+
+async function startPosCamera() {
+    if (isPosCameraRunning) return;
+    const overlay = document.getElementById("mobile-pos-camera-overlay");
+    const video = document.getElementById("mobile-pos-video");
+
+    try {
+        if ('BarcodeDetector' in window) {
+            posBarcodeDetector = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'] });
+        }
+
+        mobilePosStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        video.srcObject = mobilePosStream;
+
+        // Flash Logic
+        const track = mobilePosStream.getVideoTracks()[0];
+        const btnFlash = document.getElementById("btn-pos-toggle-flash");
+        if (track && track.getCapabilities && btnFlash) {
+            const capabilities = track.getCapabilities();
+            if (capabilities.torch) {
+                btnFlash.classList.remove("hidden");
+                try {
+                    await track.applyConstraints({ advanced: [{ torch: true }] });
+                    btnFlash.classList.remove("text-white");
+                    btnFlash.classList.add("text-yellow-400");
+                } catch (e) {
+                    console.warn("Failed to enable flash by default:", e);
+                }
+            }
+        }
+
+        overlay.classList.remove("hidden");
+        isPosCameraRunning = true;
+        posScanDebounce = false;
+        requestAnimationFrame(posScanLoop);
+    } catch (err) {
+        console.error("Camera error:", err);
+        alert("Could not access camera.");
+    }
+}
+
+function stopPosCamera() {
+    if (mobilePosStream) {
+        mobilePosStream.getTracks().forEach(t => t.stop());
+        mobilePosStream = null;
+    }
+    isPosCameraRunning = false;
+    document.getElementById("mobile-pos-camera-overlay").classList.add("hidden");
+
+    const btnFlash = document.getElementById("btn-pos-toggle-flash");
+    if (btnFlash) {
+        btnFlash.classList.add("hidden");
+        btnFlash.classList.remove("text-yellow-400");
+        btnFlash.classList.add("text-white");
+    }
+}
+
+async function posScanLoop() {
+    if (!isPosCameraRunning) return;
+    const video = document.getElementById("mobile-pos-video");
+
+    if (posBarcodeDetector && !posScanDebounce && video.readyState === video.HAVE_ENOUGH_DATA) {
+        try {
+            const barcodes = await posBarcodeDetector.detect(video);
+            if (barcodes.length > 0) {
+                posScanDebounce = true;
+                handlePosScan(barcodes[0].rawValue);
+            }
+        } catch (e) { }
+    }
+    if (isPosCameraRunning) requestAnimationFrame(posScanLoop);
+}
+
+async function togglePosFlash() {
+    if (mobilePosStream) {
+        const track = mobilePosStream.getVideoTracks()[0];
+        if (track && track.getCapabilities) {
+            const capabilities = track.getCapabilities();
+            if (capabilities.torch) {
+                const current = track.getSettings().torch;
+                await track.applyConstraints({ advanced: [{ torch: !current }] });
+                const btn = document.getElementById("btn-pos-toggle-flash");
+                if (!current) {
+                    btn.classList.remove("text-white");
+                    btn.classList.add("text-yellow-400");
+                } else {
+                    btn.classList.add("text-white");
+                    btn.classList.remove("text-yellow-400");
+                }
+            }
+        }
+    }
+}
+
+async function handlePosScan(code) {
+    const item = barcodeMap.get(code) || allItems.find(i => i.barcode === code);
+    if (item) {
+        playBeep(880, 0.1);
+
+        const overlay = document.getElementById("pos-scan-success");
+        if (overlay) {
+            overlay.classList.remove("opacity-0");
+            overlay.classList.add("opacity-75");
+        }
+
+        await addToCart(item, 1);
+        showToast(`Added ${item.name}`);
+        setTimeout(() => {
+            if (overlay) {
+                overlay.classList.remove("opacity-75");
+                overlay.classList.add("opacity-0");
+            }
+            posScanDebounce = false;
+        }, 1000); // Delay before next scan
+    } else {
+        playBeep(200, 0.3, 'sawtooth');
+        const overlay = document.getElementById("pos-scan-error");
+        if (overlay) {
+            overlay.classList.remove("opacity-0");
+            overlay.classList.add("opacity-75");
+        }
+        showToast(`Item not found: ${code}`, true);
+        setTimeout(() => {
+            if (overlay) {
+                overlay.classList.remove("opacity-75");
+                overlay.classList.add("opacity-0");
+            }
+            posScanDebounce = false;
+        }, 1500);
+    }
+}
+
+async function processMobileTransaction() {
+    const btnConfirm = document.getElementById("btn-mobile-confirm-pay");
+    const inputTendered = document.getElementById("mobile-input-tendered");
+
+    if (btnConfirm.hasAttribute("data-processing")) return;
+    btnConfirm.setAttribute("data-processing", "true");
+    btnConfirm.disabled = true;
+    inputTendered.disabled = true;
+    const originalText = btnConfirm.textContent;
+    btnConfirm.textContent = "Processing...";
+
+    const settings = await getSystemSettings();
+    const total = posCart.reduce((sum, item) => sum + (item.selling_price * item.qty), 0);
+    const tendered = parseFloat(inputTendered.value) || 0;
+
+    if (tendered < total) {
+        showToast("Amount tendered is insufficient.", true);
+        btnConfirm.removeAttribute("data-processing");
+        btnConfirm.disabled = false;
+        inputTendered.disabled = false;
+        btnConfirm.textContent = originalText;
+        return;
+    }
+
+    const user = JSON.parse(localStorage.getItem('pos_user'));
+    const taxRate = (settings.tax?.rate || 0) / 100;
+    const taxAmount = total - (total / (1 + taxRate));
+    const rewardRatio = settings.rewards?.ratio || 100;
+    const pointsEarned = Math.floor(total / rewardRatio);
+    const change = tendered - total;
+
+    const transaction = {
+        id: generateUUID(),
+        items: JSON.parse(JSON.stringify(posCart)),
+        total_amount: total,
+        amount_tendered: tendered,
+        change: change,
+        tax_amount: taxAmount,
+        payment_method: "Cash",
+        user_email: user ? user.email : "Guest",
+        user_name: user ? user.name : "Guest",
+        customer_id: selectedCustomer.id,
+        customer_name: selectedCustomer.name,
+        points_earned: pointsEarned,
+        timestamp: new Date().toISOString(),
+        is_voided: false
+    };
+
+    try {
+        await Repository.upsert('transactions', transaction);
+        for (const item of transaction.items) {
+            const current = await Repository.get('items', item.id);
+            if (current) {
+                await Repository.upsert('items', { ...current, stock_level: current.stock_level - item.qty });
+                await Repository.upsert('stock_movements', { id: generateUUID(), item_id: item.id, item_name: item.name, timestamp: transaction.timestamp, type: 'Sale', qty: -item.qty, user: transaction.user_email, transaction_id: transaction.id, reason: "POS Sale (Mobile)" });
+            }
+        }
+        if (selectedCustomer.id !== "Guest") {
+            const updatedCustomer = { ...selectedCustomer };
+            updatedCustomer.loyalty_points = (updatedCustomer.loyalty_points || 0) + pointsEarned;
+            await Repository.upsert('customers', updatedCustomer);
+        }
+        SyncEngine.sync();
+        lastTransactionData = transaction;
+        posCart = [];
+        currentSuspendedId = null;
+        currentSuspendedCreatedAt = null;
+        renderCart();
+        selectCustomer({ id: "Guest", name: "Guest" });
+        document.getElementById("pos-customer-search").value = "";
+        document.getElementById("mobile-change-amount").textContent = `₱${change.toFixed(2)}`;
+        document.getElementById("mobile-change-overlay").classList.remove("hidden");
+    } catch (error) {
+        console.error("Error saving transaction:", error);
+        showToast("Failed to save transaction.", true);
+    } finally {
+        btnConfirm.removeAttribute("data-processing");
+        inputTendered.disabled = false;
+        btnConfirm.disabled = false;
+        btnConfirm.textContent = originalText;
+    }
+}
+
+function updateGridColumns(cols) {
+    const grid = document.getElementById("pos-grid");
+    if (!grid) return;
+    grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+}
+
+async function fetchItemsFromDexie() {
+    try {
+        const all = await Repository.getAll('items');
+        allItems = all; // Repository.getAll already filters _deleted: true
+        // Rebuild barcode map for O(1) lookup
+        barcodeMap.clear();
+        allItems.forEach(item => {
+            if (item.barcode) barcodeMap.set(item.barcode, item);
+        });
+        renderGrid(allItems);
+    } catch (error) {
+        console.error("Error loading items from Dexie:", error);
+        document.getElementById("pos-grid").innerHTML = `<div class="col-span-full text-center text-red-500">Error loading local database. Please ensure sync is active.</div>`;
+    }
+}
+
+async function fetchCustomersFromDexie() {
+    try {
+        allCustomers = await Repository.getAll('customers'); // Already filters _deleted
+    } catch (error) {
+        console.error("Error loading customers:", error);
+    }
+}
+
+function selectCustomer(customer) {
+    selectedCustomer = customer;
+    const display = document.getElementById("selected-customer-display");
+    const btnReset = document.getElementById("btn-reset-customer");
+    const input = document.getElementById("pos-customer-search");
+
+    display.textContent = `Customer: ${customer.name}`;
+    document.getElementById("pos-customer-results").classList.add("hidden");
+
+    if (customer.id !== "Guest") {
+        input.value = customer.name;
+        btnReset.classList.remove("hidden");
+    } else {
+        btnReset.classList.add("hidden");
+    }
+
+    // Focus back to item search
+    document.getElementById("pos-search")?.focus();
+}
+
+function renderGrid(items) {
+    const grid = document.getElementById("pos-grid");
+    const fragment = document.createDocumentFragment();
+    grid.innerHTML = "";
+
+    if (items.length === 0) {
+        grid.innerHTML = `<div class="col-span-full text-center text-gray-500 mt-10">No items found.</div>`;
+        return;
+    }
+
+    // Limit rendering to top 100 items to maintain performance during rapid searches/scans
+    const itemsToRender = items.slice(0, 100);
+    const isCompact = localStorage.getItem('pos_compact_mode') === 'true';
+    const isSearchActive = document.getElementById("pos-search").value.trim().length > 0;
+
+    itemsToRender.forEach((item, index) => {
+        const card = document.createElement("div");
+        // Base classes
+        let baseClasses = isCompact
+            ? "bg-white border rounded p-1.5 shadow-sm flex flex-col justify-between h-16 select-none relative overflow-hidden group focus:outline-none focus:ring-1 focus:ring-blue-500"
+            : "bg-white border rounded-lg p-3 shadow-sm flex flex-col justify-between h-24 select-none relative overflow-hidden group focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+        // Interactive vs Locked state
+        if (isSearchActive) {
+            baseClasses += " hover:shadow-md cursor-pointer transition duration-150 hover:border-blue-400 active:bg-blue-50";
+            card.setAttribute("tabindex", "0");
+        } else {
+            baseClasses += " opacity-60 grayscale cursor-not-allowed";
+        }
+        card.className = baseClasses;
+
+        // Stock Indicator Color
+        let stockColor = 'text-green-600';
+        if (item.stock_level <= 0) {
+            stockColor = 'text-red-600';
+        } else if (item.stock_level <= (item.min_stock || 10)) {
+            stockColor = 'text-yellow-600';
+        }
+
+        const titleClass = isCompact ? "font-bold text-gray-800 leading-tight line-clamp-1 text-[11px]" : "font-bold text-gray-800 leading-tight line-clamp-2 text-sm mb-1";
+        const barcodeClass = isCompact ? "text-[9px] text-gray-400 font-mono" : "text-xs text-gray-400 font-mono";
+        const footerClass = isCompact ? "flex justify-between items-center mt-1 border-t pt-1" : "flex justify-between items-end mt-2 border-t pt-2";
+        const stockClass = isCompact ? "text-[9px] font-semibold" : "text-xs font-semibold";
+        const priceClass = isCompact ? "font-bold text-blue-600 text-xs" : "font-bold text-blue-600";
+
+        card.innerHTML = `
+            <div>
+                <div class="${titleClass}">${item.name || "Unnamed Item"}</div>
+                <div class="${barcodeClass}">${item.barcode || "No Barcode"}</div>
+            </div>
+            <div class="${footerClass}">
+                <div class="${stockClass} ${stockColor}">Stock: ${item.stock_level}</div>
+                <div class="${priceClass}">₱${(item.selling_price || 0).toFixed(2)}</div>
+            </div>
+            <!-- Hover Effect Overlay -->
+            <div class="absolute inset-0 bg-blue-600 bg-opacity-0 ${isSearchActive ? 'group-hover:bg-opacity-5' : ''} transition duration-150"></div>
+        `;
+
+        // Only attach listeners if search is active
+        if (isSearchActive) {
+            card.addEventListener("click", async () => {
+                await addToCart(item, 1);
+                const searchInput = document.getElementById("pos-search");
+                if (searchInput) {
+                    searchInput.value = "";
+                    filterItems("");
+                    searchInput.focus();
+                }
+            });
+
+            card.addEventListener("keydown", async (e) => {
+                if (activeCartIndex !== null) return;
+
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    await addToCart(item, 1);
+                    const searchInput = document.getElementById("pos-search");
+                    if (searchInput) {
+                        searchInput.value = "";
+                        filterItems("");
+                        searchInput.focus();
+                    }
+                } else {
+                    handleGridNavigation(e, index, items.length);
+                }
+            });
+        }
+
+        fragment.appendChild(card);
+    });
+
+    if (items.length > 100) {
+        const moreInfo = document.createElement("div");
+        moreInfo.className = "col-span-full text-center text-gray-400 text-xs py-4";
+        moreInfo.textContent = `Showing 100 of ${items.length} items. Refine search to find more.`;
+        fragment.appendChild(moreInfo);
+    }
+
+    if (!isSearchActive && items.length > 0) {
+        const lockMsg = document.createElement("div");
+        lockMsg.className = "col-span-full text-center text-gray-400 italic text-sm mt-4";
+        lockMsg.textContent = "Start typing to select items...";
+        // Insert at top
+        grid.innerHTML = "";
+        grid.appendChild(lockMsg);
+    }
+
+    // Append items if we are allowed to show them, or if we want to show 'disabled' items (user preference check could be here)
+    // For now, based on request, we show them as locked.
+    requestAnimationFrame(() => {
+        grid.appendChild(fragment);
+    });
+}
+
+function filterItems(term) {
+    term = term.toLowerCase();
+    const terms = term.split(/\s+/).filter(t => t.length > 0);
+    const filtered = allItems.filter(i => {
+        const name = (i.name || "").toLowerCase();
+        const barcode = (i.barcode || "").toLowerCase();
+        return terms.every(t => name.includes(t) || barcode.includes(t));
+    });
+    renderGrid(filtered);
+}
+
+function handleGridNavigation(e, index, totalItems) {
+    const cols = parseInt(localStorage.getItem('pos_grid_cols') || '3');
+    let nextIndex = index;
+
+    if (e.key === "ArrowRight") nextIndex++;
+    else if (e.key === "ArrowLeft") nextIndex--;
+    else if (e.key === "ArrowDown") nextIndex += cols;
+    else if (e.key === "ArrowUp") nextIndex -= cols;
+    else return;
+
+    const cards = document.querySelectorAll("#pos-grid > div[tabindex='0']");
+
+    if (nextIndex >= 0 && nextIndex < totalItems) {
+        e.preventDefault();
+        cards[nextIndex]?.focus();
+    } else if (e.key === "ArrowUp" && nextIndex < 0) {
+        e.preventDefault();
+        document.getElementById("pos-search").focus();
+    }
+}
+
+
+async function ensureStockViaBreakdown(item, requiredQty) {
+    if (item.stock_level >= requiredQty) return false;
+    if (!item.parent_id) return false;
+
+    const parent = allItems.find(p => p.id === item.parent_id);
+    if (!parent) return false;
+
+    const deficit = requiredQty - item.stock_level;
+    const factor = parseFloat(item.conv_factor) || 1;
+    const parentsNeeded = Math.ceil(deficit / factor);
+
+    // Recursively ensure parent has enough stock
+    // We try to fulfill 'parentsNeeded', but if we can't get all, we take what we can.
+    await ensureStockViaBreakdown(parent, parentsNeeded);
+
+    // After attempting recursion, check what we actually have available to break
+    const parentsToBreak = Math.min(parent.stock_level, parentsNeeded);
+
+    if (parentsToBreak > 0) {
+        const qtyCreated = parentsToBreak * factor;
+
+        // Update Memory State
+        parent.stock_level -= parentsToBreak;
+        item.stock_level += qtyCreated;
+
+        // Persist DB
+        await Promise.all([Repository.upsert('items', parent), Repository.upsert('items', item)]);
+
+        // Log Movements
+        const user = JSON.parse(localStorage.getItem('pos_user'))?.email || 'system';
+        const timestamp = new Date().toISOString();
+
+        await Repository.upsert('stock_movements', {
+            id: generateUUID(), item_id: parent.id, item_name: parent.name, timestamp,
+            type: 'Conversion', qty: -parentsToBreak, user, reason: `Recursive Breakdown > ${item.name}`
+        });
+
+        await Repository.upsert('stock_movements', {
+            id: generateUUID(), item_id: item.id, item_name: item.name, timestamp,
+            type: 'Conversion', qty: qtyCreated, user, reason: `Recursive Breakdown < ${parent.name}`
+        });
+
+        showGlobalToast(`Auto-breakdown: ${parentsToBreak} ${parent.name} -> ${item.name}`);
+        return true;
+    }
+
+    return false;
+}
+
+function parseSearchTerm(val) {
+    const regex = /^(\d+)\*(.*)$/;
+    const match = val.match(regex);
+    if (match) {
+        return { qty: parseInt(match[1], 10), term: match[2] };
+    }
+    return { qty: 1, term: val };
+}
+
+async function addToCart(item, qty = 1) {
+    playBeep(880, 0.1); // Good beep
+    showToast(`Added ${item.name} to posCart`);
+    // Hide last transaction summary when starting a new sale
+    document.getElementById("last-transaction").classList.add("hidden");
+
+    // Auto-Breakdown Logic (Recursive)
+    if (item.stock_level < qty) {
+        const breakdownOccurred = await ensureStockViaBreakdown(item, qty);
+        if (breakdownOccurred) {
+            // Refresh Grid to show new stock levels if breakdown happened
+            filterItems(document.getElementById("pos-search").value);
+        }
+    }
+
+    const existingItem = posCart.find(i => i.id === item.id);
+    if (existingItem) {
+        existingItem.qty += qty;
+    } else {
+        posCart.unshift({ ...item, qty: qty });
+    }
+    renderCart();
+}
+
+function removeFromCart(index) {
+    posCart.splice(index, 1);
+    renderCart();
+
+    // Auto-focus search box after deletion
+    const desktopSearch = document.getElementById("pos-search");
+    const mobileSearch = document.getElementById("mobile-pos-search");
+
+    if (desktopSearch && (desktopSearch.offsetWidth > 0 || desktopSearch.offsetHeight > 0)) {
+        desktopSearch.focus();
+    } else if (mobileSearch && (mobileSearch.offsetWidth > 0 || mobileSearch.offsetHeight > 0)) {
+        mobileSearch.focus();
+    }
+}
+
+function updateQty(index, newQty) {
+    if (newQty > 0) {
+        posCart[index].qty = newQty;
+    } else {
+        removeFromCart(index);
+        return;
+    }
+    renderCart();
+}
+
+function renderCart() {
+    const cartContainer = document.getElementById("pos-cart-items");
+    const totalEl = document.getElementById("cart-total");
+    const btnCheckout = document.getElementById("btn-checkout");
+    const mobileCartContainer = document.getElementById("mobile-pos-cart-items");
+    const mobileTotalEl = document.getElementById("mobile-cart-total");
+
+    if (!cartContainer) return;
+    cartContainer.innerHTML = "";
+    let total = 0;
+
+    if (!posCart || posCart.length === 0) {
+        cartContainer.innerHTML = `
+            <div class="flex flex-col items-center justify-center h-full text-gray-400">
+                <svg class="w-16 h-16 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                <p>Cart is empty</p>
+            </div>`;
+        if (totalEl) totalEl.textContent = "₱0.00";
+        if (mobileCartContainer) mobileCartContainer.innerHTML = cartContainer.innerHTML;
+        if (mobileTotalEl) mobileTotalEl.textContent = "₱0.00";
+
+        if (btnCheckout) btnCheckout.disabled = true;
+        return;
+    }
+
+    posCart.forEach((item, index) => {
+        const row = document.createElement("div");
+        const isHighlighted = index === activeCartIndex;
+        const displayQty = isHighlighted ? qtyBuffer : item.qty;
+        const itemTotal = (item.selling_price || 0) * (isHighlighted && qtyBuffer !== "" ? parseInt(qtyBuffer) || 0 : item.qty);
+
+        total += itemTotal;
+
+        row.className = `flex justify-between items-center bg-white p-2 rounded shadow-sm text-sm border-2 transition-all ${isHighlighted ? 'border-blue-500 bg-blue-50 scale-[1.02] z-10' : 'border-transparent'}`;
+        row.innerHTML = ` 
+            <div class="flex-1 overflow-hidden mr-2">
+                <div class="font-bold truncate text-gray-800">${item.name}</div>
+                <div class="text-gray-500 text-xs">₱${(item.selling_price || 0).toFixed(2)} x ${displayQty}</div>
+            </div>
+            <div class="flex items-center gap-2">
+                <div class="font-bold text-blue-600 mr-2">₱${itemTotal.toFixed(2)}</div>
+                <input type="number" min="1" class="w-16 border rounded text-center text-sm py-1 cart-qty-input" data-index="${index}" value="${displayQty}">
+                <button class="text-red-400 hover:text-red-600 ml-1 btn-remove p-1" data-index="${index}">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                </button>
+            </div>
+        `;
+
+        const qtyInput = row.querySelector(".cart-qty-input");
+        qtyInput.addEventListener("change", (e) => {
+            updateQty(index, parseInt(e.target.value));
+            const searchInput = document.getElementById("pos-search");
+            if (searchInput) {
+                searchInput.value = "";
+                searchInput.focus();
+            }
+        });
+
+        // Select all text on focus for quick editing
+        qtyInput.addEventListener("focus", e => e.target.select());
+
+        // Add arrow key navigation for posCart quantities
+        qtyInput.addEventListener("keydown", e => {
+            const inputs = Array.from(document.querySelectorAll("#pos-cart-items .cart-qty-input"));
+            const currentIndex = inputs.indexOf(e.target);
+
+            if (e.key === "ArrowUp") {
+                e.preventDefault();
+                const prevInput = inputs[currentIndex - 1];
+                if (prevInput) prevInput.focus();
+                else inputs[inputs.length - 1]?.focus(); // Loop to bottom
+            } else if (e.key === "ArrowDown") {
+                e.preventDefault();
+                const nextInput = inputs[currentIndex + 1];
+                if (nextInput) nextInput.focus();
+                else inputs[0]?.focus(); // Loop to top
+            }
+        });
+
+        row.querySelector(".btn-remove").addEventListener("click", () => removeFromCart(index));
+
+        cartContainer.appendChild(row);
+
+        // Ensure highlighted item is visible
+        if (isHighlighted) {
+            row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    });
+
+    // Render Mobile Cart
+    if (mobileCartContainer) {
+        mobileCartContainer.innerHTML = "";
+        posCart.forEach((item, index) => {
+            const div = document.createElement("div");
+            div.className = "bg-white p-3 rounded-lg shadow-sm border flex justify-between items-center";
+            div.innerHTML = `
+                <div class="flex-1">
+                    <div class="font-bold text-gray-800 text-sm">${item.name}</div>
+                    <div class="text-xs text-gray-500">₱${(item.selling_price || 0).toFixed(2)} each</div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button class="w-8 h-8 rounded-full bg-gray-100 text-gray-600 font-bold flex items-center justify-center hover:bg-gray-200" onclick="document.querySelector('.cart-qty-input[data-index=\\'${index}\\']').value = ${item.qty - 1}; document.querySelector('.cart-qty-input[data-index=\\'${index}\\']').dispatchEvent(new Event('change'));">-</button>
+                    <span class="font-bold text-lg w-6 text-center">${item.qty}</span>
+                    <button class="w-8 h-8 rounded-full bg-gray-100 text-gray-600 font-bold flex items-center justify-center hover:bg-gray-200" onclick="document.querySelector('.cart-qty-input[data-index=\\'${index}\\']').value = ${item.qty + 1}; document.querySelector('.cart-qty-input[data-index=\\'${index}\\']').dispatchEvent(new Event('change'));">+</button>
+                </div>
+                <div class="ml-4 font-bold text-blue-600">₱${((item.selling_price || 0) * item.qty).toFixed(2)}</div>
+            `;
+            mobileCartContainer.appendChild(div);
+        });
+    }
+
+    totalEl.textContent = `₱${total.toFixed(2)}`;
+    if (mobileTotalEl) mobileTotalEl.textContent = `₱${total.toFixed(2)}`;
+    btnCheckout.disabled = false;
+}
+
+function showToast(message, isError = false) {
+    showGlobalToast(message, isError ? 'error' : 'success');
+}
+
+function updateCheckoutCalculations() {
+    const modal = document.getElementById("modal-checkout");
+    if (!modal || modal.classList.contains("hidden")) return;
+
+    const total = parseFloat(modal.dataset.total) || 0;
+    const discount = parseFloat(modal.dataset.discount) || 0;
+    const netTotal = Math.max(0, total - discount);
+
+    const selectPayment = document.getElementById("select-payment-method");
+    const inputPoints = document.getElementById("input-points-to-use");
+    const inputTendered = document.getElementById("input-tendered");
+    const tenderedContainer = document.getElementById("tendered-container");
+    const btnConfirm = document.getElementById("btn-confirm-pay");
+    const pointsAppliedSummary = document.getElementById("points-applied-summary");
+    const pointsAppliedValue = document.getElementById("points-applied-value");
+    const remainingBalanceValue = document.getElementById("remaining-balance-value");
+
+    const availablePoints = (selectedCustomer && selectedCustomer.id !== "Guest") ? (selectedCustomer.loyalty_points || 0) : 0;
+    const maxUsablePoints = Math.min(availablePoints, Math.floor(netTotal));
+
+    let pointsToUse = parseInt(inputPoints?.value) || 0;
+
+    // Auto-clamp points to available and netTotal
+    if (pointsToUse < 0) pointsToUse = 0;
+    if (pointsToUse > maxUsablePoints) {
+        pointsToUse = maxUsablePoints;
+        if (inputPoints) inputPoints.value = pointsToUse > 0 ? pointsToUse : "";
+    }
+
+    const pointsAmount = pointsToUse * 1.0;
+    const remainingBalance = Math.max(0, netTotal - pointsAmount);
+
+    modal.dataset.pointsUsed = pointsToUse;
+    modal.dataset.pointsAmount = pointsAmount;
+    modal.dataset.remainingBalance = remainingBalance;
+
+    if (pointsToUse > 0) {
+        if (pointsAppliedSummary) pointsAppliedSummary.classList.remove("hidden");
+        if (pointsAppliedValue) pointsAppliedValue.textContent = `-₱${pointsAmount.toFixed(2)} (${pointsToUse} pts)`;
+        if (remainingBalanceValue) remainingBalanceValue.textContent = `₱${remainingBalance.toFixed(2)}`;
+    } else {
+        if (pointsAppliedSummary) pointsAppliedSummary.classList.add("hidden");
+    }
+
+    if (remainingBalance <= 0) {
+        tenderedContainer.classList.add("hidden");
+        btnConfirm.disabled = false;
+    } else {
+        tenderedContainer.classList.remove("hidden");
+        const tendered = parseFloat(inputTendered.value) || 0;
+        btnConfirm.disabled = (tendered < remainingBalance);
+    }
+}
+
+function openCheckout() {
+    if (!checkPermission("pos", "write")) {
+        showToast("You do not have permission to process sales.", true);
+        return;
+    }
+
+    const total = posCart.reduce((sum, item) => sum + (item.selling_price * item.qty), 0);
+    if (total === 0) return;
+
+    const modal = document.getElementById("modal-checkout");
+    const totalEl = document.getElementById("checkout-total");
+    const inputTendered = document.getElementById("input-tendered");
+    const btnConfirm = document.getElementById("btn-confirm-pay");
+    const pointsSection = document.getElementById("loyalty-points-section");
+    const pointsDisplay = document.getElementById("available-points-display");
+    const inputPoints = document.getElementById("input-points-to-use");
+    const selectPayment = document.getElementById("select-payment-method");
+
+    modal.dataset.total = total;
+    modal.dataset.discount = "0";
+    modal.dataset.discountCode = "";
+    modal.dataset.pointsUsed = "0";
+    modal.dataset.pointsAmount = "0";
+    modal.dataset.remainingBalance = total;
+
+    totalEl.textContent = `₱${total.toFixed(2)}`;
+    document.getElementById("discount-code-input").value = "";
+    document.getElementById("discount-display").textContent = "";
+    document.getElementById("discount-display").classList.add("hidden");
+
+    inputTendered.value = "";
+    if (inputPoints) inputPoints.value = "";
+    btnConfirm.disabled = true;
+    selectPayment.value = "Cash";
+
+    if (selectedCustomer && selectedCustomer.id !== "Guest" && (selectedCustomer.loyalty_points || 0) > 0) {
+        pointsSection.classList.remove("hidden");
+        pointsDisplay.textContent = (selectedCustomer.loyalty_points || 0).toLocaleString();
+    } else {
+        pointsSection.classList.add("hidden");
+    }
+
+    modal.classList.remove("hidden");
+    updateCheckoutCalculations();
+
+    setTimeout(() => {
+        inputTendered.focus();
+    }, 100);
+}
+
+function closeCheckout() {
+    document.getElementById("modal-checkout").classList.add("hidden");
+}
+
+async function processTransaction() {
+    const btnConfirm = document.getElementById("btn-confirm-pay");
+    const inputTendered = document.getElementById("input-tendered");
+    const paymentMethod = document.getElementById("select-payment-method").value;
+    const modal = document.getElementById("modal-checkout");
+
+    // Prevent double submission
+    if (btnConfirm.hasAttribute("data-processing")) return;
+
+    btnConfirm.setAttribute("data-processing", "true");
+    btnConfirm.disabled = true;
+    inputTendered.disabled = true;
+    const originalText = btnConfirm.textContent;
+    btnConfirm.textContent = "Processing...";
+
+    const settings = await getSystemSettings();
+    const originalTotal = parseFloat(modal.dataset.total);
+    const discountAmount = parseFloat(modal.dataset.discount || 0);
+    const discountCode = modal.dataset.discountCode || "";
+
+    const pointsUsed = parseInt(modal.dataset.pointsUsed || "0", 10);
+    const pointsAmount = parseFloat(modal.dataset.pointsAmount || "0");
+    const remainingBalance = parseFloat(modal.dataset.remainingBalance || "0");
+
+    const total = originalTotal - discountAmount; // Net Total
+    const tenderedInputVal = parseFloat(inputTendered.value) || 0;
+
+    if (remainingBalance > 0 && tenderedInputVal < remainingBalance) {
+        showToast("Amount tendered is insufficient.", true);
+        btnConfirm.removeAttribute("data-processing");
+        btnConfirm.disabled = false;
+        inputTendered.disabled = false;
+        btnConfirm.textContent = originalText;
+        return;
+    }
+
+    const tendered = (remainingBalance <= 0) ? (pointsAmount > 0 ? pointsAmount : total) : tenderedInputVal;
+    const change = (remainingBalance <= 0) ? 0 : Math.max(0, tenderedInputVal - remainingBalance);
+
+    let finalPaymentMethod = paymentMethod;
+    if (pointsUsed > 0 && remainingBalance > 0) {
+        finalPaymentMethod = `${paymentMethod === 'Points' ? 'Cash' : paymentMethod} + Points`;
+    } else if (pointsUsed > 0 && remainingBalance <= 0) {
+        finalPaymentMethod = "Points";
+    }
+
+    const user = JSON.parse(localStorage.getItem('pos_user'));
+    const taxRate = (settings.tax?.rate || 0) / 100;
+    const taxAmount = total - (total / (1 + taxRate));
+
+    const rewardRatio = settings.rewards?.ratio || 100;
+    const pointsEarned = Math.floor(total / rewardRatio);
+
+    const transaction = {
+        id: generateUUID(),
+        items: JSON.parse(JSON.stringify(posCart)), // Deep copy
+        total_amount: total,
+        amount_tendered: tendered,
+        change: change,
+        tax_amount: taxAmount,
+        payment_method: finalPaymentMethod,
+        user_email: user ? user.email : "Guest",
+        user_name: user ? user.name : "Guest",
+        customer_id: selectedCustomer.id,
+        customer_name: selectedCustomer.name,
+        points_earned: pointsEarned,
+        points_used: pointsUsed,
+        points_amount: pointsAmount,
+        timestamp: new Date().toISOString(),
+        is_voided: false,
+        discount_code: discountCode,
+        discount_amount: discountAmount
+    };
+
+    try {
+        // 1. Save to Dexie (Offline First)
+        await Repository.upsert('transactions', transaction);
+
+        // 2. Update Local Dexie Items
+        for (const item of transaction.items) {
+            const current = await Repository.get('items', item.id);
+            if (current) {
+                await Repository.upsert('items', { ...current, stock_level: current.stock_level - item.qty });
+
+                // Record Stock Movement
+                await Repository.upsert('stock_movements', {
+                    id: generateUUID(),
+                    item_id: item.id,
+                    item_name: item.name,
+                    timestamp: transaction.timestamp,
+                    type: 'Sale',
+                    qty: -item.qty,
+                    user: transaction.user_email,
+                    transaction_id: transaction.id,
+                    reason: "POS Sale"
+                });
+            }
+        }
+
+        // 3. Update Customer Points
+        if (selectedCustomer.id !== "Guest") {
+            const updatedCustomer = { ...selectedCustomer };
+            updatedCustomer.loyalty_points = (updatedCustomer.loyalty_points || 0) + pointsEarned;
+            if (pointsUsed > 0) {
+                updatedCustomer.loyalty_points = Math.max(0, updatedCustomer.loyalty_points - pointsUsed);
+            }
+            await Repository.upsert('customers', updatedCustomer);
+        }
+
+        // Auto-Record Discount as Expense if configured
+        if (discountCode && discountAmount > 0) {
+            const sysCodes = await Repository.getAll('discount_codes');
+            const appliedCode = sysCodes?.find(c => c.code === discountCode);
+            if (appliedCode && appliedCode.auto_record) {
+                const cashierName = transaction.user_name || transaction.user_email || 'System';
+                const expense = {
+                    id: generateUUID(),
+                    description: `${cashierName} ${discountCode}`,
+                    amount: discountAmount,
+                    category: 'Other',
+                    supplier_id: "",
+                    supplier_name: null,
+                    invoice_number: transaction.id,
+                    date: new Date().toISOString().split('T')[0],
+                    user_id: transaction.user_email,
+                    _updatedAt: Date.now(),
+                    created_at: new Date()
+                };
+                await Repository.upsert('expenses', expense);
+            }
+        }
+
+        // 4. Trigger Background Sync
+        SyncEngine.sync();
+
+        lastTransactionData = transaction;
+        posCart = [];
+        currentSuspendedId = null;
+        currentSuspendedCreatedAt = null;
+        renderCart();
+        closeCheckout();
+
+        // Reset Customer to Guest
+        selectCustomer({ id: "Guest", name: "Guest" });
+        document.getElementById("pos-customer-search").value = "";
+
+        showToast("Transaction saved successfully!");
+
+        // Show Last Transaction Summary
+        const lastTxDiv = document.getElementById("last-transaction");
+        document.getElementById("last-change-amount").textContent = `₱${transaction.change.toFixed(2)}`;
+        document.getElementById("last-total").textContent = `₱${transaction.total_amount.toFixed(2)}`;
+        document.getElementById("last-tendered").textContent = `₱${transaction.amount_tendered.toFixed(2)}`;
+        lastTxDiv.classList.remove("hidden");
+
+        if (settings.pos?.auto_print) {
+            printReceipt(lastTransactionData);
+        }
+
+        // Focus back on search input for next sale
+        document.getElementById("pos-search").focus();
+    } catch (error) {
+        console.error("Error saving transaction:", error);
+        showToast("Failed to save transaction.", true);
+        btnConfirm.disabled = false;
+    } finally {
+        btnConfirm.removeAttribute("data-processing");
+        inputTendered.disabled = false;
+        btnConfirm.textContent = originalText;
+    }
+}
+function getLocalDateString(date) {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+async function openRemittanceModal() {
+    const activeShift = await checkActiveShift();
+    if (!activeShift) {
+        showGlobalToast("No active shift found. Please start a shift first.", "error");
+        return;
+    }
+
+    const modal = document.getElementById("modal-remittance");
+    const amountInput = document.getElementById("remit-amount");
+    const reasonInput = document.getElementById("remit-reason");
+    const historyList = document.getElementById("remittance-history-list");
+
+    if (amountInput) amountInput.value = "";
+    if (reasonInput) reasonInput.value = "";
+
+    renderRemittanceHistoryList(activeShift, historyList);
+
+    if (modal) modal.classList.remove("hidden");
+    if (amountInput) amountInput.focus();
+}
+
+function closeRemittanceModal() {
+    const modal = document.getElementById("modal-remittance");
+    if (modal) modal.classList.add("hidden");
+}
+
+function renderRemittanceHistoryList(shift, container) {
+    if (!container) return;
+    const remittances = shift.remittances || [];
+    if (remittances.length === 0) {
+        container.innerHTML = `<div class="text-gray-400 italic text-center py-2">No remittances recorded yet for this shift.</div>`;
+        return;
+    }
+
+    const sorted = [...remittances].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    container.innerHTML = sorted.map(r => `
+        <div class="flex justify-between items-center py-1.5 border-b border-gray-100 last:border-0">
+            <div>
+                <div class="font-bold text-gray-700 text-xs">${r.reason || 'Remittance'}</div>
+                <div class="text-[10px] text-gray-400">${new Date(r.timestamp).toLocaleTimeString()} · ${r.user || 'User'}</div>
+            </div>
+            <div class="font-mono font-bold text-purple-700 text-xs">₱${(r.amount || 0).toFixed(2)}</div>
+        </div>
+    `).join("");
+}
+
+async function saveRemittance() {
+    const amountInput = document.getElementById("remit-amount");
+    const reasonInput = document.getElementById("remit-reason");
+
+    const amount = parseFloat(amountInput?.value);
+    const reason = reasonInput?.value ? reasonInput.value.trim() : "";
+
+    if (isNaN(amount) || amount <= 0) {
+        showGlobalToast("Please enter a valid positive remittance amount.", "error");
+        return;
+    }
+
+    if (!reason) {
+        showGlobalToast("Please enter a reason or reference.", "error");
+        return;
+    }
+
+    try {
+        await recordRemittance(amount, reason);
+        showGlobalToast(`Cash remittance of ₱${amount.toFixed(2)} recorded!`, "success");
+        closeRemittanceModal();
+    } catch (err) {
+        console.error("Remittance failed:", err);
+        showGlobalToast("Failed to record remittance: " + err.message, "error");
+    }
+}
+
+let currentHistoryPage = 1;
+let historyDateFilter = getLocalDateString(new Date());
+
+async function openHistoryModal(page = 1) {
+    // If called directly from an event listener, 'page' might be a PointerEvent
+    if (typeof page !== 'number') {
+        page = 1;
+    }
+    currentHistoryPage = page;
+    const modal = document.getElementById("modal-pos-history");
+    const tbody = document.getElementById("pos-history-body");
+    const dateInput = document.getElementById("history-date-filter");
+
+    // Bind date filter events if not already bound
+    if (!dateInput.dataset.bound) {
+        dateInput.value = historyDateFilter;
+        dateInput.addEventListener("change", (e) => {
+            historyDateFilter = e.target.value;
+            openHistoryModal(1);
+        });
+        document.getElementById("btn-clear-history-date").addEventListener("click", () => {
+            dateInput.value = "";
+            historyDateFilter = "";
+            openHistoryModal(1);
+        });
+
+        document.getElementById("btn-history-prev").addEventListener("click", () => {
+            if (currentHistoryPage > 1) openHistoryModal(currentHistoryPage - 1);
+        });
+        document.getElementById("btn-history-next").addEventListener("click", () => {
+            openHistoryModal(currentHistoryPage + 1);
+        });
+
+        dateInput.dataset.bound = "true";
+    }
+
+    modal.classList.remove("hidden");
+    tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center">Loading...</td></tr>`;
+
+    try {
+        let filteredTxs = await Repository.getAll('transactions');
+
+        // Apply Date FilterFIRST (iterating backward avoids needing to full-sort first)
+        if (historyDateFilter) {
+            const filterDate = historyDateFilter; // e.g., "2026-03-08"
+            filteredTxs = filteredTxs.filter(tx => {
+                const txDate = getLocalDateString(tx.timestamp);
+                return txDate === filterDate;
+            });
+        }
+
+        // Explicitly sort transactions by timestamp (newest first / descending chronological)
+        // to ensure accurate ordering regardless of IndexedDB insertion order.
+        filteredTxs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+        // Pagination Logic (50 per page as requested)
+        const itemsPerPage = 50;
+        const totalItems = filteredTxs.length;
+        const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
+
+        // Ensure current page is valid
+        if (currentHistoryPage > totalPages) currentHistoryPage = totalPages;
+
+        const startIndex = (currentHistoryPage - 1) * itemsPerPage;
+        const endIndex = startIndex + itemsPerPage;
+
+        // Only slice out the 50 items we need
+        const paginatedTxs = filteredTxs.slice(startIndex, endIndex);
+
+        // Update Pagination UI
+        const showingStart = totalItems === 0 ? 0 : startIndex + 1;
+        const showingEnd = Math.min(endIndex, totalItems);
+        document.getElementById("pos-history-page-info").textContent = `Showing ${showingStart}-${showingEnd} of ${totalItems} (Page ${currentHistoryPage}/${totalPages})`;
+
+        document.getElementById("btn-history-prev").disabled = currentHistoryPage <= 1;
+        document.getElementById("btn-history-next").disabled = currentHistoryPage >= totalPages;
+
+        if (paginatedTxs.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-gray-500 italic">No transactions found for ${historyDateFilter || 'any date'}.</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = paginatedTxs.map(tx => `
+            <tr class="border-b ${tx.is_voided ? 'bg-red-50 opacity-60' : ''}">
+                <td class="p-2 text-xs">${new Date(tx.timestamp).toLocaleString()}</td>
+                <td class="p-2 text-xs">${tx.customer_name}</td>
+                <td class="p-2 text-right font-bold">₱${tx.total_amount.toFixed(2)}</td>
+                <td class="p-2 text-center flex justify-center gap-2">
+                    <button class="bg-blue-100 text-blue-700 hover:bg-blue-200 px-2 py-1 rounded text-xs font-bold btn-view-tx" data-id="${tx.id}">View</button>
+                    <button class="bg-gray-100 text-gray-700 hover:bg-gray-200 px-2 py-1 rounded text-xs font-bold btn-print-tx" data-id="${tx.id}">Print</button>
+                    ${tx.is_voided
+                ? '<span class="text-red-600 font-bold text-xs uppercase">Voided</span>'
+                : `<button class="bg-red-100 text-red-600 hover:bg-red-200 px-2 py-1 rounded text-xs font-bold btn-void-tx" data-id="${tx.id}">Void</button>`
+            }
+                </td>
+            </tr>
+        `).join('');
+
+        tbody.querySelectorAll(".btn-void-tx").forEach(btn => {
+            btn.addEventListener("click", () => voidTransaction(btn.dataset.id));
+        });
+        tbody.querySelectorAll(".btn-print-tx").forEach(btn => {
+            btn.addEventListener("click", async () => {
+                const tx = filteredTxs.find(t => t.id === btn.dataset.id);
+                if (tx) await printReceipt(tx, true);
+            });
+        });
+        tbody.querySelectorAll(".btn-view-tx").forEach(btn => {
+            btn.addEventListener("click", () => {
+                const tx = filteredTxs.find(t => t.id === btn.dataset.id);
+                if (tx) viewTransactionDetails(tx);
+            });
+        });
+    } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-red-500">Error loading history.</td></tr>`;
+    }
+}
+
+function viewTransactionDetails(tx) {
+    document.getElementById("tx-details-header-info").textContent = `${new Date(tx.timestamp).toLocaleString()} | ID: ${tx.id.substring(0, 8)}...`;
+
+    document.getElementById("tx-details-items-body").innerHTML = tx.items.map(item => `
+        <tr class="border-b hover:bg-gray-50">
+            <td class="py-2 px-3 font-medium text-gray-800">${item.name}</td>
+            <td class="py-2 px-3 text-center">${item.qty} ${item.unit || 'pcs'}</td>
+            <td class="py-2 px-3 text-right">₱${(item.selling_price || item.price || 0).toFixed(2)}</td>
+            <td class="py-2 px-3 text-right font-bold">₱${((item.selling_price || item.price || 0) * item.qty).toFixed(2)}</td>
+        </tr>
+    `).join('');
+
+    // Totals
+    const subtotal = tx.subtotal !== undefined ? tx.subtotal : (tx.total_amount + (tx.discount_amount || 0));
+    document.getElementById("tx-details-subtotal").textContent = `₱${subtotal.toFixed(2)}`;
+    document.getElementById("tx-details-discount").textContent = `-₱${(tx.discount_amount || 0).toFixed(2)}`;
+
+    const pointsAmount = tx.points_amount || 0;
+    const pointsUsed = tx.points_used || 0;
+    const pointsContainer = document.getElementById("tx-details-points-container");
+    if (pointsContainer) {
+        if (pointsAmount > 0 || pointsUsed > 0) {
+            pointsContainer.classList.remove("hidden");
+            document.getElementById("tx-details-points").textContent = `-₱${pointsAmount.toFixed(2)} (${pointsUsed} pts)`;
+        } else {
+            pointsContainer.classList.add("hidden");
+        }
+    }
+
+    document.getElementById("tx-details-total").textContent = `₱${(tx.total_amount || 0).toFixed(2)}`;
+    document.getElementById("tx-details-tendered").textContent = `₱${(tx.amount_tendered || 0).toFixed(2)}`;
+    document.getElementById("tx-details-change").textContent = `₱${(tx.change || 0).toFixed(2)}`;
+
+    document.getElementById("modal-pos-tx-details").classList.remove("hidden");
+}
+
+async function voidTransaction(id) {
+    if (!checkPermission("pos", "write")) {
+        showToast("Permission denied.", true);
+        return;
+    }
+
+    if (!confirm("Are you sure you want to VOID this transaction? This will reverse stock levels.")) return;
+
+    if (!(await requestManagerApproval())) return;
+
+    const reason = prompt("Please enter the reason for voiding this transaction:");
+    if (reason === null) return; // User cancelled
+
+    try {
+        const tx = await Repository.get('transactions', id);
+        if (!tx) return;
+
+        const user = JSON.parse(localStorage.getItem('pos_user'));
+
+        // 1. Update Dexie Transaction
+        await Repository.upsert('transactions', {
+            ...tx,
+            is_voided: true,
+            voided_at: new Date().toISOString(),
+            voided_by: user ? user.email : "System",
+            void_reason: reason || "No reason provided"
+        });
+
+        // 2. Reverse Stock in Dexie
+        for (const item of tx.items) {
+            const current = await Repository.get('items', item.id);
+            if (current) {
+                await Repository.upsert('items', { ...current, stock_level: current.stock_level + item.qty });
+            }
+        }
+
+        // 3. Trigger Background Sync
+        SyncEngine.sync();
+
+        showToast("Transaction voided and stock reversed.");
+        await addNotification('Void', `Transaction ${id} was voided by ${user ? user.email : "System"}`);
+        openHistoryModal(); // Refresh list
+        fetchItemsFromDexie(); // Refresh grid
+    } catch (error) {
+        console.error("Void error:", error);
+        showToast("Failed to void transaction.", true);
+    }
+}
+
+async function suspendCurrentTransaction() {
+    if (posCart.length === 0) {
+        showToast("Cart is empty.", true);
+        return;
+    }
+
+    const user = JSON.parse(localStorage.getItem('pos_user'));
+    const suspendedTx = {
+        id: currentSuspendedId || generateUUID(),
+        items: JSON.parse(JSON.stringify(posCart)),
+        customer: selectedCustomer,
+        user_email: user ? user.email : "Guest",
+        timestamp: new Date(),
+        created_at: currentSuspendedCreatedAt || new Date(), // Preserve original creation time for ordering
+        total: posCart.reduce((sum, item) => sum + ((item.selling_price || 0) * item.qty), 0),
+    };
+
+    try {
+        // 1. Save locally first (Persistence across refreshes)
+        await Repository.upsert('suspended_transactions', suspendedTx);
+
+        posCart = [];
+        currentSuspendedId = null;
+        currentSuspendedCreatedAt = null;
+        selectedCustomer = { id: "Guest", name: "Guest" };
+        renderCart();
+        selectCustomer(selectedCustomer);
+        showToast(`Transaction for ${suspendedTx.customer.name} suspended.`);
+        updateSuspendedCount();
+    } catch (error) {
+        console.error("Error suspending transaction:", error);
+        showToast("Failed to suspend transaction.", true);
+    }
+}
+
+async function openSuspendedModal() {
+    const container = document.getElementById("suspended-list-container");
+    container.innerHTML = `<div class="text-center p-4">Loading...</div>`;
+    document.getElementById("modal-suspended").classList.remove("hidden");
+
+    try {
+        const allSuspended = await Repository.getAll('suspended_transactions'); // Already filters _deleted
+        const suspended = allSuspended.filter(tx => tx.source !== 'stockin'); // Exclude stock-in held entries
+        // Sort by created_at ascending so new transactions go to bottom, resumed ones keep position
+        suspended.sort((a, b) => new Date(a.created_at || a.timestamp) - new Date(b.created_at || b.timestamp));
+        if (suspended.length === 0) {
+            container.innerHTML = `<div class="text-center p-4 text-gray-500">No suspended transactions.</div>`;
+            return;
+        }
+
+        container.innerHTML = `
+            <table class="w-full text-sm">
+                <thead class="bg-gray-50">
+                    <tr class="border-b">
+                        <th class="text-left p-2">Time</th>
+                        <th class="text-left p-2">Customer</th>
+                        <th class="text-left p-2">Cashier</th>
+                        <th class="text-right p-2">Total</th>
+                        <th class="text-center p-2">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${suspended.map(tx => `
+                        <tr class="border-b hover:bg-gray-50">
+                            <td class="p-2 text-xs">${new Date(tx.timestamp).toLocaleString()}</td>
+                            <td class="p-2 font-medium">${tx.customer?.name || 'Guest'}</td>
+                            <td class="p-2 text-[10px] text-gray-500">${tx.user_email || 'Unknown'}</td>
+                            <td class="p-2 text-right font-bold">₱${(tx.total || 0).toFixed(2)}</td>
+                            <td class="p-2 text-center flex justify-center gap-2">
+                                <button class="bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded btn-resume-suspended" data-id="${tx.id}">Resume</button>
+                                <button class="bg-red-100 text-red-600 hover:bg-red-200 text-xs px-2 py-1 rounded btn-delete-suspended" data-id="${tx.id}">Delete</button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+
+        container.querySelectorAll(".btn-resume-suspended").forEach(btn => {
+            btn.onclick = () => resumeTransaction(btn.dataset.id);
+        });
+        container.querySelectorAll(".btn-delete-suspended").forEach(btn => {
+            btn.onclick = () => deleteSuspendedTransaction(btn.dataset.id);
+        });
+
+        const btnDeleteAll = document.getElementById("btn-delete-all-suspended");
+        if (btnDeleteAll) {
+            btnDeleteAll.onclick = deleteAllSuspendedTransactions;
+        }
+    } catch (error) {
+        console.error("Error loading suspended transactions:", error);
+        container.innerHTML = `<div class="text-center p-4 text-red-500">Error loading data.</div>`;
+    }
+}
+
+function closeSuspendedModal() {
+    document.getElementById("modal-suspended").classList.add("hidden");
+}
+
+async function resumeTransaction(id) {
+    if (posCart && posCart.length > 0 && !confirm("Current cart is not empty. Overwrite with suspended transaction?")) {
+        return;
+    }
+
+    try {
+        // Try as string first, then as number if it looks like one
+        let tx = await Repository.get('suspended_transactions', id);
+        if (!tx && !isNaN(id)) {
+            tx = await Repository.get('suspended_transactions', parseInt(id));
+        }
+
+        if (tx) {
+            let items = tx.items;
+
+            // Robust parsing: Handle stringified JSON or legacy json_body wrapper
+            if (typeof items === 'string') {
+                try { items = JSON.parse(items); } catch (e) { console.warn("Failed to parse items string", e); }
+            }
+            if (!items && tx.json_body) {
+                try {
+                    const body = typeof tx.json_body === 'string' ? JSON.parse(tx.json_body) : tx.json_body;
+                    if (body.items) items = body.items;
+                } catch (e) { }
+            }
+            // Fix: Handle SQLite serialization where items are stored as items_json string
+            if (!items && tx.items_json) {
+                try {
+                    items = typeof tx.items_json === 'string' ? JSON.parse(tx.items_json) : tx.items_json;
+                } catch (e) { console.warn("Failed to parse items_json", e); }
+            }
+
+            posCart = Array.isArray(items) ? items : [];
+
+            if (posCart.length === 0) {
+                console.warn("Resumed transaction has NO items even after parsing attempt.", tx);
+                // We allow it to proceed so the user can at least delete the bad record if needed, 
+                // or we could show a toast.
+            }
+
+            // Fix: Force-hide previous success overlays and clear values (Mobile & Desktop)
+            if (document.getElementById("mobile-change-overlay")) {
+                document.getElementById("mobile-change-overlay").classList.add("hidden");
+                document.getElementById("mobile-change-amount").textContent = "₱0.00";
+            }
+            if (document.getElementById("mobile-payment-overlay")) {
+                document.getElementById("mobile-payment-overlay").classList.add("hidden");
+                const tenderedInput = document.getElementById("mobile-input-tendered");
+                if (tenderedInput) tenderedInput.value = "";
+            }
+            // Fix: Hide Desktop "Last Transaction" Panel
+            if (document.getElementById("last-transaction")) {
+                document.getElementById("last-transaction").classList.add("hidden");
+            }
+
+            selectedCustomer = tx.customer || { id: "Guest", name: "Guest" };
+            currentSuspendedId = tx.id; // Use the actual ID from the record
+            currentSuspendedCreatedAt = tx.created_at || tx.timestamp; // Preserve original creation time
+
+            renderCart();
+            selectCustomer(selectedCustomer);
+            closeSuspendedModal();
+            await Repository.remove('suspended_transactions', tx.id);
+            showToast("Transaction resumed.");
+            updateSuspendedCount();
+            SyncEngine.sync(); // Trigger sync
+        } else {
+            showToast("Could not find transaction record.", true);
+        }
+    } catch (error) {
+        console.error("Error resuming transaction:", error);
+        alert("Error resuming: " + error.message);
+    }
+}
+
+async function deleteSuspendedTransaction(id) {
+    if (!confirm("Are you sure you want to permanently delete this suspended transaction?")) return;
+
+    try {
+        // Try as string first, then as number if it looks like one
+        let tx = await Repository.get('suspended_transactions', id);
+        if (!tx && !isNaN(id)) {
+            tx = await Repository.get('suspended_transactions', parseInt(id));
+        }
+
+        const finalId = tx ? tx.id : id;
+        await Repository.remove('suspended_transactions', finalId);
+
+        showToast("Transaction deleted.");
+        openSuspendedModal(); // Refresh list
+        updateSuspendedCount();
+        SyncEngine.sync(); // Trigger sync
+    } catch (error) {
+        console.error("Error deleting suspended transaction:", error);
+        showToast("Failed to delete transaction.", true);
+    }
+}
+
+async function deleteAllSuspendedTransactions() {
+    if (!confirm("Are you sure you want to delete ALL suspended transactions?")) return;
+
+    try {
+        const allSuspended = await Repository.getAll('suspended_transactions');
+        const suspended = allSuspended.filter(tx => tx.source !== 'stockin');
+        if (suspended.length > 0) {
+            await Promise.all(suspended.map(tx => Repository.remove('suspended_transactions', tx.id)));
+            showToast("All suspended transactions deleted.");
+            SyncEngine.sync();
+        } else {
+            showToast("No suspended transactions to delete.");
+        }
+        openSuspendedModal();
+        updateSuspendedCount();
+    } catch (error) {
+        console.error("Error deleting all suspended transactions:", error);
+        showToast("Failed to delete transactions.", true);
+    }
+}
+
+async function updateSuspendedCount() {
+    const allList = await Repository.getAll('suspended_transactions'); // Already filters _deleted
+    const list = allList.filter(tx => tx.source !== 'stockin');
+    const count = list.length;
+    const btn = document.getElementById("btn-view-suspended");
+    if (!btn) return;
+
+    const existingBadge = btn.querySelector(".suspended-badge");
+    if (existingBadge) existingBadge.remove();
+
+    if (count > 0) {
+        const badge = document.createElement("span");
+        badge.className = "suspended-badge ml-1 bg-white text-yellow-700 px-1.5 py-0.5 rounded-full font-bold text-[9px]";
+        badge.textContent = count;
+        btn.appendChild(badge);
+    }
+}
+
+
+async function requestQuickCustomer(tx) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById("modal-quick-customer");
+        const nameInput = document.getElementById("quick-cust-name");
+        const resultsDiv = document.getElementById("quick-cust-results");
+        const phoneInput = document.getElementById("quick-cust-phone");
+        const btnSave = document.getElementById("btn-save-quick-customer");
+        const btnCancel = document.getElementById("btn-cancel-quick-customer");
+        let selectedId = null;
+
+        if (!modal) {
+            resolve(tx);
+            return;
+        }
+
+        // Pre-populate if already assigned
+        nameInput.value = tx.customer_id !== "Guest" ? tx.customer_name : "";
+        phoneInput.value = "";
+        selectedId = tx.customer_id !== "Guest" ? tx.customer_id : null;
+
+        resultsDiv.innerHTML = "";
+        resultsDiv.classList.add("hidden");
+        modal.classList.remove("hidden");
+        nameInput.focus();
+
+        const cleanup = () => {
+            modal.classList.add("hidden");
+            btnSave.onclick = null;
+            btnCancel.onclick = null;
+            nameInput.oninput = null;
+            nameInput.onkeydown = null;
+            phoneInput.onkeydown = null;
+        };
+
+        btnCancel.onclick = () => {
+            cleanup();
+            resolve(null);
+        };
+
+        const updateTxAndResolve = async (customer) => {
+            // 1. Update Local Dexie
+            await Repository.upsert('transactions', {
+                ...tx,
+                customer_id: customer.id,
+                customer_name: customer.name
+            });
+
+            tx.customer_id = customer.id;
+            tx.customer_name = customer.name;
+
+            cleanup();
+            resolve(tx);
+        };
+
+        nameInput.onkeydown = (e) => {
+            if (e.key === "ArrowDown") {
+                const first = resultsDiv.querySelector("div[tabindex='0']");
+                if (first) {
+                    e.preventDefault();
+                    first.focus();
+                }
+            } else if (e.key === "Enter") {
+                e.preventDefault();
+                phoneInput.focus();
+            }
+        };
+
+        phoneInput.onkeydown = (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                btnSave.click();
+            }
+        };
+
+        nameInput.oninput = (e) => {
+            const term = e.target.value.toLowerCase();
+            selectedId = null; // Reset if user types
+            if (!term) {
+                resultsDiv.classList.add("hidden");
+                return;
+            }
+            const filtered = allCustomers.filter(c =>
+                (c.name || "").toLowerCase().includes(term) ||
+                (c.phone || "").includes(term)
+            );
+            resultsDiv.innerHTML = "";
+            if (filtered.length > 0) {
+                resultsDiv.classList.remove("hidden");
+                filtered.slice(0, 5).forEach(c => {
+                    const div = document.createElement("div");
+                    div.className = "p-2 hover:bg-blue-50 cursor-pointer text-xs border-b last:border-0 focus:bg-blue-100 focus:outline-none";
+                    div.setAttribute("tabindex", "0");
+                    div.innerHTML = `<strong>${c.name}</strong> - ${c.phone}`;
+
+                    const selectAction = () => {
+                        nameInput.value = c.name;
+                        phoneInput.value = c.phone;
+                        selectedId = c.id;
+                        resultsDiv.classList.add("hidden");
+                        phoneInput.focus();
+                    };
+
+                    div.onclick = selectAction;
+                    div.onkeydown = (e) => {
+                        if (e.key === "Enter") {
+                            e.preventDefault();
+                            selectAction();
+                        } else if (e.key === "ArrowDown") {
+                            e.preventDefault();
+                            const next = div.nextElementSibling;
+                            if (next && next.getAttribute("tabindex")) next.focus();
+                        } else if (e.key === "ArrowUp") {
+                            e.preventDefault();
+                            const prev = div.previousElementSibling;
+                            if (prev && prev.getAttribute("tabindex")) prev.focus();
+                            else nameInput.focus();
+                        }
+                    };
+                    resultsDiv.appendChild(div);
+                });
+            } else {
+                resultsDiv.innerHTML = `<div class="p-2 text-xs text-gray-500">No matches</div>`;
+                resultsDiv.classList.remove("hidden");
+            }
+        };
+
+        btnSave.onclick = async () => {
+            const name = nameInput.value.trim();
+            const phone = phoneInput.value.trim();
+            if (!name) {
+                alert("Please enter at least a name or select an existing customer.");
+                return;
+            }
+
+            // If they didn't change anything and it was already assigned, just proceed
+            if (selectedId && name === tx.customer_name && tx.customer_id !== "Guest") {
+                cleanup();
+                resolve(tx);
+                return;
+            }
+
+            if (selectedId) {
+                await updateTxAndResolve({ id: selectedId, name });
+                return;
+            }
+
+            try {
+                const newCustomer = { id: generateUUID(), name, phone, email: "", loyalty_points: 0, timestamp: new Date() };
+                await Repository.upsert('customers', newCustomer);
+                fetchCustomersFromDexie();
+                await updateTxAndResolve(newCustomer);
+            } catch (error) {
+                console.error("Error saving quick customer:", error);
+                alert("Failed to save customer info.");
+            }
+        };
+    });
+}
+
+async function printReceipt(tx, isReprint = false) {
+    try {
+        // Request customer info only if it's a Guest transaction
+        if (tx.customer_id === "Guest") {
+            const result = await requestQuickCustomer(tx);
+            if (result) {
+                tx = result;
+            } else if (!isReprint) {
+                // If it's the initial print and they cancel, abort the print
+                return;
+            }
+        }
+        const settings = await getSystemSettings();
+        const store = settings.store || { name: "LightPOS", data: "" };
+        const defaultPrint = {
+            paper_width: 76,
+            show_dividers: true,
+            header: { text: "", font_size: 14, font_family: "'Courier New', Courier, monospace", bold: true, italic: false },
+            items: { font_size: 12, font_family: "'Courier New', Courier, monospace", bold: false, italic: false },
+            body: { font_size: 12, font_family: "'Courier New', Courier, monospace", bold: false, italic: false },
+            footer: { text: "Thank you for shopping!", font_size: 10, font_family: "'Courier New', Courier, monospace", bold: false, italic: true }
+        };
+
+        const p = {
+            ...defaultPrint,
+            ...(settings.print || {}),
+            header: { ...defaultPrint.header, ...(settings.print?.header || {}) },
+            items: { ...defaultPrint.items, ...(settings.print?.items || {}) },
+            body: { ...defaultPrint.body, ...(settings.print?.body || {}) },
+            footer: { ...defaultPrint.footer, ...(settings.print?.footer || {}) }
+        };
+
+        const pWidth = p.paper_width || 76;
+        const showHR = p.show_dividers !== false;
+
+        const getStyle = (s) => `
+            font-size: ${s.font_size}px; 
+            font-family: ${s.font_family}; 
+            font-weight: ${s.bold ? 'bold' : 'normal'}; 
+            font-style: ${s.italic ? 'italic' : 'normal'};
+        `;
+
+        const headerText = p.header?.text || `${store.name}\n${store.data}`;
+        const footerText = p.footer?.text || "Thank you for shopping!";
+
+        const printWindow = window.open('', '_blank', 'width=300,height=600');
+        if (!printWindow) {
+            throw new Error("Failed to open print window. Pop-up blocker might be enabled.");
+        }
+        const itemsStyle = p.items ? getStyle(p.items) : getStyle(p.body);
+        const itemsHtml = tx.items.map(item => `
+            <tr style="${itemsStyle}">
+                <td colspan="2" style="padding-top: 5px;">${item.name}</td>
+            </tr>
+            <tr style="${itemsStyle}">
+                <td style="font-size: 0.9em; opacity: 0.8;">${item.qty} x ${(item.selling_price || 0).toFixed(2)}</td>
+                <td style="text-align: right;">${(item.qty * (item.selling_price || 0)).toFixed(2)}</td>
+            </tr>
+        `).join('');
+
+        const receiptHtml = `
+            <html>
+            <head>
+                <title>Print Receipt</title>
+                <style>
+                    @page { margin: 0; }
+                    body { 
+                        width: ${pWidth}mm;
+                        ${getStyle(p.body)}
+                        padding: 5mm;
+                        margin: 0;
+                        color: #000;
+                    }
+                    .text-center { text-align: center; }
+                    .text-right { text-align: right; }
+                    .bold { font-weight: bold; }
+                    .hr { border-bottom: 1px dashed #000; margin: 5px 0; }
+                    table { width: 100%; border-collapse: collapse; }
+                    .header-sec { ${getStyle(p.header)} }
+                    .body-sec { ${getStyle(p.body)} }
+                    .footer-sec { margin-top: 20px; ${getStyle(p.footer)} }
+                    .watermark {
+                        position: fixed;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%) rotate(-45deg);
+                        font-size: 40px;
+                        color: rgba(0, 0, 0, 0.1);
+                        white-space: nowrap;
+                        pointer-events: none;
+                        z-index: -1;
+                        font-weight: bold;
+                    }
+                </style>
+            </head>
+            <body onload="window.print(); window.close();">
+                ${isReprint ? '<div class="watermark">REPRINT</div>' : ''}
+                <div class="text-center header-sec">
+                    ${store.logo ? `<img src="${store.logo}" style="max-width: 40mm; max-height: 20mm; margin-bottom: 5px; filter: grayscale(1);"><br>` : ''}
+                    <div style="white-space: pre-wrap;">${headerText}</div>
+                </div>
+                ${showHR ? '<div class="hr"></div>' : ''}
+                <div class="body-sec">
+                    Date: ${new Date(tx.timestamp).toLocaleString()}<br>
+                    Trans: #${tx.id.slice(-6)}<br>
+                    Cashier: ${tx.user_name || tx.user_email}<br>
+                    Customer: ${tx.customer_name}
+                </div>
+                ${showHR ? '<div class="hr"></div>' : ''}
+                <table>
+                    ${itemsHtml}
+                </table>
+                ${showHR ? '<div class="hr"></div>' : ''}
+                <table>
+                    <tr><td class="bold">TOTAL</td><td class="text-right bold">₱${tx.total_amount.toFixed(2)}</td></tr>
+                    ${(tx.points_used && tx.points_used > 0) ? `
+                        <tr><td>Points Used (${tx.points_used} pts)</td><td class="text-right">-₱${(tx.points_amount || tx.points_used).toFixed(2)}</td></tr>
+                    ` : ''}
+                    <tr><td>Payment (${tx.payment_method})</td><td class="text-right">₱${tx.amount_tendered.toFixed(2)}</td></tr>
+                    <tr><td>Change</td><td class="text-right">₱${tx.change.toFixed(2)}</td></tr>
+                </table>
+                <div class="footer-sec text-center">
+                    <div style="white-space: pre-wrap;">${footerText}</div>
+                </div>
+            </body>
+            </html>
+        `;
+        printWindow.document.write(receiptHtml);
+        printWindow.document.close();
+
+        // Mark transaction as printed to handle watermark on manual reprints
+        tx.was_printed = true;
+    } catch (error) {
+        handleError(error, 'Receipt Printing');
+    }
+}
