@@ -57,13 +57,14 @@ export const ReceiptImageStore = {
      */
     async saveReceiptImages(expenseId, blobs) {
         const db = await getDb();
+        const expIdStr = String(expenseId);
         await this.deleteLocalReceiptImages(expenseId);
 
         for (let i = 0; i < blobs.length; i++) {
-            const id = `${expenseId}_${i}`;
+            const id = `${expIdStr}_${i}`;
             await db.receipt_images.put({
                 id: id,
-                expense_id: expenseId,
+                expense_id: expIdStr,
                 image_index: i,
                 blob: blobs[i],
                 sync_status: 'pending',
@@ -88,23 +89,46 @@ export const ReceiptImageStore = {
     /**
      * Retrieve all receipt image blobs for an expense from local database.
      * 
-     * @param {string} expenseId 
+     * @param {string|number} expenseId 
      * @returns {Promise<Blob[]>}
      */
     async getReceiptImages(expenseId) {
         const db = await getDb();
+        const expIdStr = String(expenseId);
+        const expIdNum = Number(expenseId);
         let records = [];
+
         try {
+            // 1. Try index lookup with string representation
             records = await db.receipt_images
                 .where('expense_id')
-                .equals(expenseId)
+                .equals(expIdStr)
                 .toArray();
+
+            // 2. Try index lookup with numeric representation if empty
+            if (records.length === 0 && !isNaN(expIdNum)) {
+                records = await db.receipt_images
+                    .where('expense_id')
+                    .equals(expIdNum)
+                    .toArray();
+            }
+
+            // 3. Fallback scan by ID prefix or expense_id matching
+            if (records.length === 0) {
+                const prefix = expIdStr + '_';
+                records = await db.receipt_images
+                    .filter(r => String(r.expense_id) === expIdStr || (r.id && String(r.id).startsWith(prefix)))
+                    .toArray();
+            }
+
             records.sort((a, b) => (a.image_index || 0) - (b.image_index || 0));
-        } catch (e) { }
+        } catch (e) {
+            console.warn('ReceiptImageStore: IndexedDB query error:', e);
+        }
 
         if (records.length === 0) {
             try {
-                const legacyRecord = await db.receipt_images.get(expenseId);
+                const legacyRecord = await db.receipt_images.get(expIdStr);
                 if (legacyRecord && legacyRecord.blob) {
                     records = [legacyRecord];
                 }
@@ -127,18 +151,18 @@ export const ReceiptImageStore = {
      */
     async deleteLocalReceiptImages(expenseId) {
         const db = await getDb();
+        const expIdStr = String(expenseId);
         try {
             const records = await db.receipt_images
-                .where('expense_id')
-                .equals(expenseId)
+                .filter(r => String(r.expense_id) === expIdStr || (r.id && String(r.id).startsWith(expIdStr + '_')) || r.id === expIdStr)
                 .toArray();
-            const keys = records.map(r => r.id || r.expense_id);
+            const keys = records.map(r => r.id);
             if (keys.length > 0) {
                 await db.receipt_images.bulkDelete(keys);
             }
         } catch (e) { }
         try {
-            await db.receipt_images.delete(expenseId);
+            await db.receipt_images.delete(expIdStr);
         } catch (e) { }
     },
 

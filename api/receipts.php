@@ -141,12 +141,11 @@ if ($method === 'GET') {
                 }
             }
         }
-        sort($indices);
-
         $legacyFile = $receiptsDir . $expenseId . '.jpg';
-        if (empty($indices) && file_exists($legacyFile)) {
-            $indices = [0];
+        if (file_exists($legacyFile) && !in_array(0, $indices)) {
+            $indices[] = 0;
         }
+        sort($indices);
 
         if (ob_get_length()) ob_end_clean();
         echo json_encode([
