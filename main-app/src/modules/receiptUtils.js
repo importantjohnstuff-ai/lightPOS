@@ -92,6 +92,9 @@ export async function printTransactionReceipt(tx, isReplacement = false, isRepri
                     <tr><td class="bold">TOTAL</td><td class="text-right bold">₱${total.toFixed(2)}</td></tr>
                     ${!isReplacement ? `
                         <tr><td>Payment (${tx.payment_method})</td><td class="text-right">₱${tx.amount_tendered.toFixed(2)}</td></tr>
+                        ${((tx.discount_amount && parseFloat(tx.discount_amount) > 0) || (tx.discount_code && parseFloat(tx.discount_amount || tx.discount || 0) > 0)) ? `
+                            <tr><td>Discounted${tx.discount_code ? ` (${tx.discount_code})` : ''}</td><td class="text-right">₱${parseFloat(tx.discount_amount || tx.discount || 0).toFixed(2)}</td></tr>
+                        ` : ''}
                         <tr><td>Change</td><td class="text-right">₱${tx.change ? tx.change.toFixed(2) : '0.00'}</td></tr>
                     ` : `
                         <tr><td colspan="2" style="font-size: 9px; font-style: italic;">* Adjusted for returns</td></tr>

@@ -3552,6 +3552,9 @@ async function printReceipt(tx, isReprint = false) {
                         <tr><td>Points Used (${tx.points_used} pts)</td><td class="text-right">-₱${(tx.points_amount || tx.points_used).toFixed(2)}</td></tr>
                     ` : ''}
                     <tr><td>Payment (${tx.payment_method})</td><td class="text-right">₱${tx.amount_tendered.toFixed(2)}</td></tr>
+                    ${((tx.discount_amount && parseFloat(tx.discount_amount) > 0) || (tx.discount_code && parseFloat(tx.discount_amount || tx.discount || 0) > 0)) ? `
+                        <tr><td>Discounted${tx.discount_code ? ` (${tx.discount_code})` : ''}</td><td class="text-right">₱${parseFloat(tx.discount_amount || tx.discount || 0).toFixed(2)}</td></tr>
+                    ` : ''}
                     <tr><td>Change</td><td class="text-right">₱${tx.change.toFixed(2)}</td></tr>
                 </table>
                 <div class="footer-sec text-center">
